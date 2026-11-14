@@ -1277,12 +1277,8 @@ Harbor::Draw()
   }
   else
     Text(6, m_MainX + 2, m_MainW - 4, L"Waiting for your conversations…", Muted);
-  Text(m_H - 2,
-       m_MainX + 2,
-       m_MainW - 4,
-       m_Browse ? L"MESSAGES · ↑↓ select · Enter actions" : L"COMPOSE",
-       Muted);
-  if (!m_Browse)
+  Text(
+    m_H - 2, m_MainX + 2, std::max(1, m_MainW - 17), m_Browse ? L"MESSAGES · ↑↓ · Enter" : L"COMPOSE", Muted);
   {
     Text(m_H - 2, m_W - 13, 11, L"/ commands", Muted);
     m_Hits.push_back({ m_H - 2, m_W - 13, 11, "commands", "" });
@@ -1296,11 +1292,10 @@ Harbor::Draw()
   if (c && (!c->follow) &&
       (c->unseen > 0 || c->scroll + std::max(1, m_Bottom - m_Top) < int(m_Rows.size()) - 2))
   {
-    const std::string label = c->unseen > 0
-                                ? "↓ " + std::to_string(c->unseen) + " new message(s) · Ctrl+G to latest"
-                                : "↓ Latest messages · Ctrl+G";
-    Text(m_H - 2, m_MainX + 2, m_MainW - 4, W(label), Accent);
-    m_Hits.push_back({ m_H - 2, m_MainX + 2, m_MainW - 4, "latest", "" });
+    const std::string label =
+      c->unseen > 0 ? "↓ " + std::to_string(c->unseen) + " new · Ctrl+G" : "↓ Latest · Ctrl+G";
+    Text(m_H - 2, m_MainX + 2, std::max(1, m_MainW - 17), W(label), Accent);
+    m_Hits.push_back({ m_H - 2, m_MainX + 2, std::max(1, m_MainW - 17), "latest", "" });
   }
   if (!m_Menu.empty())
     DrawMenu();
@@ -1714,6 +1709,7 @@ Harbor::Commands()
   m_Option = 0;
   m_MenuOffset = 0;
   m_Options = {
+    { "More message tools", "For the selected message", [this] { Actions(false); } },
     { "Find a conversation", "⌥K / Ctrl+K", [this] { ChatPicker(); } },
     { "Jump to latest messages",
       "Ctrl+G",
@@ -1779,7 +1775,9 @@ Harbor::Commands()
           { "Paste / drop previews attachments",
             "Ctrl+V reads clipboard image or text",
             [this] { CloseMenu(); } },
-          { "Drag to select and copy", "Release copies text; click opens actions", [this] { CloseMenu(); } },
+          { "Drag to select and copy",
+            "Release copies text; right-click opens actions",
+            [this] { CloseMenu(); } },
           { "Quit", "Ctrl+Q", [this] { CloseMenu(); } }
         };
         m_Option = 0;
@@ -1823,7 +1821,7 @@ Harbor::Commands()
   m_Dirty = true;
 }
 void
-Harbor::Actions()
+Harbor::Actions(bool minimal)
 {
   if (m_Motion)
     m_AnimatedUntil = TimeUtil::GetCurrentTimeMSec() + 80;
@@ -1936,6 +1934,18 @@ Harbor::Actions()
                                               CloseMenu();
                                             } } };
                           } });
+  m_Options.erase(std::remove_if(m_Options.begin(),
+                                 m_Options.end(),
+                                 [minimal](const Option& option)
+                                 {
+                                   const bool primary = option.label == "Reply" ||
+                                                        option.label == "Forward" ||
+                                                        option.label == "Copy text";
+                                   return minimal ? !primary : primary;
+                                 }),
+                  m_Options.end());
+  if (!minimal)
+    m_Menu = "message-tools";
   m_Dirty = true;
 }
 void
@@ -2134,7 +2144,7 @@ void
 Harbor::DrawMenu()
 {
   bool picker = m_Menu == "chats" || m_Menu == "forward";
-  bool compact = m_Menu == "actions" || picker;
+  bool compact = m_Menu == "actions" || m_Menu == "message-tools" || picker;
   int width = std::min(m_MainW - 4, picker ? 50 : compact ? 38 : 64);
   int x = m_MainX + (m_MainW - width) / 2;
   int y =
@@ -2160,16 +2170,17 @@ Harbor::DrawMenu()
   for (int row = y; row < y + height; row++)
     Text(row, x, width, L"", Surface);
 
-  std::string title = m_Menu == "chats"      ? "Find a conversation"
-                      : m_Menu == "forward"  ? "Forward to…"
-                      : m_Menu == "actions"  ? "Message actions"
-                      : m_Menu == "update"   ? "Update ready"
-                      : m_Menu == "commands" ? "Commands & shortcuts"
-                      : m_Menu == "files"    ? "Attach · " + m_Directory
-                      : m_Menu == "delete"   ? "Delete message?"
-                      : m_Menu == "help"     ? "Keyboard help"
-                      : m_Menu == "preview"  ? "Image preview"
-                                             : "Preview attachments";
+  std::string title = m_Menu == "chats"           ? "Find a conversation"
+                      : m_Menu == "forward"       ? "Forward to…"
+                      : m_Menu == "actions"       ? "Message actions"
+                      : m_Menu == "message-tools" ? "Message tools"
+                      : m_Menu == "update"        ? "Update ready"
+                      : m_Menu == "commands"      ? "Commands & shortcuts"
+                      : m_Menu == "files"         ? "Attach · " + m_Directory
+                      : m_Menu == "delete"        ? "Delete message?"
+                      : m_Menu == "help"          ? "Keyboard help"
+                      : m_Menu == "preview"       ? "Image preview"
+                                                  : "Preview attachments";
   Text(y + 1, x + 2, width - 4, W(title), Surface, true);
   int start = y + (picker ? 5 : 3);
   bool filtering = m_Menu == "chats" || m_Menu == "forward" || m_Menu == "files";
@@ -2538,6 +2549,27 @@ Harbor::Mouse()
     return;
 
   auto* c = Current();
+  if (e.bstate & (BUTTON3_PRESSED | BUTTON3_CLICKED | BUTTON3_DOUBLE_CLICKED))
+  {
+    m_MouseDown = m_MouseDragging = m_HasSelection = false;
+    if (!m_Menu.empty())
+    {
+      const bool inside =
+        e.x >= m_DialogX && e.x < m_DialogX + m_DialogW && e.y >= m_DialogY && e.y < m_DialogY + m_DialogH;
+      if (!inside)
+        CloseMenu();
+      return;
+    }
+    for (auto it = m_Hits.rbegin(); it != m_Hits.rend(); ++it)
+      if (it->type == "message" && e.y == it->y && e.x >= it->x && e.x < it->x + it->w && c)
+      {
+        c->selected = it->value;
+        m_Browse = true;
+        Actions();
+        return;
+      }
+    return;
+  }
   if (m_Menu.empty())
   {
     if (e.bstate & (BUTTON4_PRESSED
@@ -2657,8 +2689,8 @@ Harbor::Mouse()
     else if (hit.type == "message" && c)
     {
       c->selected = hit.value;
-      m_Browse = true;
-      Actions();
+      // Left-click only establishes the text/keyboard anchor. Message actions
+      // belong to right-click; dragging still copies when the button is released.
     }
     return;
   }

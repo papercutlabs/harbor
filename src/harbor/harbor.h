@@ -137,7 +137,7 @@ private:
   void ChatPicker(bool forward = false);
   void RebuildPicker();
   void Commands();
-  void Actions();
+  void Actions(bool minimal = true);
   void CloseMenu();
   void Choose(int);
   void FilePicker(const std::string&);

@@ -60,9 +60,10 @@ try:
     x,y=point(t,'final')
     drag(t,a,(x+len('final')-1,y))
     assert clipboard()==source.replace('*','')+'\n\n你好 café e\u0301 🙂 final',repr(clipboard())
-    # A stationary click still opens actions after release.
-    t.send(b'\x1b');t.click_text('final');t.expect('Message actions')
-    print('PASS drag auto-copy, reverse selection, no action popup, wrapping/newlines, Unicode, draft preservation, click actions')
+    # Left-click does not open actions; right-click does.
+    t.send(b'\x1b');t.click_text('final');assert 'Message actions' not in t.text
+    t.click_text('final',button=2);t.expect('Message actions')
+    print('PASS drag auto-copy, reverse selection, no action popup, wrapping/newlines, Unicode, draft preservation, right-click actions')
 finally:
     t.close()
     subprocess.run(['/usr/bin/osascript','-l','JavaScript','-e',clear,name],capture_output=True,timeout=5)

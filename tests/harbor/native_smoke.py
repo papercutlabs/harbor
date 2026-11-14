@@ -101,12 +101,20 @@ class Terminal:
     def picker(self, name):
         self.send(b'\x0b');self.expect('Find a conversation');self.send(name);self.send(b'\r')
         self.expect(name)
-    def click_text(self, text):
+    def click_text(self, text, button=0):
         self.expect(text)
         y=next(i for i,line in enumerate(self.screen.display) if text in line)
         x=self.screen.display[y].index(text)+1
-        self.send(f'\x1b[<0;{x+1};{y+1}M',wait=.06)
-        self.send(f'\x1b[<0;{x+1};{y+1}m',wait=.1)
+        self.send(f'\x1b[<{button};{x+1};{y+1}M',wait=.06)
+        self.send(f'\x1b[<{button};{x+1};{y+1}m',wait=.1)
+    def message_tool(self, message, tool):
+        self.click_text(message, button=2)
+        self.expect('Message actions')
+        self.send(b'\x1b')
+        self.click_text('/ commands')
+        self.click_text('More message tools')
+        self.expect('Message tools')
+        self.click_text(tool)
     def snapshot(self, name):
         out=ROOT/'design'/name
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -156,7 +164,7 @@ if __name__=='__main__':
         t.picker('Studio');t.picker('Saved Messages');assert t.screen.display[6:15]==saved_screen;check('Reading position survives switching')
         t.picker('Marina');t.expect('Persistent draft');t.send(b'\x15')
         # Use the real mouse-reporting path to select the voice message.
-        t.send(b'\x1b[5~');t.click_text('Voice · voice.wav');t.expect('Message actions');t.click_text('Open / play attachment');t.expect('playing',timeout=5);check('Mouse actions start native voice playback')
+        t.send(b'\x1b[5~');t.message_tool('Voice · voice.wav','Open / play attachment');t.expect('playing',timeout=5);check('Mouse actions start native voice playback')
         t.send(' ');t.expect('paused');t.send(' ');t.expect('playing');check('Playback pauses and resumes in-app')
         t.picker('Studio');check('Switching away stops playback')
         t.picker('Marina');t.send(b'\x1b');t.send('caption')
@@ -176,12 +184,12 @@ if __name__=='__main__':
       t=Terminal(config_dir=edit_config)
       try:
         t.picker('Marina');t.send('Unsent draft sentinel')
-        t.click_text('Keeping this one');t.click_text('Edit message');t.expect('Editing your message')
+        t.message_tool('Keeping this one','Edit message');t.expect('Editing your message')
         t.send(b'\x15');t.send('An edit to cancel');t.send(b'\x1b');t.expect('Unsent draft sentinel')
         t.send('!');t.expect('Unsent draft sentinel!');check('Canceling an edit restores the existing draft and cursor')
-        t.click_text('Keeping this one');t.click_text('Edit message');t.send(b'\x15');t.send('Revised original');t.send(b'\r')
+        t.message_tool('Keeping this one','Edit message');t.send(b'\x15');t.send('Revised original');t.send(b'\r')
         t.expect('Revised original');t.expect('Unsent draft sentinel!');check('Saving an edit restores the unsent draft')
-        t.click_text('Revised original');t.click_text('Edit message');t.send(b'\x15');t.send('Unfinished edit')
+        t.message_tool('Revised original','Edit message');t.send(b'\x15');t.send('Unfinished edit')
       finally:t.close()
       t=Terminal(config_dir=edit_config)
       try:
@@ -190,7 +198,7 @@ if __name__=='__main__':
       finally:t.close()
     t=Terminal(extra_env={'HARBOR_DEMO_FAIL_EDIT':'1'})
     try:
-      t.picker('Marina');t.send('Keep this normal draft');t.click_text('Keeping this one');t.click_text('Edit message');t.send(b'\x15');t.send('An edit that fails');t.send(b'\r')
+      t.picker('Marina');t.send('Keep this normal draft');t.message_tool('Keeping this one','Edit message');t.send(b'\x15');t.send('An edit that fails');t.send(b'\r')
       t.expect('Send failed');t.expect('Keep this normal draft');t.click_text('/ commands');t.click_text('Recover a failed send')
       t.expect('Editing your message');t.expect('An edit that fails');t.send(b'\x1b');t.expect('Keep this normal draft')
       check('Failed edit recovery retains edit mode and the original unsent draft')
@@ -208,7 +216,7 @@ if __name__=='__main__':
     try:
       t.picker('Marina');t.send(b'\x1b[5~');t.pump(1.7)
       assert 'A live incoming reply.' not in t.text
-      t.expect('new message');t.send(b'\x07');t.expect('A live incoming reply.')
+      t.expect('new · Ctrl+G');t.send(b'\x07');t.expect('A live incoming reply.')
       check('Older reading position stays put with a visible new-message action')
     finally:t.close()
     with tempfile.TemporaryDirectory(prefix='harbor-opener-test-') as directory:
@@ -218,7 +226,7 @@ if __name__=='__main__':
       t=Terminal(extra_env={'HARBOR_TEST_OPENER':str(opener)})
       try:
         t.picker('Marina');t.pump(.5);assert '▀' in t.text
-        t.click_text('▷ morning.mp4');t.click_text('Open / play attachment')
+        t.message_tool('▷ morning.mp4','Open / play attachment')
         result=opener.with_suffix('.json');deadline=time.monotonic()+3
         while not result.exists() and time.monotonic()<deadline:t.pump(.1)
         assert json.loads(result.read_text())==[str(ROOT/'tests/harbor/fixtures/morning.mp4')]

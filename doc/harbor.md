@@ -19,7 +19,7 @@ Harbor is the native Telegram TUI in this nchat fork. It shares nchat's Telegram
 | Newline | Shift+Enter; Ctrl+J fallback |
 | Delete previous word | Option+Backspace; Ctrl+W fallback |
 | Browse messages | Esc; Up/Down select |
-| Selected message actions | Enter; or click a message |
+| Selected message actions | Right-click a message; or Esc, arrows, Enter |
 | Copy selected text | Drag across message text; release copies automatically |
 | Return to composing | Start typing or press Esc again |
 | Find a conversation | Option+K; Ctrl+K fallback |
@@ -51,6 +51,7 @@ Native PTY checks run against the offline demo protocol, with temporary account 
 - `tests/harbor/native_smoke.py`: interaction, drafts, restarts, recovery, incoming replies, media actions, graphics transfers, setup protection.
 - `tests/harbor/refinement_smoke.py`: modified Return, word wrapping/cursor geometry, padding-era layout, outside dismissal, editable captions.
 - `tests/harbor/word_delete_smoke.py`: legacy/enhanced Option+Backspace, Ctrl+W, Unicode, cursor-position edits, captions.
+- `tests/harbor/right_click_smoke.py`: three-action context menu, reply/forward/copy, quiet left-click, and unchanged drafts.
 - `tests/harbor/selection_smoke.py`: SGR drag/release copying, wrapping, multiple messages, Unicode, and a private test clipboard.
 - `tests/harbor/graphics_smoke.py`: decoded portrait PNG proportions, letterboxing, source cropping during scrolling.
 - `harbor-media-test`: subprocess quoting/timeouts, file parsing, image/video decoding and actual voice playback/pause. Its optional clipboard test uses a named test pasteboard.
