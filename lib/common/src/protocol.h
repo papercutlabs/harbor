@@ -147,6 +147,8 @@ struct ChatInfo
   bool isPinned = false;
   bool isArchived = false;
   int64_t lastMessageTime = -1;
+  int64_t actualLastMessageTime = -1; // display timestamp, independent of pin order
+  std::string lastMessageText; // optional picker preview, refreshed by backend
 };
 
 enum FileStatus
@@ -237,6 +239,7 @@ class GetChatsRequest : public RequestMessage
 {
 public:
   virtual MessageType GetMessageType() const { return GetChatsRequestType; }
+  bool includeForumTopics = false; // opt-in: expose forum topics as separate conversation IDs
   std::unordered_set<std::string> chatIds; // optionally fetch only specified chats
 };
 

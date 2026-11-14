@@ -49,6 +49,12 @@ HarborDemo::Seed()
         "self",
         "Note " + std::to_string(i + 1) + ": Make the next action obvious. Leave more space between ideas.",
         i);
+  if (getenv("HARBOR_DEMO_TOPICS"))
+  {
+    add("hive", "leo", "Parent group history.", 10);
+    add("hive#421", "leo", "Topic-specific history for the Desk conversation.", 100);
+    add("hive#550", "asha", "A different topic with separate history.", 90);
+  }
   add("kleya", "kleya", "One conversation. A clear place to write. Everything else within reach.", 1);
 }
 
@@ -114,6 +120,19 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
         c.isSelf = c.id == "self";
         n->contactInfos.push_back(c);
       }
+      if (getenv("HARBOR_DEMO_TOPICS"))
+      {
+        for (auto pair : std::vector<std::pair<std::string, std::string>>{
+               { "hive", "Team forum" },
+               { "hive#421", "Team forum > Desk planning — DEMO-421" },
+               { "hive#550", "Team forum > Infrastructure" } })
+        {
+          ContactInfo topic;
+          topic.id = pair.first;
+          topic.name = pair.second;
+          n->contactInfos.push_back(topic);
+        }
+      }
       Emit(n);
       break;
     }
@@ -126,6 +145,13 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
         ChatInfo c;
         c.id = item.first;
         c.lastMessageTime = item.second.back().timeSent;
+        c.actualLastMessageTime = item.second.back().timeSent;
+        c.lastMessageText = item.second.back().text;
+        if (getenv("HARBOR_DEMO_TOPICS") && c.id == "studio")
+        {
+          c.isPinned = true;
+          c.lastMessageTime = 8000000000000000000LL;
+        }
         c.isUnread = c.id == "marina";
         n->chatInfos.push_back(c);
       }

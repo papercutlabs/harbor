@@ -195,6 +195,22 @@ Time(int64_t value)
   strftime(text, sizeof(text), "%H:%M", &tm);
   return text;
 }
+std::string
+PickerTime(int64_t value)
+{
+  if (value <= 0)
+    return "";
+  time_t then = value / 1000, now = TimeUtil::GetCurrentTimeMSec() / 1000;
+  struct tm date, today;
+  localtime_r(&then, &date);
+  localtime_r(&now, &today);
+  char text[24];
+  const char* format = date.tm_year == today.tm_year && date.tm_yday == today.tm_yday
+                         ? "%H:%M"
+                         : (now - then < 6 * 86400 && now >= then ? "%a" : "%d/%m");
+  strftime(text, sizeof(text), format, &date);
+  return text;
+}
 // Nerd Fonts mdi-check / mdi-check-all are single integrated receipt glyphs.
 // https://github.com/ryanoasis/nerd-fonts/blob/master/glyphnames.json
 std::string
@@ -381,6 +397,18 @@ Harbor::Init()
   pair(LinkOut, 19, 21);
   pair(LinkSelected, 19, 23);
   pair(EmphasisSelected, 19, 23);
+  // Terminals differ on whether arrows use CSI, application SS3, or CSI-u.
+  for (const auto& key : std::vector<std::pair<std::string, int>>{ { "\033[A", KEY_UP },
+                                                                   { "\033[B", KEY_DOWN },
+                                                                   { "\033OA", KEY_UP },
+                                                                   { "\033OB", KEY_DOWN },
+                                                                   { "\033[1;1A", KEY_UP },
+                                                                   { "\033[1;1B", KEY_DOWN },
+                                                                   { "\033[57352u", KEY_UP },
+                                                                   { "\033[57353u", KEY_DOWN },
+                                                                   { "\033[57352;1u", KEY_UP },
+                                                                   { "\033[57353;1u", KEY_DOWN } })
+    define_key(key.first.c_str(), key.second);
   define_key("\033k", FindKey);
   define_key("\033[27;3;107~", FindKey);
   define_key("\033[107;3u", FindKey);
@@ -653,6 +681,12 @@ Harbor::Merge(Conversation& c, const std::vector<ChatMessage>& messages)
       c.unseen++;
     c.messages[m.id] = m;
     c.last = std::max(c.last, m.timeSent);
+    if (m.timeSent >= c.actualLast)
+    {
+      c.actualLast = m.timeSent;
+      c.preview =
+        (m.isOutgoing ? "You: " : "") + (m.text.empty() && !m.fileInfo.empty() ? "Attachment" : m.text);
+    }
   }
   c.order.clear();
   for (auto& m : c.messages)
@@ -681,7 +715,9 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
       {
         m_Connected.insert(p);
         Request(p, std::make_shared<GetContactsRequest>());
-        Request(p, std::make_shared<GetChatsRequest>());
+        auto chats = std::make_shared<GetChatsRequest>();
+        chats->includeForumTopics = true;
+        Request(p, chats);
         auto r = std::make_shared<SetStatusRequest>();
         r->isOnline = true;
         Request(p, r);
@@ -708,6 +744,16 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
       {
         auto& c = Ensure(p, info.id);
         c.last = std::max(c.last, info.lastMessageTime);
+        int64_t actual =
+          info.actualLastMessageTime >= 0
+            ? info.actualLastMessageTime
+            : (info.lastMessageTime < TimeUtil::GetCurrentTimeMSec() + 86400000 ? info.lastMessageTime : 0);
+        if (actual >= c.actualLast)
+        {
+          c.actualLast = actual;
+          if (!info.lastMessageText.empty())
+            c.preview = info.lastMessageText;
+        }
         c.unread = info.isUnread;
         if (c.loaded && m_Current == Key(p, info.id) && !c.order.empty() &&
             info.lastMessageTime > c.messages[c.order.back()].timeSent)
@@ -736,6 +782,13 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
       if (n->sequence)
       {
         c.fetching = false;
+        if (!n->success)
+        {
+          c.historyStalls = 3;
+          if (m_Current == Key(p, c.id))
+            Notify("Could not load this conversation · Ctrl+R to retry");
+          break;
+        }
         if (n->success && older && n->chatMessages.empty())
           c.more = false;
         if (older && !n->chatMessages.empty() && !c.order.empty() && c.order.front() == oldest)
@@ -1598,12 +1651,15 @@ Harbor::ChatPicker(bool forward)
   m_Filter.clear();
   m_Option = 0;
   m_MenuOffset = 0;
-  RebuildPicker();
+  RebuildPicker(false);
   m_Dirty = true;
 }
 void
-Harbor::RebuildPicker()
+Harbor::RebuildPicker(bool preserveSelection)
 {
+  std::string selected;
+  if (preserveSelection && m_Option >= 0 && m_Option < int(m_Options.size()))
+    selected = m_Options[m_Option].key;
   m_Options.clear();
   for (auto key : m_ChatOrder)
   {
@@ -1655,7 +1711,17 @@ Harbor::RebuildPicker()
                               OpenChat(key);
                             }
                           } });
+    m_Options.back().key = key;
+    m_Options.back().time = PickerTime(c.actualLast);
+    m_Options.back().preview = S(Safe(HarborFormatting::Parse(W(c.preview)).text));
   }
+  if (!selected.empty())
+    for (size_t i = 0; i < m_Options.size(); ++i)
+      if (m_Options[i].key == selected)
+      {
+        m_Option = int(i);
+        break;
+      }
   m_Option = std::max(0, std::min(m_Option, int(m_Options.size()) - 1));
 }
 void
@@ -2145,7 +2211,7 @@ Harbor::DrawMenu()
 {
   bool picker = m_Menu == "chats" || m_Menu == "forward";
   bool compact = m_Menu == "actions" || m_Menu == "message-tools" || picker;
-  int width = std::min(m_MainW - 4, picker ? 50 : compact ? 38 : 64);
+  int width = std::min(m_MainW - 4, picker ? 64 : compact ? 38 : 64);
   int x = m_MainX + (m_MainW - width) / 2;
   int y =
     4 + (m_AnimatedUntil ? std::max(0, int((m_AnimatedUntil - TimeUtil::GetCurrentTimeMSec()) / 40)) : 0);
@@ -2228,11 +2294,21 @@ Harbor::DrawMenu()
        i++, row += stride)
   {
     auto label = W(m_Options[i].label);
+    const int color = i == m_Option ? Selected : Surface;
     if (picker)
+    {
       label = (i == m_Option ? L"› " : L"  ") + label;
-    Text(row, x + 2, width - 4, label, i == m_Option ? Selected : Surface, i == m_Option);
-    if (picker && !m_Options[i].hint.empty())
-      Text(row, x + width - 4, 2, L"●", i == m_Option ? Selected : Surface);
+      const auto right = W((m_Options[i].hint.empty() ? "  " : "● ") + m_Options[i].time);
+      int reserve = std::max(7, Width(right));
+      int room = std::max(1, width - 6 - reserve);
+      Text(row, x + 2, width - 4, L"", color);
+      Text(row, x + 2, room, label, color, i == m_Option);
+      if (width >= 60 && room - Width(label) >= 14 && !m_Options[i].preview.empty())
+        Text(row, x + 4 + Width(label), room - Width(label) - 2, W(m_Options[i].preview), color);
+      Text(row, x + width - 2 - reserve, reserve, right, color);
+    }
+    else
+      Text(row, x + 2, width - 4, label, color, i == m_Option);
     if (!compact)
       Text(row + 1, x + 3, width - 5, W(m_Options[i].hint), Surface);
     m_Hits.push_back({ row, x + 2, width - 4, "option", std::to_string(i) });
@@ -2283,7 +2359,7 @@ Harbor::KeyPress(wint_t k)
         if (m_Menu == "files")
           RebuildFiles();
         else
-          RebuildPicker();
+          RebuildPicker(false);
       }
       return;
     }
@@ -2394,7 +2470,7 @@ Harbor::KeyPress(wint_t k)
       if (m_Menu == "files")
         RebuildFiles();
       else
-        RebuildPicker();
+        RebuildPicker(false);
     }
     return;
   }

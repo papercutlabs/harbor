@@ -8,7 +8,7 @@ Harbor is a native terminal application, not a web mockup. It builds as a separa
 
 - Full-width conversations in narrow terminals; persistent chat list in wider windows.
 - Type to compose, Enter to send, Shift+Enter for a newline.
-- Option+K chat search, with Ctrl+K as a fallback.
+- Option+K chat search, with Ctrl+K as a fallback. Forum topics appear as Group > Topic, with last-message times and pin-first ordering.
 - Colored message formatting, replies, edits, reactions, and message actions.
 - Per-chat drafts and reading positions; automatic initial history loading.
 - Drag to select message text; releasing copies it automatically.
@@ -31,7 +31,7 @@ The build script installs into a new directory under `~/.local/harbor/releases/`
 
 For a real Telegram account, run `harbor -s` once and complete Telegram authentication. After setup, use `harbor`. Configuration defaults to `~/.config/harbor`; the offline demo uses a separate directory. Updates do not require account setup again.
 
-[Interaction guide and terminal support](doc/harbor.md) · [Latest changes](doc/harbor-0.1.9.md)
+[Interaction guide and terminal support](doc/harbor.md) · [Latest changes](doc/harbor-0.1.10.md)
 
 ## Development checks
 

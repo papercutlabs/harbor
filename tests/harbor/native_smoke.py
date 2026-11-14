@@ -63,6 +63,10 @@ class Terminal:
             os.execv(str(exe), [str(exe), '--demo', '-d', self.config])
         os.close(slave)
         self.pump(.6)
+        try: self.expect('HARBOR / TELEGRAM', timeout=10)
+        except Exception:
+            self.close()
+            raise
 
     @property
     def text(self): return '\n'.join(self.screen.display)
@@ -100,7 +104,9 @@ class Terminal:
         assert text in self.text, f'Missing {text!r}:\n{self.text}'
     def picker(self, name):
         self.send(b'\x0b');self.expect('Find a conversation');self.send(name);self.send(b'\r')
-        self.expect(name)
+        deadline=time.monotonic()+3
+        while 'Find a conversation' in self.text and time.monotonic()<deadline: self.pump(.1)
+        assert 'Find a conversation' not in self.text, 'Chat picker did not select its result'
     def click_text(self, text, button=0):
         self.expect(text)
         y=next(i for i,line in enumerate(self.screen.display) if text in line)

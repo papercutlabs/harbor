@@ -42,7 +42,8 @@ private:
     int historyStalls = 0;
     int64_t historyRetryAt = 0;
     bool follow = true, loaded = false, more = true, fetching = false, unread = false;
-    int64_t last = 0;
+    int64_t last = 0, actualLast = 0;
+    std::string preview;
   };
   struct Row
   {
@@ -56,6 +57,7 @@ private:
   {
     std::string label, hint;
     std::function<void()> run;
+    std::string key = {}, time = {}, preview = {};
   };
   struct Hit
   {
@@ -135,7 +137,7 @@ private:
   void Insert(const std::wstring&);
   void Paste(const std::wstring&);
   void ChatPicker(bool forward = false);
-  void RebuildPicker();
+  void RebuildPicker(bool preserveSelection = true);
   void Commands();
   void Actions(bool minimal = true);
   void CloseMenu();

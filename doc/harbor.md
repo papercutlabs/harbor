@@ -32,6 +32,8 @@ Harbor is the native Telegram TUI in this nchat fork. It shares nchat's Telegram
 | Follow latest | Ctrl+G |
 | Refresh active conversation | Ctrl+R |
 
+Forum topics appear alongside ordinary chats as `Group > Topic`. Option+K searches both parts of the name, retains pin ordering, and shows actual last-message times. Previews are shown only where the row has room. Topics open directly and retain independent drafts and history.
+
 At fewer than 100 terminal columns, Harbor gives the conversation the full width. Wider windows retain the conversation list. Draft text, cursor, reply/edit context, and reading position are stored per conversation in a private state file. New replies follow the viewport when it is at the bottom; when reading older messages, a new-message action returns to the latest.
 
 ## Media and terminal support
@@ -48,6 +50,8 @@ Run `utils/build-harbor` with CMake, FFmpeg, Python 3, and the nchat build depen
 
 Native PTY checks run against the offline demo protocol, with temporary account directories. `HARBOR_EXECUTABLE=/absolute/path/to/harbor` selects a specific installed binary:
 
+- `tests/harbor/topics_picker_smoke.py`: topics, history/draft/send isolation, pin-first ordering, timestamps/previews, arrow encodings, and stable selection during live updates.
+- `harbor-forum-test`: actual TDLib forum-history and send-topic request fields.
 - `tests/harbor/native_smoke.py`: interaction, drafts, restarts, recovery, incoming replies, media actions, graphics transfers, setup protection.
 - `tests/harbor/refinement_smoke.py`: modified Return, word wrapping/cursor geometry, padding-era layout, outside dismissal, editable captions.
 - `tests/harbor/word_delete_smoke.py`: legacy/enhanced Option+Backspace, Ctrl+W, Unicode, cursor-position edits, captions.
