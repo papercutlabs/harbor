@@ -19,6 +19,20 @@ try:
     t.picker('Studio');t.send('Unsent draft')
     menu(t,'new layout is ready')
     t.snapshot('harbor-right-click-50')
+    # After closing a right-click menu, left-clicking a different message must
+    # clear whole-message focus rather than moving its highlight.
+    t.send(b'\x1b')
+    t.click_text('conversation should feel calm')
+    assert 'MESSAGES' not in t.text
+    y=next(y for y,row in enumerate(t.screen.display) if 'conversation should feel calm' in row)
+    x=t.screen.display[y].index('conversation')
+    actual=t.screen.buffer[y][x].bg
+    # A different incoming message has its ordinary panel background.
+    other=next(y for y,row in enumerate(t.screen.display) if 'new layout is ready' in row)
+    xx=t.screen.display[other].index('new layout')
+    assert actual==t.screen.buffer[other][xx].bg
+    t.click_text('new layout is ready',button=2)
+    t.expect('Message actions')
     t.click_text('Copy text');t.expect('Copied');t.expect('Unsent draft')
     copied=subprocess.check_output(['/usr/bin/osascript','-l','JavaScript','-e',read,name],text=True,timeout=5).removesuffix('\n')
     assert copied=='The new layout is ready to try.'

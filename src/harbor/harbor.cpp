@@ -2599,8 +2599,8 @@ Harbor::Mouse()
           m_MouseDragging = false;
           return;
         }
-        // Resolve a stationary click on release, so a press can become a drag.
-        e.bstate = BUTTON1_CLICKED;
+        // A stationary left-click has no message-level action.
+        return;
       }
       else
         return;
@@ -2611,6 +2611,9 @@ Harbor::Mouse()
       for (const auto& hit : m_Hits)
         if (hit.type == "message" && e.y == hit.y && e.x >= hit.x && e.x < hit.x + hit.w)
         {
+          m_Browse = false;
+          if (c)
+            c->selected.clear();
           m_MouseDown = true;
           m_MouseActivityAt = TimeUtil::GetCurrentTimeMSec();
           m_MouseDragging = false;
@@ -2626,6 +2629,9 @@ Harbor::Mouse()
       e.x >= m_DialogX && e.x < m_DialogX + m_DialogW && e.y >= m_DialogY && e.y < m_DialogY + m_DialogH;
     if (!inside && (e.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED | BUTTON1_DOUBLE_CLICKED)))
     {
+      m_Browse = false;
+      if (c)
+        c->selected.clear();
       CloseMenu();
       m_Dirty = true;
       return;
@@ -2688,9 +2694,8 @@ Harbor::Mouse()
       Choose(std::stoi(hit.value));
     else if (hit.type == "message" && c)
     {
-      c->selected = hit.value;
-      // Left-click only establishes the text/keyboard anchor. Message actions
-      // belong to right-click; dragging still copies when the button is released.
+      m_Browse = false;
+      c->selected.clear();
     }
     return;
   }
