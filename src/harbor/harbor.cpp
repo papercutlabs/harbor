@@ -46,7 +46,10 @@ enum
   LinkIn,
   LinkOut,
   LinkSelected,
-  EmphasisSelected
+  EmphasisSelected,
+  Dialog,
+  DialogBorder,
+  Backdrop
 };
 enum
 {
@@ -362,7 +365,8 @@ Harbor::Init()
   const std::vector<std::tuple<short, int, int, int>> palette = {
     { 16, 20, 27, 37 },    { 17, 220, 231, 243 }, { 18, 161, 178, 201 },
     { 19, 159, 202, 244 }, { 20, 29, 43, 60 },    { 21, 41, 59, 70 },
-    { 22, 185, 213, 184 }, { 23, 52, 71, 95 },    { 24, 224, 193, 152 }
+    { 22, 185, 213, 184 }, { 23, 52, 71, 95 },    { 24, 224, 193, 152 },
+    { 25, 34, 49, 66 }, { 26, 87, 111, 139 }
   };
   if (can_change_color() && COLORS >= 256)
     for (auto item : palette)
@@ -397,6 +401,9 @@ Harbor::Init()
   pair(LinkOut, 19, 21);
   pair(LinkSelected, 19, 23);
   pair(EmphasisSelected, 19, 23);
+  pair(Dialog, 17, 25);
+  pair(DialogBorder, 19, 25);
+  pair(Backdrop, 26, 16);
   // Terminals differ on whether arrows use CSI, application SS3, or CSI-u.
   for (const auto& key : std::vector<std::pair<std::string, int>>{ { "\033[A", KEY_UP },
                                                                    { "\033[B", KEY_DOWN },
@@ -2209,6 +2216,10 @@ Harbor::ClipboardPaste()
 void
 Harbor::DrawMenu()
 {
+  // Flatten the conversation into a quiet backdrop before painting the dialog.
+  // Keep the text in place so closing the dialog does not change reading position.
+  for (int row = 0; row < m_H; ++row)
+    mvchgat(row, 0, m_W, A_NORMAL, Backdrop, nullptr);
   bool picker = m_Menu == "chats" || m_Menu == "forward";
   bool compact = m_Menu == "actions" || m_Menu == "message-tools" || picker;
   int width = std::min(m_MainW - 4, picker ? 64 : compact ? 38 : 64);
@@ -2220,7 +2231,7 @@ Harbor::DrawMenu()
   int extra = (m_Menu == "attachments" || m_Menu == "preview") ? std::min(12, m_H / 3) : 0;
   int captionHeight = m_Menu == "attachments" ? 4 : 0;
   int optionsHeight = std::min(maxItems, int(m_Options.size())) * stride;
-  int height = std::min(m_H - 5, (picker ? 8 : 5) + optionsHeight + extra + captionHeight);
+  int height = std::min(m_H - 5, (picker ? 8 : 5) + optionsHeight + extra + captionHeight + 2);
   if (m_Option < m_MenuOffset)
     m_MenuOffset = m_Option;
   if (m_Option >=
@@ -2234,7 +2245,15 @@ Harbor::DrawMenu()
   m_DialogW = width;
   m_DialogH = height;
   for (int row = y; row < y + height; row++)
-    Text(row, x, width, L"", Surface);
+    Text(row, x, width, L"", Dialog);
+
+  Text(y, x, width, L"╭" + std::wstring(width - 2, L'─') + L"╮", DialogBorder);
+  Text(y + height - 1, x, width, L"╰" + std::wstring(width - 2, L'─') + L"╯", DialogBorder);
+  for (int row = y + 1; row < y + height - 1; ++row)
+  {
+    Text(row, x, 1, L"│", DialogBorder);
+    Text(row, x + width - 1, 1, L"│", DialogBorder);
+  }
 
   std::string title = m_Menu == "chats"           ? "Find a conversation"
                       : m_Menu == "forward"       ? "Forward to…"
@@ -2247,7 +2266,7 @@ Harbor::DrawMenu()
                       : m_Menu == "help"          ? "Keyboard help"
                       : m_Menu == "preview"       ? "Image preview"
                                                   : "Preview attachments";
-  Text(y + 1, x + 2, width - 4, W(title), Surface, true);
+  Text(y + 1, x + 2, width - 4, W(title), DialogBorder, true);
   int start = y + (picker ? 5 : 3);
   bool filtering = m_Menu == "chats" || m_Menu == "forward" || m_Menu == "files";
   if (filtering)
@@ -2259,7 +2278,7 @@ Harbor::DrawMenu()
   if (extra && !m_Attachments.empty())
   {
     auto& file = m_Attachments.front();
-    Text(start, x + 2, width - 4, W(FileUtil::BaseName(file) + " · " + Size(file)), Surface);
+    Text(start, x + 2, width - 4, W(FileUtil::BaseName(file) + " · " + Size(file)), Dialog);
     int rows = std::max(1, extra - 2);
     int cols = width - 4;
     m_Media->RequestImage(file, cols, rows, Type(file).find("video") == 0);
@@ -2267,14 +2286,14 @@ Harbor::DrawMenu()
     if (image && !image->failed)
       m_Media->DrawImage(*image, start + 1, x + 2, cols, rows);
     else
-      Text(start + 2, x + 2, width - 4, W(Type(file)), Surface);
+      Text(start + 2, x + 2, width - 4, W(Type(file)), Dialog);
     start += extra;
   }
   int captionY = -1;
   if (captionHeight)
   {
     captionY = start;
-    Text(start, x + 2, width - 4, L"Caption · type to add", Surface);
+    Text(start, x + 2, width - 4, L"Caption · type to add", Dialog);
     auto* c = Current();
     auto layout = Layout(c ? c->draft : L"", std::max(1, width - 6));
     auto point = layout.cursors[c ? std::min(c->cursor, c->draft.size()) : 0];
@@ -2294,7 +2313,7 @@ Harbor::DrawMenu()
        i++, row += stride)
   {
     auto label = W(m_Options[i].label);
-    const int color = i == m_Option ? Selected : Surface;
+    const int color = i == m_Option ? Selected : Dialog;
     if (picker)
     {
       label = (i == m_Option ? L"› " : L"  ") + label;
@@ -2310,14 +2329,14 @@ Harbor::DrawMenu()
     else
       Text(row, x + 2, width - 4, label, color, i == m_Option);
     if (!compact)
-      Text(row + 1, x + 3, width - 5, W(m_Options[i].hint), Surface);
+      Text(row + 1, x + 3, width - 5, W(m_Options[i].hint), Dialog);
     m_Hits.push_back({ row, x + 2, width - 4, "option", std::to_string(i) });
   }
-  Text(y + height - 1,
+  Text(y + height - 2,
        x + 2,
        width - 4,
        m_Options.empty() ? L"No matches · Esc back" : L"↑↓ · Enter select · Esc close",
-       Surface);
+       Dialog);
   if (captionY >= 0)
   {
     auto* c = Current();
