@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source_dir="$(cd "$(dirname "$0")/.." && pwd)"
+harbor_prefix="${1:-$HOME/.local/harbor/releases/$(date +%Y%m%d-%H%M%S)-$$}"
+if [[ "$harbor_prefix" != /* ]]; then harbor_prefix="$PWD/$harbor_prefix"; fi
+if [[ -e "$harbor_prefix" ]]; then
+  printf 'Choose a new release directory; this one already exists: %s\n' "$harbor_prefix" >&2
+  exit 1
+fi
+for dependency in cmake ffmpeg python3; do
+  if ! command -v "$dependency" >/dev/null; then
+    printf 'Missing dependency: %s\n' "$dependency" >&2
+    exit 1
+  fi
+done
+cmake -S "$source_dir" -B "$source_dir/build-harbor" \
+  -DHAS_HARBOR=ON -DHAS_TELEGRAM=ON -DHAS_WHATSAPP=OFF -DHAS_SIGNAL=OFF \
+  -DHAS_DUMMY=OFF -DHAS_COREDUMP=OFF -DCMAKE_INSTALL_PREFIX="$harbor_prefix"
+cmake --build "$source_dir/build-harbor" --target harbor -j "${HARBOR_JOBS:-6}"
+cmake --install "$source_dir/build-harbor" --component HarborRuntime
+python3 - "$harbor_prefix/bin/harbor" <<'PY'
+import os
+import sys
+import re
+import subprocess
+from pathlib import Path
+executable=Path(sys.argv[1])
+# Record the executable version independently of the release directory name.
+output=subprocess.run([str(executable),'--version'],check=True,capture_output=True,text=True).stdout
+match=re.match(r'Harbor (\d+\.\d+\.\d+)',output)
+if not match: raise SystemExit('Installed executable did not report a Harbor version')
+metadata=executable.parent.parent/'share/harbor/version'
+metadata.parent.mkdir(parents=True,exist_ok=True)
+metadata.write_text(match[1]+'\n')
+home=Path.home()
+for launcher in (home/'.local/bin/harbor',Path('/opt/homebrew/bin/harbor')):
+    if launcher.parent==Path('/opt/homebrew/bin') and not launcher.is_symlink():
+        continue
+    if launcher.exists() or launcher.is_symlink():
+        if not launcher.is_symlink():
+            print(f'Existing unmanaged launcher retained: {launcher}')
+            continue
+        target=launcher.resolve()
+        own_root=str(home/'.local/harbor')+'/'
+        marker=target.parent.parent/'share/doc/harbor/LICENSE'
+        if not str(target).startswith(own_root) and not marker.is_file():
+            print(f'Existing unmanaged launcher retained: {launcher}')
+            continue
+    launcher.parent.mkdir(parents=True,exist_ok=True)
+    temporary=launcher.with_name('.harbor-next-'+str(os.getpid()))
+    try:
+        os.symlink(executable,temporary)
+        os.replace(temporary,launcher)
+        print(f'Updated launcher: {launcher}')
+    except PermissionError:
+        if temporary.is_symlink(): temporary.unlink()
+        print(f'Launcher is not writable: {launcher}')
+PY
+printf '\nInstalled Harbor: %s/bin/harbor\n' "$harbor_prefix"
+printf 'Offline demo: %s/bin/harbor --demo\n' "$harbor_prefix"
+printf 'Telegram setup: %s/bin/harbor -s\n' "$harbor_prefix"
+printf 'Existing sessions keep running their previous release; restart when ready.\n'

@@ -47,6 +47,12 @@
 #include "sgchat.h"
 #endif
 
+#ifdef HARBOR_BUILD
+#include "harbor/demoprotocol.h"
+#include "harbor/update.h"
+static bool harborDemo = false;
+#endif
+
 static std::string GetFeatures();
 static void RemoveProfile();
 static std::shared_ptr<Protocol> SetupProfile();
@@ -81,7 +87,10 @@ public:
   virtual std::shared_ptr<Protocol> Create() const
   {
     std::shared_ptr<T> protocol;
-#ifdef HAS_DYNAMICLOAD
+#if defined(HAS_DYNAMICLOAD)
+#ifdef HARBOR_BUILD
+    if (T::GetName() == "HarborDemo") return std::make_shared<T>();
+#endif
     std::string libPath =
       FileUtil::DirName(FileUtil::GetSelfPath()) + "/../" CMAKE_INSTALL_LIBDIR "/" + T::GetLibName() +
       FileUtil::GetLibSuffix();
@@ -119,6 +128,9 @@ public:
 
 static std::vector<std::shared_ptr<ProtocolBaseFactory>> GetProtocolFactorys()
 {
+#ifdef HARBOR_BUILD
+  if (harborDemo) return { std::make_shared<ProtocolFactory<HarborDemo>>() };
+#endif
   std::vector<std::shared_ptr<ProtocolBaseFactory>> protocolFactorys =
   {
 #ifdef HAS_DUMMY
@@ -143,7 +155,14 @@ int main(int argc, char* argv[])
 {
   // Defaults
   umask(S_IRWXG | S_IRWXO);
+#ifdef HARBOR_BUILD
+  const char* home = getenv("HOME");
+  const char* xdg = getenv("XDG_CONFIG_HOME");
+  const std::string configHome = (xdg && *xdg) ? xdg : std::string(home ? home : "") + "/.config";
+  FileUtil::SetApplicationDir(configHome + "/harbor");
+#else
   FileUtil::SetApplicationDir(FileUtil::GetDefaultApplicationDir());
+#endif
   Log::SetVerboseLevel(Log::INFO_LEVEL);
 
   // Argument handling
@@ -154,6 +173,14 @@ int main(int argc, char* argv[])
   std::vector<std::string> args(argv + 1, argv + argc);
   for (auto it = args.begin(); it != args.end(); ++it)
   {
+#ifdef HARBOR_BUILD
+    if (*it == "--demo")
+    {
+      harborDemo = true;
+      FileUtil::SetApplicationDir(configHome + "/harbor-demo");
+      continue;
+    }
+#endif
     if (((*it == "-d") || (*it == "--confdir")) && (std::distance(it + 1, args.end()) > 0))
     {
       ++it;
@@ -219,8 +246,8 @@ int main(int argc, char* argv[])
     isDirInited = true;
   }
 
-  ScopedDirLock dirLock(FileUtil::GetApplicationDir());
-  if (!dirLock.IsLocked())
+  std::unique_ptr<ScopedDirLock> dirLock = std::make_unique<ScopedDirLock>(FileUtil::GetApplicationDir());
+  if (!dirLock->IsLocked())
   {
     std::cerr <<
       "error: unable to acquire lock for " << FileUtil::GetApplicationDir() << "\n" <<
@@ -233,6 +260,11 @@ int main(int argc, char* argv[])
     int storedVersion = FileUtil::GetDirVersion(FileUtil::GetApplicationDir());
     if (storedVersion != dirVersion)
     {
+#ifdef HARBOR_BUILD
+      std::cerr << "Harbor will not replace an existing directory with an unknown format.\n"
+                   "Choose a new configuration directory with -d, or restore its version file.\n";
+      return 1;
+#endif
       if (isSetup)
       {
         FileUtil::InitDirVersion(FileUtil::GetApplicationDir(), dirVersion);
@@ -254,6 +286,10 @@ int main(int argc, char* argv[])
 
   // Init profiles dir
   Profiles::Init();
+#ifdef HARBOR_BUILD
+  if (harborDemo)
+    FileUtil::MkDir(FileUtil::GetApplicationDir() + "/profiles/HarborDemo_local");
+#endif
 
   // Init logging
   const std::string& logPath = FileUtil::GetApplicationDir() + std::string("/log.txt");
@@ -495,6 +531,20 @@ int main(int argc, char* argv[])
     kill(getpid(), sig);
   }
 
+#ifdef HARBOR_BUILD
+  if (!HarborUpdate::RestartTarget().empty() && !AppUtil::IsTerminateRequested())
+  {
+    const auto target = HarborUpdate::RestartTarget();
+    const auto config = FileUtil::GetApplicationDir();
+    protocols.clear();
+    profileDirLocks.clear();
+    dirLock.reset();
+    if (harborDemo) execl(target.c_str(), target.c_str(), "--demo", "-d", config.c_str(), nullptr);
+    else execl(target.c_str(), target.c_str(), "-d", config.c_str(), nullptr);
+    std::cerr << "Could not restart Harbor. Your draft was saved; run harbor again.\n";
+    return 1;
+  }
+#endif
   return rv;
 }
 
@@ -643,6 +693,21 @@ std::shared_ptr<Protocol> SetupProfile()
 
 void ShowHelp()
 {
+#ifdef HARBOR_BUILD
+  std::cout << "Harbor — a Telegram TUI built on nchat\n\n"
+    "Usage: harbor [--demo | -s | -d DIR | --version]\n\n"
+    "  --demo     isolated offline demo account\n"
+    "  -s         set up your Telegram account\n"
+    "  -d DIR     use a separate configuration directory\n"
+    "  -k         inspect terminal key sequences\n"
+    "  Ctrl+Q     quit\n\n"
+    "Type to compose. Enter sends; Shift+Enter inserts a newline.\n"
+    "Esc browses messages. Arrows select; Enter opens actions.\n"
+    "Option+K (Esc k) or Ctrl+K finds chats. / opens commands from an empty composer.\n"
+    "Ctrl+G jumps to latest messages; Ctrl+R refreshes the conversation.\n"
+    "Config defaults to ~/.config/harbor; stock nchat is unchanged.\n";
+  return;
+#endif
   std::cout <<
     "nchat is a terminal-based messaging client with Telegram, WhatsApp and Signal support.\n"
     "\n"
@@ -723,6 +788,9 @@ void ShowHelp()
 
 void ShowVersion()
 {
+#ifdef HARBOR_BUILD
+  std::cout << "Harbor " << HarborUpdate::Version() << " — native interface; backend: ";
+#endif
   // *INDENT-OFF*
   std::cout <<
     AppUtil::GetAppName(true /*p_WithVersion*/) << "\n"

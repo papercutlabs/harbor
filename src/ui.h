@@ -14,6 +14,7 @@
 class Protocol;
 class ServiceMessage;
 class UiController;
+class Harbor;
 class UiModel;
 
 class Ui
@@ -33,6 +34,7 @@ public:
   static void RunKeyDump();
 
 private:
+  std::shared_ptr<Harbor> m_Harbor;
   std::shared_ptr<UiModel> m_Model;
   std::shared_ptr<UiController> m_Controller;
   std::string m_TerminalTitle;

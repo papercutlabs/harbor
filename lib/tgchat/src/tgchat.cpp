@@ -1010,7 +1010,15 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
         {
           Status::Clear(m_ProfileId, Status::FlagSending);
 
-          if (object->get_id() == td::td_api::error::ID) return;
+          if (object->get_id() == td::td_api::error::ID)
+          {
+            auto failed = std::make_shared<SendMessageNotify>(m_ProfileId);
+            failed->success = false;
+            failed->chatId = sendMessageRequest->chatId;
+            failed->chatMessage = sendMessageRequest->chatMessage;
+            CallMessageHandler(failed);
+            return;
+          }
 
           std::shared_ptr<SendMessageNotify> sendMessageNotify =
             std::make_shared<SendMessageNotify>(m_ProfileId);
@@ -1054,12 +1062,18 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
           edit_message->input_message_content_ = std::move(message_content);
 
           SendQuery(std::move(edit_message),
-                    [this](Object object)
+                    [this, editMessageRequest](Object object)
           {
             Status::Clear(m_ProfileId, Status::FlagSending);
 
             if (object->get_id() == td::td_api::error::ID)
             {
+              auto failed = std::make_shared<SendMessageNotify>(m_ProfileId);
+              failed->success = false;
+              failed->chatId = editMessageRequest->chatId;
+              failed->chatMessage = editMessageRequest->chatMessage;
+              failed->chatMessage.id = editMessageRequest->msgId;
+              CallMessageHandler(failed);
               auto error = td::move_tl_object_as<td::td_api::error>(object);
               LOG_WARNING("Edit message text error: %s", error->message_.c_str());
             }
@@ -1079,12 +1093,18 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
           edit_message->caption_ = std::move(message_content);
 
           SendQuery(std::move(edit_message),
-                    [this](Object object)
+                    [this, editMessageRequest](Object object)
           {
             Status::Clear(m_ProfileId, Status::FlagSending);
 
             if (object->get_id() == td::td_api::error::ID)
             {
+              auto failed = std::make_shared<SendMessageNotify>(m_ProfileId);
+              failed->success = false;
+              failed->chatId = editMessageRequest->chatId;
+              failed->chatMessage = editMessageRequest->chatMessage;
+              failed->chatMessage.id = editMessageRequest->msgId;
+              CallMessageHandler(failed);
               auto error = td::move_tl_object_as<td::td_api::error>(object);
               LOG_WARNING("Edit message caption error: %s", error->message_.c_str());
             }
@@ -1958,6 +1978,14 @@ void TgChat::Impl::ProcessUpdate(td::td_api::object_ptr<td::td_api::Object> upda
       newMessagesNotify->sequence = true;
       CallMessageHandler(newMessagesNotify);
     }
+  },
+  [this](td::td_api::updateMessageSendFailed& update)
+  {
+    auto failed = std::make_shared<SendMessageNotify>(m_ProfileId);
+    failed->success = false;
+    failed->chatId = StrUtil::NumToHex(update.message_->chat_id_);
+    TdMessageConvert(*update.message_, failed->chatMessage);
+    CallMessageHandler(failed);
   },
   [this](td::td_api::updateMessageSendSucceeded& update_message_send_succeeded)
   {

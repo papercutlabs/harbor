@@ -5,3 +5,13 @@
 /dbgbuild
 /dist
 /.gotools
+
+/build-quiet
+/build-harbor
+
+# Local native-test output and Python environments
+__pycache__/
+*.pyc
+.venv/
+/design/*.raw
+/design/*.json
