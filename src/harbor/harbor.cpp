@@ -18,10 +18,18 @@
 #include <fstream>
 #include <iostream>
 #include <regex>
+#include <cerrno>
+#include <csignal>
+#include <cstdlib>
+#include <cstring>
 #include <set>
+#include <spawn.h>
 #include <sstream>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+extern char** environ;
 
 namespace
 {
@@ -1840,6 +1848,7 @@ Harbor::Commands()
         m_Menu = "help";
         m_Options = {
           { "Compose immediately", "Type from messages to write", [this] { CloseMenu(); } },
+          { "Commands from a draft", "Ctrl+O · / is literal once typing", [this] { CloseMenu(); } },
           { "Enter sends / Shift+Enter newline", "Ctrl+J is a newline fallback", [this] { CloseMenu(); } },
           { "Escape switches focus", "Arrows browse · Enter actions", [this] { CloseMenu(); } },
           { "Option+K finds conversations",
@@ -1891,7 +1900,110 @@ Harbor::Commands()
     { "Update Harbor", "Restart when an installed update is ready", [this] { UpdatePrompt(); } },
     { "Quit Harbor", "Ctrl+Q", [this] { m_Running = false; } }
   };
+  auto desk = DeskOptions();
+  m_Options.insert(m_Options.begin(), desk.begin(), desk.end());
   m_Dirty = true;
+}
+std::vector<Harbor::Option>
+Harbor::DeskOptions()
+{
+  // Only a host that started Harbor with HARBOR_DESK_COMMANDS adds entries; ordinary Harbor has none.
+  // Each line: label<TAB>hint<TAB>argv0<TAB>argv1... The argv is executed directly; no shell is involved.
+  std::vector<Option> options;
+  const char* path = getenv("HARBOR_DESK_COMMANDS");
+  if (path == nullptr || *path == '\0')
+    return options;
+  std::ifstream input(path);
+  std::string line;
+  while (std::getline(input, line))
+  {
+    std::vector<std::string> fields;
+    std::stringstream stream(line);
+    std::string field;
+    while (std::getline(stream, field, '\t'))
+      fields.push_back(field);
+    if (fields.size() < 3 || fields[0].empty() || fields[2].empty())
+      continue;
+    std::vector<std::string> argv(fields.begin() + 2, fields.end());
+    options.push_back({ "Desk · " + fields[0], fields[1], [this, argv]
+                        {
+                          CloseMenu();
+                          DeskHandoff(argv);
+                        } });
+  }
+  return options;
+}
+void
+Harbor::SuspendTerminal()
+{
+  SaveState();
+  m_Media->Stop();
+  m_Media->ClearGraphics();
+  printf("\033[?1002l\033[<u\033[?2004l");
+  fflush(stdout);
+  mousemask(0, nullptr);
+  curs_set(1);
+  endwin();
+  fflush(stdout);
+}
+void
+Harbor::ResumeTerminal()
+{
+  reset_prog_mode();
+  mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, nullptr);
+  printf("\033[?1003l\033[?1002h\033[?2004h\033[>1u");
+  fflush(stdout);
+  clearok(stdscr, TRUE);
+  m_Dirty = true;
+}
+void
+Harbor::DeskHandoff(const std::vector<std::string>& argv)
+{
+  // The Desk view runs on this same terminal while this process, its chats, drafts and reading positions stay as they are.
+  // Ctrl+C belongs to the child; Harbor ignores it until the child has ended.
+  struct sigaction ignore = {}, oldInt = {}, oldQuit = {}, oldTstp = {};
+  ignore.sa_handler = SIG_IGN;
+  sigemptyset(&ignore.sa_mask);
+  sigaction(SIGINT, &ignore, &oldInt);
+  sigaction(SIGQUIT, &ignore, &oldQuit);
+  sigaction(SIGTSTP, &ignore, &oldTstp);
+  SuspendTerminal();
+  std::vector<char*> args;
+  for (const auto& arg : argv)
+    args.push_back(const_cast<char*>(arg.c_str()));
+  args.push_back(nullptr);
+  posix_spawnattr_t attr;
+  posix_spawnattr_init(&attr);
+  sigset_t defaults, empty;
+  sigemptyset(&defaults);
+  sigaddset(&defaults, SIGINT);
+  sigaddset(&defaults, SIGQUIT);
+  sigaddset(&defaults, SIGTSTP);
+  sigaddset(&defaults, SIGPIPE);
+  sigemptyset(&empty);
+  posix_spawnattr_setsigdefault(&attr, &defaults);
+  posix_spawnattr_setsigmask(&attr, &empty);
+  posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK);
+  pid_t pid = 0;
+  int spawned = posix_spawnp(&pid, args[0], nullptr, &attr, args.data(), environ);
+  posix_spawnattr_destroy(&attr);
+  int status = 0;
+  if (spawned == 0)
+    while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
+    {
+    }
+  sigaction(SIGINT, &oldInt, nullptr);
+  sigaction(SIGQUIT, &oldQuit, nullptr);
+  sigaction(SIGTSTP, &oldTstp, nullptr);
+  ResumeTerminal();
+  if (spawned != 0)
+    Notify("Desk could not start: " + std::string(strerror(spawned)));
+  else if (WIFSIGNALED(status))
+    Notify("Desk interrupted (signal " + std::to_string(WTERMSIG(status)) + ") · draft kept");
+  else if (WEXITSTATUS(status) != 0)
+    Notify("Desk exited " + std::to_string(WEXITSTATUS(status)) + " · draft kept");
+  else
+    Notify("Back from Desk");
 }
 void
 Harbor::Actions(bool minimal)
@@ -2413,6 +2525,12 @@ Harbor::KeyPress(wint_t k)
   if (k == 17)
   {
     m_Running = false;
+    return;
+  }
+  // Ctrl+O opens the same Commands menu from any draft and leaves the draft unchanged; / stays literal once typing.
+  if (k == 15 && m_Menu.empty())
+  {
+    Commands();
     return;
   }
   if (k == 7)

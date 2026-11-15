@@ -139,6 +139,11 @@ private:
   void ChatPicker(bool forward = false);
   void RebuildPicker(bool preserveSelection = true);
   void Commands();
+  // Optional Desk entries named by HARBOR_DESK_COMMANDS, each run as an argv child on this same terminal.
+  std::vector<Option> DeskOptions();
+  void DeskHandoff(const std::vector<std::string>& argv);
+  void SuspendTerminal();
+  void ResumeTerminal();
   void Actions(bool minimal = true);
   void CloseMenu();
   void Choose(int);
