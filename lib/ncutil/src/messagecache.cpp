@@ -531,7 +531,26 @@ void MessageCache::AddProfile(const std::string& p_ProfileId, bool p_CheckSequen
         "SET schema = ?;" << schemaVersion;
     }
 
-    static const int64_t s_SchemaVersion = 12;
+    if (schemaVersion == 12)
+    {
+      LOG_INFO("update db schema 12 to 13");
+
+      // additive: rows cached before this version keep a NULL richText and render from text. The
+      // column check keeps this idempotent if a previous run added it but did not record schema 13.
+      int64_t richTextColumns = 0;
+      *m_Dbs[p_ProfileId] << "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'richText';"
+        >> richTextColumns;
+      if (richTextColumns == 0)
+      {
+        *m_Dbs[p_ProfileId] << "ALTER TABLE messages ADD COLUMN richText TEXT;";
+      }
+
+      schemaVersion = 13;
+      *m_Dbs[p_ProfileId] << "UPDATE version "
+        "SET schema = ?;" << schemaVersion;
+    }
+
+    static const int64_t s_SchemaVersion = 13;
     if (schemaVersion > s_SchemaVersion)
     {
       LOG_WARNING("cache db schema %d from newer nchat version detected, if cache issues are encountered "
@@ -1316,10 +1335,11 @@ void MessageCache::PerformRequest(std::shared_ptr<Request> p_Request)
             try
             {
               *m_Dbs[profileId] << "INSERT INTO " + s_TableMessages + " "
-                "(chatId, id, senderId, text, quotedId, quotedText, quotedSender, fileInfo, timeSent, isOutgoing, isRead, isEdited, isDeleted, isPinned, reactions) VALUES "
-                "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);" <<
+                "(chatId, id, senderId, text, quotedId, quotedText, quotedSender, fileInfo, timeSent, isOutgoing, isRead, isEdited, isDeleted, isPinned, reactions, richText) VALUES "
+                "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);" <<
                 chatId << msg.id << msg.senderId << msg.text << msg.quotedId << msg.quotedText << msg.quotedSender <<
-                msg.fileInfo << msg.timeSent << msg.isOutgoing << msg.isRead << msg.isEdited << msg.isDeleted << msg.isPinned << reactionsBytes;
+                msg.fileInfo << msg.timeSent << msg.isOutgoing << msg.isRead << msg.isEdited << msg.isDeleted << msg.isPinned << reactionsBytes <<
+                msg.richText;
             }
             catch (const sqlite::sqlite_exception& ex)
             {
@@ -1341,10 +1361,11 @@ void MessageCache::PerformRequest(std::shared_ptr<Request> p_Request)
             try
             {
               *m_Dbs[profileId] << "INSERT INTO " + s_TableMessages + " "
-                "(chatId, id, senderId, text, quotedId, quotedText, quotedSender, fileInfo, timeSent, isOutgoing, isRead, isEdited, isDeleted, isPinned, reactions) VALUES "
-                "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);" <<
+                "(chatId, id, senderId, text, quotedId, quotedText, quotedSender, fileInfo, timeSent, isOutgoing, isRead, isEdited, isDeleted, isPinned, reactions, richText) VALUES "
+                "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);" <<
                 chatId << msg.id << msg.senderId << msg.text << msg.quotedId << msg.quotedText << msg.quotedSender <<
-                msg.fileInfo << msg.timeSent << msg.isOutgoing << msg.isRead << msg.isEdited << msg.isDeleted << msg.isPinned << reactionsBytes;
+                msg.fileInfo << msg.timeSent << msg.isOutgoing << msg.isRead << msg.isEdited << msg.isDeleted << msg.isPinned << reactionsBytes <<
+                msg.richText;
             }
             catch (const sqlite::sqlite_exception& ex)
             {
@@ -2230,14 +2251,14 @@ void MessageCache::PerformFetchMessagesFrom(const std::string& p_ProfileId, cons
     // *INDENT-OFF*
     *m_Dbs[p_ProfileId] <<
       "SELECT id, senderId, text, quotedId, quotedText, quotedSender, fileInfo, reactions, timeSent, "
-      "isOutgoing, isRead, isEdited, isDeleted, isPinned FROM " + s_TableMessages + " WHERE chatId = ? AND timeSent < ? "
+      "isOutgoing, isRead, isEdited, isDeleted, isPinned, richText FROM " + s_TableMessages + " WHERE chatId = ? AND timeSent < ? "
       "ORDER BY timeSent DESC LIMIT ?;" << p_ChatId << p_FromMsgIdTimeSent << p_Limit >>
       [&](const std::string& id, const std::string& senderId, const std::string& text,
           const std::string& quotedId, const std::string& quotedText,
           const std::string& quotedSender, const std::string& fileInfo,
           std::vector<char> reactionsBytes,
           int64_t timeSent, int32_t isOutgoing, int32_t isRead, int32_t isEdited, int32_t isDeleted,
-          int32_t isPinned)
+          int32_t isPinned, std::unique_ptr<std::string> richText)
       {
         ChatMessage chatMessage;
         chatMessage.id = id;
@@ -2253,6 +2274,7 @@ void MessageCache::PerformFetchMessagesFrom(const std::string& p_ProfileId, cons
         chatMessage.isEdited = isEdited;
         chatMessage.isDeleted = isDeleted;
         chatMessage.isPinned = isPinned;
+        chatMessage.richText = richText ? *richText : std::string();
 
         if (!reactionsBytes.empty())
         {
@@ -2278,13 +2300,13 @@ void MessageCache::PerformFetchOneMessage(const std::string& p_ProfileId, const 
     // *INDENT-OFF*
     *m_Dbs[p_ProfileId] <<
       "SELECT id, senderId, text, quotedId, quotedText, quotedSender, fileInfo, reactions, timeSent, "
-      "isOutgoing, isRead, isEdited, isDeleted, isPinned FROM " + s_TableMessages + " WHERE chatId = ? AND id = ?;" << p_ChatId << p_MsgId >>
+      "isOutgoing, isRead, isEdited, isDeleted, isPinned, richText FROM " + s_TableMessages + " WHERE chatId = ? AND id = ?;" << p_ChatId << p_MsgId >>
       [&](const std::string& id, const std::string& senderId, const std::string& text,
           const std::string& quotedId, const std::string& quotedText,
           const std::string& quotedSender, const std::string& fileInfo,
           std::vector<char> reactionsBytes,
           int64_t timeSent, int32_t isOutgoing, int32_t isRead, int32_t isEdited, int32_t isDeleted,
-          int32_t isPinned)
+          int32_t isPinned, std::unique_ptr<std::string> richText)
       {
         ChatMessage chatMessage;
         chatMessage.id = id;
@@ -2300,6 +2322,7 @@ void MessageCache::PerformFetchOneMessage(const std::string& p_ProfileId, const 
         chatMessage.isEdited = isEdited;
         chatMessage.isDeleted = isDeleted;
         chatMessage.isPinned = isPinned;
+        chatMessage.richText = richText ? *richText : std::string();
 
         if (!reactionsBytes.empty())
         {

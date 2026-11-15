@@ -127,6 +127,9 @@ enum MessageType
   NewGroupMembersNotifyType,
   UpdateArchivedNotifyType,
   MoveChatNotifyType,
+  // Appended so existing numeric values stay unchanged
+  SearchMessagesRequestType,
+  SearchMessagesNotifyType,
 };
 
 struct ContactInfo
@@ -149,6 +152,7 @@ struct ChatInfo
   int64_t lastMessageTime = -1;
   int64_t actualLastMessageTime = -1; // display timestamp, independent of pin order
   std::string lastMessageText; // optional picker preview, refreshed by backend
+  bool lastMessageNative = false; // lastMessageText came from native text and is shown literally
 };
 
 enum FileStatus
@@ -202,6 +206,7 @@ struct ChatMessage
   std::string quotedText;
   std::string quotedSender;
   std::string fileInfo;
+  std::string richText; // optional native text + formatting ranges, see richtext.h; db cached
   std::string link; // only required for tgchat, sponsored msg, not db cached
   std::map<std::string, std::string> mentions; // displayName -> userId, not db cached
   Reactions reactions;
@@ -458,6 +463,20 @@ public:
   std::string findText;
   std::string findMsgId;
   bool findPinned = false;
+};
+
+// Server-side search of one conversation (a forum topic when chatId names one). Unlike
+// FindMessageRequest, which only consults the local cache, a successful reply covers the
+// conversation's full history as the server reports it.
+class SearchMessagesRequest : public RequestMessage
+{
+public:
+  virtual MessageType GetMessageType() const { return SearchMessagesRequestType; }
+  std::string chatId;
+  std::string query;
+  bool pinned = false; // pinned messages instead of a text query
+  int32_t limit = 50;
+  int64_t token = 0; // echoed in the notify so the requester can discard stale replies
 };
 
 class GetGroupMembersRequest : public RequestMessage
@@ -718,6 +737,7 @@ public:
   std::string chatId;
   std::string msgId;
   std::set<std::string> emojis;
+  bool success = true; // false: the protocol could not list reactions for this message
 };
 
 class FindMessageNotify : public ServiceMessage
@@ -729,6 +749,22 @@ public:
   bool success = false;
   std::string chatId;
   std::string msgId;
+};
+
+class SearchMessagesNotify : public ServiceMessage
+{
+public:
+  explicit SearchMessagesNotify(const std::string& p_ProfileId)
+    : ServiceMessage(p_ProfileId) { }
+  virtual MessageType GetMessageType() const { return SearchMessagesNotifyType; }
+  bool success = false; // false: search failed; an empty successful result means no matches
+  std::string error;
+  std::string chatId;
+  std::string query;
+  bool pinned = false;
+  int64_t token = 0;
+  int32_t totalCount = -1; // server-reported total, -1 when unknown
+  std::vector<ChatMessage> chatMessages; // newest first
 };
 
 class UpdatePinNotify : public ServiceMessage

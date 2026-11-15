@@ -1,8 +1,10 @@
 #pragma once
 #include "protocol.h"
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 // An offline implementation of the same Protocol boundary used by TDLib.
 class HarborDemo : public Protocol
@@ -36,6 +38,12 @@ public:
 
 private:
   void Seed();
+  void SeedRich(const std::function<void(const std::string&, const std::string&, const std::string&, int,
+                                         const std::string&, const std::string&)>& add);
+  void Record(const std::string&);
+  void Later(int milliseconds, std::shared_ptr<ServiceMessage>);
+  std::vector<std::thread> m_Delayed;
+  std::mutex m_RecordMutex;
   void Emit(std::shared_ptr<ServiceMessage> message)
   {
     if (m_Handler)

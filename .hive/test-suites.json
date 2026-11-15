@@ -1,0 +1,51 @@
+{
+  "schema": "pcl.test-suites.v1",
+  "suites": [
+    {
+      "id": "harbor-offline",
+      "cwd": ".",
+      "full": {
+        "argv": [
+          "python3",
+          "tests/harbor/run_checks.py"
+        ]
+      },
+      "focused": {
+        "argv": [
+          "python3",
+          "tests/harbor/run_checks.py"
+        ],
+        "selectorKind": "lanes",
+        "selectorBinding": {
+          "kind": "env",
+          "name": "HARBOR_CHECK_LANE"
+        }
+      },
+      "inputs": {
+        "sourcePaths": [
+          "CMakeLists.txt",
+          "src/harbor",
+          "lib/common/src",
+          "lib/tgchat/src",
+          "lib/ncutil/src",
+          "tests/harbor",
+          ".hive/test-suites.json"
+        ],
+        "dependencyPaths": [
+          "src/harbor/input/go.mod",
+          "src/harbor/input/go.sum",
+          "tests/harbor/requirements.txt"
+        ],
+        "environmentRefs": [
+          "HARBOR_BUILD_DIR",
+          "HARBOR_CHECK_PYTHON",
+          "HARBOR_GO_EXECUTABLE"
+        ]
+      },
+      "inventory": {
+        "path": "tests/harbor/check_inventory.json"
+      },
+      "lifecycleContract": "tests/harbor/run_checks.py"
+    }
+  ]
+}

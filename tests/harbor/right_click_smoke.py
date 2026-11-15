@@ -1,4 +1,5 @@
-"""Right-click exposes only Reply, Forward, Copy text; left drag keeps copying."""
+"""Right-click exposes only the primary actions (Reply, Forward, Copy text, plus Copy code and Go to replied
+message when a message has them); every other action, including React…, stays in Message tools."""
 import subprocess
 import uuid
 from native_smoke import Terminal
@@ -11,7 +12,8 @@ def menu(t,message):
     assert 'Message actions' not in t.text
     t.click_text(message,button=2)
     for label in ['Reply','Forward','Copy text']:t.expect(label)
-    for label in ['Edit message','Delete message','React with a heart','Open / play attachment','Open link']:
+    for label in ['Edit message','Delete message','React…','Open / play attachment','Open link','Open a link…',
+                  'Reveal spoiler','Expand quote']:
         assert label not in t.text
 
 t=Terminal(cols=50,rows=44,extra_env={'HARBOR_TEST_PASTEBOARD':name})
@@ -43,8 +45,11 @@ try:
     t.picker('Studio');t.expect('Unsent draft')
     menu(t,'Keep the details quiet')
     t.send(b'\x1b');t.send(b'\r');t.expect('Message actions')
-    assert 'Edit message' not in t.text and 'React with a heart' not in t.text
-    print('PASS left click stays quiet; right-click/Enter show exactly three actions; reply/forward/copy and drafts')
+    assert 'Edit message' not in t.text and 'React…' not in t.text
+    # the absent labels are real actions: the full Message tools list for the same message has them
+    t.send(b'\x1b');t.click_text('/ commands');t.click_text('More message tools');t.expect('Message tools')
+    for label in ['Edit message','React…','Delete message']:t.expect(label)
+    print('PASS left click stays quiet; right-click/Enter show only the primary actions; tools keep the rest; reply/forward/copy and drafts')
 finally:
     t.close()
     subprocess.run(['/usr/bin/osascript','-l','JavaScript','-e',clear,name],capture_output=True,timeout=5)

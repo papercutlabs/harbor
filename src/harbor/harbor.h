@@ -1,4 +1,5 @@
 #pragma once
+#include "format.h"
 #include "protocol.h"
 #include <deque>
 #include <functional>
@@ -46,6 +47,30 @@ private:
     bool follow = true, loaded = false, more = true, fetching = false, unread = false;
     int64_t last = 0, actualLast = 0;
     std::string preview;
+    bool previewNative = false; // preview came from native text: show it literally, never parse it
+    // per-message presentation the user chose: revealed spoilers, expanded quotes
+    std::set<std::string> revealed, expanded;
+    // messages fetched out of sequence (reply originals, search hits) older than loaded history;
+    // history paging continues from the oldest contiguous message instead
+    std::set<std::string> detached;
+    // reading position to return to after visiting a reply original, search result or pin
+    struct Mark
+    {
+      bool set = false, follow = true, browse = false;
+      bool landed = false; // a visit reached its message; until then a failed visit forgets the mark
+      std::string selected, anchor;
+      int scroll = 0, offset = 0;
+    } back;
+    std::string visit; // message to show once it arrives
+    int64_t visitUntil = 0;
+  };
+  // An asynchronous chooser request bound to its profile, conversation and message; replies that
+  // do not match the open chooser are ignored.
+  struct Pending
+  {
+    std::string key, msgId, query;
+    bool pinned = false;
+    int64_t token = 0, until = 0;
   };
   struct Row
   {
@@ -85,6 +110,7 @@ private:
   void CheckUpdate();
   void UpdatePrompt();
   ChatMessage m_ForwardMessage;
+  std::wstring m_ForwardText;
   std::vector<Row> m_Rows;
   std::vector<Hit> m_Hits;
   struct CopyCell
@@ -95,6 +121,7 @@ private:
   };
   std::vector<CopyCell> m_CopyCells;
   std::map<std::string, std::wstring> m_CopyTexts;
+  std::map<std::string, std::vector<bool>> m_CopyDecor;
   bool m_MouseDown = false, m_MouseDragging = false, m_HasSelection = false;
   int64_t m_MouseActivityAt = 0;
   int m_SelectionX = 0, m_SelectionY = 0, m_SelectionEndX = 0, m_SelectionEndY = 0;
@@ -118,7 +145,7 @@ private:
   void ProcessEvents();
   void Event(std::shared_ptr<ServiceMessage>);
   void SortChats();
-  void Merge(Conversation&, const std::vector<ChatMessage>&);
+  void Merge(Conversation&, const std::vector<ChatMessage>&, bool outOfSequence = false);
   void OpenChat(const std::string&);
   void Fetch(Conversation&, bool older = false, bool automatic = false);
   void Send();
@@ -156,4 +183,22 @@ private:
   void SendAttachments();
   void OpenAttachment(const std::string&, const std::string&, const std::string&, bool preview = false);
   void ClipboardPaste();
+  HarborFormatting::Text Format(const Conversation&, const ChatMessage&, bool forceConceal = false) const;
+  std::wstring Excerpt(const Conversation&, const ChatMessage&) const;
+  void Remember(Conversation&);
+  void Visit(std::string key, std::string id); // by value: callers pass members Visit clears
+  void ReturnBack();
+  void SearchPrompt();
+  void RebuildSearch();
+  void DropDetached(Conversation&);
+  void VisitFailed(Conversation&);
+  void StartSearch(const std::string& query, bool pinned);
+  void SearchResults(std::shared_ptr<SearchMessagesNotify>);
+  void ReactionChooser(const std::string& key, const std::string& id);
+  void ReactionResults(std::shared_ptr<AvailableReactionsNotify>);
+  void CodeChooser(const std::string& key, const std::string& id);
+  void LinkChooser(const std::string& key, const std::string& id);
+  void Timeouts(int64_t now);
+  Pending m_Search, m_Reactions;
+  int64_t m_Token = 0;
 };

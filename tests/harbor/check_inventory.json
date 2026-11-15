@@ -1,0 +1,61 @@
+{
+  "static": [
+    "tests/harbor/run_checks.py",
+    "tests/harbor/native_smoke.py",
+    "tests/harbor/rich_actions_smoke.py",
+    "tests/harbor/right_click_smoke.py"
+  ],
+  "lanes": {
+    "static": [
+      "tests/harbor/run_checks.py",
+      "tests/harbor/native_smoke.py",
+      "tests/harbor/rich_actions_smoke.py",
+      "tests/harbor/right_click_smoke.py"
+    ],
+    "format": [
+      "tests/harbor/format_test.cpp"
+    ],
+    "producer": [
+      "tests/harbor/richtext_producer_test.cpp"
+    ],
+    "cache": [
+      "tests/harbor/cache_richtext_test.cpp"
+    ],
+    "media": [
+      "tests/harbor/media_test.cpp"
+    ],
+    "input_decoding": [
+      "src/harbor/input/main_test.go"
+    ],
+    "native_smoke": [
+      "tests/harbor/native_smoke.py"
+    ],
+    "formatting": [
+      "tests/harbor/formatting_smoke.py"
+    ],
+    "right_click": [
+      "tests/harbor/right_click_smoke.py"
+    ],
+    "restart_position": [
+      "tests/harbor/restart_position_smoke.py"
+    ],
+    "draft_scroll": [
+      "tests/harbor/draft_scroll_smoke.py"
+    ],
+    "send_replacement": [
+      "tests/harbor/send_replacement_smoke.py"
+    ],
+    "rich": [
+      "tests/harbor/rich_actions_smoke.py"
+    ],
+    "selection": [
+      "tests/harbor/selection_smoke.py"
+    ],
+    "desk": [
+      "tests/harbor/desk_handoff_smoke.py"
+    ],
+    "topics": [
+      "tests/harbor/topics_picker_smoke.py"
+    ]
+  }
+}

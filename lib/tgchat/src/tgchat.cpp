@@ -7,6 +7,7 @@
 
 #include "tgchat.h"
 #include "forumutil.h"
+#include "richtextutil.h"
 
 #include <cstdint>
 #include <functional>
@@ -216,9 +217,11 @@ private:
                                     std::vector<MentionInfo>& p_MentionInfos);
   void AddMentionEntities(td::td_api::object_ptr<td::td_api::formattedText>& p_FormattedText,
                           const std::vector<MentionInfo>& p_MentionInfos);
-  std::string GetText(td::td_api::object_ptr<td::td_api::formattedText>&& p_FormattedText);
+  std::string GetText(td::td_api::object_ptr<td::td_api::formattedText>&& p_FormattedText,
+                      std::string* p_RichText = nullptr);
   void TdMessageContentConvert(td::td_api::MessageContent& p_TdMessageContent, int64_t p_SenderId,
-                               std::string& p_Text, std::string& p_FileInfo);
+                               std::string& p_Text, std::string& p_FileInfo,
+                               std::string* p_RichText = nullptr);
   void TdMessageConvert(td::td_api::message& p_TdMessage, ChatMessage& p_ChatMessage);
   void DownloadFile(std::string p_ChatId, std::string p_MsgId, std::string p_FileId, std::string p_DownloadId,
                     DownloadFileAction p_DownloadFileAction);
@@ -786,7 +789,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
             chatInfo.lastMessageTime = lastMessageTime;
             chatInfo.actualLastMessageTime = lastMessageTimeSec * 1000;
             if (m_IncludeForumTopics && tchat->last_message_) {
-              ChatMessage last; TdMessageConvert(*tchat->last_message_, last); chatInfo.lastMessageText = (last.isOutgoing ? "You: " : "") + (last.text.empty() && !last.fileInfo.empty() ? "Attachment" : last.text);
+              ChatMessage last; TdMessageConvert(*tchat->last_message_, last); chatInfo.lastMessageText = (last.isOutgoing ? "You: " : "") + (last.text.empty() && !last.fileInfo.empty() ? "Attachment" : RichText::Preview(last.richText, last.text)); RichText::Message decoded; chatInfo.lastMessageNative = !(last.text.empty() && !last.fileInfo.empty()) && RichText::Decode(last.richText, decoded);
             }
 
             std::vector<ChatInfo> chatInfos;
@@ -1615,7 +1618,16 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
         SendQuery(std::move(get_available_reactions),
                   [this, getAvailableReactionsRequest](Object object)
         {
-          if (object->get_id() == td::td_api::error::ID) return;
+          if (object->get_id() == td::td_api::error::ID)
+          {
+            std::shared_ptr<AvailableReactionsNotify> availableReactionsNotify =
+              std::make_shared<AvailableReactionsNotify>(m_ProfileId);
+            availableReactionsNotify->chatId = getAvailableReactionsRequest->chatId;
+            availableReactionsNotify->msgId = getAvailableReactionsRequest->msgId;
+            availableReactionsNotify->success = false;
+            CallMessageHandler(availableReactionsNotify);
+            return;
+          }
 
           if (object->get_id() == td::td_api::availableReactions::ID)
           {
@@ -1765,6 +1777,63 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
                                   findMessageRequest->findText,
                                   findMessageRequest->findMsgId,
                                   findMessageRequest->findPinned);
+      }
+      break;
+
+    case SearchMessagesRequestType:
+      {
+        LOG_DEBUG("Search messages");
+        std::shared_ptr<SearchMessagesRequest> searchMessagesRequest =
+          std::static_pointer_cast<SearchMessagesRequest>(p_RequestMessage);
+
+        // server-side search, scoped to the forum topic when the conversation id names one
+        auto search_chat_messages = td::td_api::make_object<td::td_api::searchChatMessages>();
+        search_chat_messages->chat_id_ = ChatNumber(searchMessagesRequest->chatId);
+        search_chat_messages->topic_id_ = TelegramForum::SendTopic(searchMessagesRequest->chatId);
+        search_chat_messages->query_ = searchMessagesRequest->pinned ? "" : searchMessagesRequest->query;
+        search_chat_messages->from_message_id_ = 0;
+        search_chat_messages->offset_ = 0;
+        search_chat_messages->limit_ = std::max(1, std::min(100, searchMessagesRequest->limit));
+        if (searchMessagesRequest->pinned)
+        {
+          search_chat_messages->filter_ = td::td_api::make_object<td::td_api::searchMessagesFilterPinned>();
+        }
+
+        SendQuery(std::move(search_chat_messages),
+                  [this, searchMessagesRequest](Object object)
+        {
+          std::shared_ptr<SearchMessagesNotify> searchMessagesNotify =
+            std::make_shared<SearchMessagesNotify>(m_ProfileId);
+          searchMessagesNotify->chatId = searchMessagesRequest->chatId;
+          searchMessagesNotify->query = searchMessagesRequest->query;
+          searchMessagesNotify->pinned = searchMessagesRequest->pinned;
+          searchMessagesNotify->token = searchMessagesRequest->token;
+
+          if (object && (object->get_id() == td::td_api::foundChatMessages::ID))
+          {
+            auto found_chat_messages = td::move_tl_object_as<td::td_api::foundChatMessages>(object);
+            searchMessagesNotify->success = true;
+            searchMessagesNotify->totalCount = found_chat_messages->total_count_;
+            for (auto& message : found_chat_messages->messages_)
+            {
+              if (!message) continue;
+              ChatMessage chatMessage;
+              TdMessageConvert(*message, chatMessage);
+              searchMessagesNotify->chatMessages.push_back(chatMessage);
+            }
+          }
+          else if (object && (object->get_id() == td::td_api::error::ID))
+          {
+            auto error = td::move_tl_object_as<td::td_api::error>(object);
+            searchMessagesNotify->error = error->message_;
+          }
+          else
+          {
+            searchMessagesNotify->error = "unexpected response";
+          }
+
+          CallMessageHandler(searchMessagesNotify);
+        });
       }
       break;
 
@@ -2140,6 +2209,7 @@ void TgChat::Impl::ProcessUpdate(td::td_api::object_ptr<td::td_api::Object> upda
           {
             chatMessage.text = std::string("[This message was deleted]");
             chatMessage.fileInfo.clear();
+            chatMessage.richText.clear(); // no stale ranges over the replacement text
           }
           else // MessageDeletePrefix
           {
@@ -3041,117 +3111,11 @@ static int32_t BytePosToUtf16Pos(const std::string& p_Str, size_t p_BytePos)
   return utf16Units;
 }
 
-static size_t Utf16PosToBytePos(const std::string& p_Str, int32_t p_Utf16Pos)
-{
-  int32_t utf16Units = 0;
-  size_t i = 0;
-  while (i < p_Str.size() && utf16Units < p_Utf16Pos)
-  {
-    unsigned char c = static_cast<unsigned char>(p_Str[i]);
-    if (c < 0x80)
-    {
-      i += 1;
-      utf16Units += 1;
-    }
-    else if (c < 0xE0)
-    {
-      i += 2;
-      utf16Units += 1;
-    }
-    else if (c < 0xF0)
-    {
-      i += 3;
-      utf16Units += 1;
-    }
-    else
-    {
-      i += 4;
-      utf16Units += 2; // surrogate pair = 2 UTF-16 code units
-    }
-  }
-  return i;
-}
-
 void TgChat::Impl::ProcessMentionEntities(td::td_api::object_ptr<td::td_api::formattedText>& p_FormattedText)
 {
   static const bool bracketQuote = AppConfig::GetBool("mentions_quoted");
-  auto& text = p_FormattedText->text_;
-  auto& entities = p_FormattedText->entities_;
-
-  for (int i = static_cast<int>(entities.size()) - 1; i >= 0; --i)
-  {
-    auto& entity = entities[i];
-    const auto entityId = entity->type_->get_id();
-
-    if (entityId == td::td_api::textEntityTypeMentionName::ID)
-    {
-      const int32_t utf16Offset = entity->offset_;
-      const int32_t utf16Length = entity->length_;
-
-      // Convert UTF-16 offset to byte position
-      size_t byteOffset = Utf16PosToBytePos(text, utf16Offset);
-      size_t byteEnd = Utf16PosToBytePos(text, utf16Offset + utf16Length);
-      std::string mentionText = text.substr(byteOffset, byteEnd - byteOffset);
-
-      bool hasSpaces = (mentionText.find(' ') != std::string::npos);
-      std::string prefix;
-      std::string suffix;
-      if (bracketQuote && hasSpaces)
-      {
-        prefix = "@[";
-        suffix = "]";
-      }
-      else
-      {
-        prefix = "@";
-      }
-
-      // Insert suffix first (at higher position), then prefix
-      text.insert(byteEnd, suffix);
-      text.insert(byteOffset, prefix);
-
-      int32_t prefixUtf16Len = static_cast<int32_t>(prefix.size());
-      int32_t suffixUtf16Len = static_cast<int32_t>(suffix.size());
-      int32_t totalInserted = prefixUtf16Len + suffixUtf16Len;
-
-      // Adjust offsets of other entities
-      for (int j = 0; j < static_cast<int>(entities.size()); ++j)
-      {
-        if (j == i) continue;
-        auto& other = entities[j];
-
-        if (other->offset_ + other->length_ <= utf16Offset)
-        {
-          // Entity entirely before mention - no change
-        }
-        else if (other->offset_ <= utf16Offset &&
-                 other->offset_ + other->length_ >= utf16Offset + utf16Length)
-        {
-          // Entity contains the mention - extend its length
-          other->length_ += totalInserted;
-        }
-        else if (other->offset_ >= utf16Offset + utf16Length)
-        {
-          // Entity entirely after mention - shift offset
-          other->offset_ += totalInserted;
-        }
-        else if (other->offset_ >= utf16Offset && other->offset_ < utf16Offset + utf16Length)
-        {
-          // Entity starts inside mention - shift by prefix, extend by suffix
-          other->offset_ += prefixUtf16Len;
-          other->length_ += suffixUtf16Len;
-        }
-      }
-
-      // Erase the mention entity
-      entities.erase(entities.begin() + i);
-    }
-    else if (entityId == td::td_api::textEntityTypeMention::ID)
-    {
-      // Text already has @username, just remove the entity so getMarkdownText works
-      entities.erase(entities.begin() + i);
-    }
-  }
+  // shared with tests/harbor/richtext_producer_test.cpp
+  TelegramRichText::ExpandMentions(*p_FormattedText, bracketQuote);
 }
 
 std::string TgChat::Impl::PreprocessMentionText(const std::string& p_Text,
@@ -3311,11 +3275,17 @@ void TgChat::Impl::AddMentionEntities(td::td_api::object_ptr<td::td_api::formatt
   }
 }
 
-std::string TgChat::Impl::GetText(td::td_api::object_ptr<td::td_api::formattedText>&& p_FormattedText)
+std::string TgChat::Impl::GetText(td::td_api::object_ptr<td::td_api::formattedText>&& p_FormattedText,
+                                  std::string* p_RichText)
 {
   if (!p_FormattedText) return "";
 
   ProcessMentionEntities(p_FormattedText);
+  if (p_RichText)
+  {
+    // native text and ranges, before getMarkdownText serializes some and drops the rest
+    *p_RichText = TelegramRichText::Encode(*p_FormattedText);
+  }
 
   std::string text = p_FormattedText->text_;
   static const bool markdownEnabled = (m_Config.Get("markdown_enabled") == "1");
@@ -3424,12 +3394,13 @@ static std::string GetContactText(const td::td_api::contact& p_Contact)
 }
 
 void TgChat::Impl::TdMessageContentConvert(td::td_api::MessageContent& p_TdMessageContent, int64_t p_SenderId,
-                                           std::string& p_Text, std::string& p_FileInfo)
+                                           std::string& p_Text, std::string& p_FileInfo,
+                                           std::string* p_RichText)
 {
   if (p_TdMessageContent.get_id() == td::td_api::messageText::ID)
   {
     auto& messageText = static_cast<td::td_api::messageText&>(p_TdMessageContent);
-    p_Text = GetText(std::move(messageText.text_));
+    p_Text = GetText(std::move(messageText.text_), p_RichText);
   }
   else if (p_TdMessageContent.get_id() == td::td_api::messageAnimatedEmoji::ID)
   {
@@ -3440,7 +3411,7 @@ void TgChat::Impl::TdMessageContentConvert(td::td_api::MessageContent& p_TdMessa
   {
     auto& messageAnimation = static_cast<td::td_api::messageAnimation&>(p_TdMessageContent);
     auto& animation = messageAnimation.animation_;
-    p_Text = GetText(std::move(messageAnimation.caption_));
+    p_Text = GetText(std::move(messageAnimation.caption_), p_RichText);
 
     auto& animationFile = animation->animation_;
     auto& localFile = animationFile->local_;
@@ -3468,7 +3439,7 @@ void TgChat::Impl::TdMessageContentConvert(td::td_api::MessageContent& p_TdMessa
     std::string id = messageAudio.audio_->audio_->remote_->id_;
     std::string path = messageAudio.audio_->audio_->local_->path_;
     std::string fileName = messageAudio.audio_->file_name_;
-    p_Text = GetText(std::move(messageAudio.caption_));
+    p_Text = GetText(std::move(messageAudio.caption_), p_RichText);
     FileInfo fileInfo;
     fileInfo.fileId = id;
     if (!path.empty())
@@ -3516,7 +3487,7 @@ void TgChat::Impl::TdMessageContentConvert(td::td_api::MessageContent& p_TdMessa
     std::string id = messageDocument.document_->document_->remote_->id_;
     std::string path = messageDocument.document_->document_->local_->path_;
     std::string fileName = messageDocument.document_->file_name_;
-    p_Text = GetText(std::move(messageDocument.caption_));
+    p_Text = GetText(std::move(messageDocument.caption_), p_RichText);
     FileInfo fileInfo;
     fileInfo.fileId = id;
     if (!path.empty())
@@ -3537,7 +3508,7 @@ void TgChat::Impl::TdMessageContentConvert(td::td_api::MessageContent& p_TdMessa
     auto& messagePhoto = static_cast<td::td_api::messagePhoto&>(p_TdMessageContent);
     auto& photo = messagePhoto.photo_;
     auto& sizes = photo->sizes_;
-    p_Text = GetText(std::move(messagePhoto.caption_));
+    p_Text = GetText(std::move(messagePhoto.caption_), p_RichText);
     if (!sizes.empty())
     {
       auto& largestSize = sizes.back();
@@ -3593,7 +3564,7 @@ void TgChat::Impl::TdMessageContentConvert(td::td_api::MessageContent& p_TdMessa
   else if (p_TdMessageContent.get_id() == td::td_api::messageVideo::ID)
   {
     auto& messageVideo = static_cast<td::td_api::messageVideo&>(p_TdMessageContent);
-    p_Text = GetText(std::move(messageVideo.caption_));
+    p_Text = GetText(std::move(messageVideo.caption_), p_RichText);
     auto& video = messageVideo.video_;
     auto& videoFile = video->video_;
 
@@ -3645,7 +3616,7 @@ void TgChat::Impl::TdMessageContentConvert(td::td_api::MessageContent& p_TdMessa
 
     std::string id = messageVoiceNote.voice_note_->voice_->remote_->id_;
     std::string path = messageVoiceNote.voice_note_->voice_->local_->path_;
-    p_Text = GetText(std::move(messageVoiceNote.caption_));
+    p_Text = GetText(std::move(messageVoiceNote.caption_), p_RichText);
     FileInfo fileInfo;
     fileInfo.fileId = id;
     if (!path.empty())
@@ -3747,7 +3718,8 @@ void TgChat::Impl::TdMessageConvert(td::td_api::message& p_TdMessage, ChatMessag
   if (!p_TdMessage.content_) return;
 
   const int64_t senderId = GetSenderId(td::move_tl_object_as<td::td_api::MessageSender>(p_TdMessage.sender_id_));
-  TdMessageContentConvert(*p_TdMessage.content_, senderId, p_ChatMessage.text, p_ChatMessage.fileInfo);
+  TdMessageContentConvert(*p_TdMessage.content_, senderId, p_ChatMessage.text, p_ChatMessage.fileInfo,
+                          &p_ChatMessage.richText);
 
   p_ChatMessage.id = StrUtil::NumToHex(p_TdMessage.id_);
   p_ChatMessage.senderId = StrUtil::NumToHex(senderId);
@@ -4104,7 +4076,7 @@ void TgChat::Impl::FetchForumTopics(int64_t chat, std::string title, int32_t dat
       info.isPinned = topic->is_pinned_;
       info.actualLastMessageTime = topic->last_message_ ? int64_t(topic->last_message_->date_) * 1000 : int64_t(topic->info_->creation_date_) * 1000;
       info.lastMessageTime = info.isPinned ? topic->order_ : info.actualLastMessageTime;
-      if (topic->last_message_) { ChatMessage last; TdMessageConvert(*topic->last_message_, last); info.lastMessageText = (last.isOutgoing ? "You: " : "") + (last.text.empty() && !last.fileInfo.empty() ? "Attachment" : last.text); }
+      if (topic->last_message_) { ChatMessage last; TdMessageConvert(*topic->last_message_, last); info.lastMessageText = (last.isOutgoing ? "You: " : "") + (last.text.empty() && !last.fileInfo.empty() ? "Attachment" : RichText::Preview(last.richText, last.text)); RichText::Message decoded; info.lastMessageNative = !(last.text.empty() && !last.fileInfo.empty()) && RichText::Decode(last.richText, decoded); }
       chats->chatInfos.push_back(info);
     }
     CallMessageHandler(names);
