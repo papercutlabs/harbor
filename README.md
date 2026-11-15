@@ -32,7 +32,7 @@ The build script installs into a new directory under `~/.local/harbor/releases/`
 
 For a real Telegram account, run `harbor -s` once and complete Telegram authentication. After setup, use `harbor`. Configuration defaults to `~/.config/harbor`; the offline demo uses a separate directory. Updates do not require account setup again.
 
-[Interaction guide and terminal support](doc/harbor.md) · [Latest changes](doc/harbor-0.1.15.md)
+[Interaction guide and terminal support](doc/harbor.md) · [Latest changes](doc/harbor-0.1.16.md)
 
 ## Development checks
 
