@@ -9,13 +9,15 @@ from native_smoke import Terminal
 
 work = Path(tempfile.mkdtemp(prefix='harbor-desk-'))
 child = work/'desk_child.py'
-child.write_text('''import os, sys, termios, signal
+child.write_text('''import fcntl, os, sys, termios, signal
 mode = sys.argv[1]
 cooked = termios.tcgetattr(0)[3] & termios.ICANON != 0
 size = os.get_terminal_size(0)
 print("\\x1b[2J\\x1b[HDESK CHILD", "COOKED=%d" % cooked, "SIZE=%dx%d" % (size.columns, size.lines))
 print("ARGV=" + repr(sys.argv[2:])); sys.stdout.flush()
 if mode == "fail": sys.exit(3)
+if mode == "nonblock":  # as a Node child can: O_NONBLOCK on the shared terminal description, then failure
+    fcntl.fcntl(0, fcntl.F_SETFL, fcntl.fcntl(0, fcntl.F_GETFL) | os.O_NONBLOCK); sys.exit(4)
 if mode == "interrupt":
     print("WAITING"); sys.stdout.flush(); signal.pause()
 print("Press Enter"); sys.stdout.flush(); sys.stdin.readline()
@@ -27,6 +29,7 @@ commands.write_text('\n'.join('\t'.join(row) for row in [
     ['Quota', 'Provider capacity', py, str(child), 'ok', literal],
     ['Broken', 'Exits 3', py, str(child), 'fail'],
     ['Stuck', 'Waits for Ctrl+C', py, str(child), 'interrupt'],
+    ['Nonblock', 'Exits 4 non-blocking', py, str(child), 'nonblock'],
     ['Missing', 'No such program', str(work/'absent')],
 ]) + '\n')
 
@@ -50,7 +53,17 @@ def draft_saved(t, text):
     return any(not r.startswith('active ') and r.split(' ')[1].lower() == text.encode().hex() for r in state(t))
 
 def run(t, label):
-    t.send(b'\x0f'); t.expect('Desk · ' + label); t.click_text('Desk · ' + label)
+    t.send(b'\x0f'); t.expect('Desk · ' + label); t.click_text('Desk · ' + label)  # mouse press, then its release
+
+def held(t):
+    """The failure pause outlasts the trailing release of the click that chose the entry and a late mouse report: only a
+    new key ends it. Harbor has not repainted (no status line) until then."""
+    t.pump(.6)
+    before = t.text
+    assert 'press any key to return to Harbor' in ' '.join(before.split()), before
+    t.send(b'\x1b[<0;3;3m', wait=.4)  # a stray SGR release is not a key
+    t.send(b'\x1b[<35;4;3M', wait=.4)  # nor is motion
+    assert t.text == before, t.text
 
 t = Terminal(cols=56, rows=38, extra_env={'HARBOR_DESK_COMMANDS': str(commands)})
 try:
@@ -76,12 +89,14 @@ try:
     t.resize(48, 38); t.expect('a/b e q /x')
     assert kept(state(t)) == kept(before)  # a narrower width re-wraps only the scroll offset of a following view
     t.resize(56, 38); t.expect('a/b e q /x')
-    run(t, 'Broken'); t.expect('press any key to return to Harbor')
+    run(t, 'Broken'); t.pump(.3); assert 'press any key to return to Harbor' in ' '.join(t.text.split()), t.text; held(t)
     assert 'DESK CHILD' in t.text and 'Desk exited 3' in t.text, t.text  # the child's own output is still readable
     t.send('z'); t.expect('Desk exited 3 · draft kept'); t.expect('a/b e q /x')
+    run(t, 'Nonblock'); t.pump(.3); assert 'press any key to return to Harbor' in ' '.join(t.text.split()), t.text; held(t)
+    t.send('z'); t.expect('Desk exited 4 · draft kept'); t.expect('a/b e q /x')
     run(t, 'Stuck'); t.expect('WAITING'); t.send(b'\x03'); t.expect('Desk interrupted (signal 2)'); t.expect('a/b e q /x')
     assert 'press any key' not in t.text, t.text  # Ctrl+C returns at once
-    run(t, 'Missing'); t.expect('press any key to return to Harbor'); t.send('z'); t.expect('Desk could not start')
+    run(t, 'Missing'); t.pump(.3); assert 'press any key to return to Harbor' in ' '.join(t.text.split()), t.text; held(t); t.send('z'); t.expect('a/b e q /x'); assert 'press any key to return to Harbor' not in ' '.join(t.text.split()), t.text
     assert state(t) == before and t.pid == pid
     # Mouse reporting and bracketed paste came back: typing after a click still lands in the draft.
     t.send('!'); t.expect('!')

@@ -15,6 +15,8 @@
 #include <cmath>
 #include <cwctype>
 #include <dirent.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <fstream>
 #include <iostream>
 #include <regex>
@@ -2047,17 +2049,54 @@ Harbor::DeskFailurePause(const std::string& reason)
   struct termios saved = {};
   if (tcgetattr(STDIN_FILENO, &saved) != 0)
     return;
+  // A child (Node sets it on a shared tty) or curses may leave the descriptor non-blocking; the pause must block.
+  const int flags = fcntl(STDIN_FILENO, F_GETFL);
+  if (flags >= 0 && (flags & O_NONBLOCK))
+    fcntl(STDIN_FILENO, F_SETFL, flags & ~O_NONBLOCK);
   struct termios raw = saved;
   raw.c_lflag &= ~(ICANON | ECHO);
   raw.c_cc[VMIN] = 1;
   raw.c_cc[VTIME] = 0;
   tcsetattr(STDIN_FILENO, TCSANOW, &raw);
-  char key = 0;
-  while (read(STDIN_FILENO, &key, 1) < 0 && errno == EINTR)
+  // Input queued before the message appeared is not an answer to it: the trailing mouse release of the click that
+  // chose the entry, or typeahead sent to the child. Discard it, then wait for a new key.
+  tcflush(STDIN_FILENO, TCIFLUSH);
+  while (true)
   {
+    unsigned char key = 0;
+    const ssize_t got = read(STDIN_FILENO, &key, 1);
+    if (got < 0 && errno == EINTR)
+      continue;
+    if (got <= 0)
+      break;
+    if (key != 0x1b)
+      break;
+    // ESC alone is a key. A mouse report (CSI < ... M/m, legacy CSI M b x y) or a focus report (CSI I/O) arriving
+    // after the flush, such as a late release, is not a human key and leaves the message on screen.
+    std::string seq;
+    struct pollfd more = { STDIN_FILENO, POLLIN, 0 };
+    while (seq.size() < 32 && poll(&more, 1, 60) > 0)
+    {
+      unsigned char c = 0;
+      if (read(STDIN_FILENO, &c, 1) != 1)
+        break;
+      seq.push_back(static_cast<char>(c));
+      const bool sgr = seq.size() >= 2 && seq[0] == '[' && seq[1] == '<';
+      const bool legacy = seq.size() >= 2 && seq[0] == '[' && seq[1] == 'M';
+      if ((sgr && (c == 'M' || c == 'm') && seq.size() > 2) || (legacy && seq.size() == 5))
+        break;
+      if (!sgr && !legacy && seq.size() >= 2 && c >= 0x40 && c <= 0x7e)
+        break;
+    }
+    const bool mouse = seq.size() > 2 && seq[0] == '[' && (seq[1] == '<' || seq[1] == 'M');
+    const bool focus = seq == "[I" || seq == "[O";
+    if (!mouse && !focus)
+      break;
   }
   tcflush(STDIN_FILENO, TCIFLUSH); // the rest of a multi-byte key is not Harbor input
   tcsetattr(STDIN_FILENO, TCSANOW, &saved);
+  if (flags >= 0)
+    fcntl(STDIN_FILENO, F_SETFL, flags);
 }
 void
 Harbor::DeskHandoff(const std::vector<std::string>& argv)
@@ -2070,6 +2109,7 @@ Harbor::DeskHandoff(const std::vector<std::string>& argv)
   sigaction(SIGINT, &ignore, &oldInt);
   sigaction(SIGQUIT, &ignore, &oldQuit);
   sigaction(SIGTSTP, &ignore, &oldTstp);
+  const int inputFlags = fcntl(STDIN_FILENO, F_GETFL);
   SuspendTerminal();
   std::vector<char*> args;
   for (const auto& arg : argv)
@@ -2095,6 +2135,9 @@ Harbor::DeskHandoff(const std::vector<std::string>& argv)
     while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
     {
     }
+  // The child shares this terminal's open file description; put back Harbor's own flags (a Node child sets O_NONBLOCK).
+  if (inputFlags >= 0)
+    fcntl(STDIN_FILENO, F_SETFL, inputFlags);
   // A failed Desk child's own error text is still on screen; keep it readable until a key, then repaint.
   // A signal (Ctrl+C) or an ordinary exit returns at once. Ctrl+C during the pause is still ignored here.
   if (spawned != 0 || (WIFEXITED(status) && WEXITSTATUS(status) != 0))
