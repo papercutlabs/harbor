@@ -41,11 +41,13 @@ def kept(rows):
     out = []
     for row in rows:
         f = row.split(' ')
+        if f[0] == 'active':
+            out.append(tuple(f)); continue
         out.append((f[0], f[1], f[2], f[4], f[5], f[6], f[7], f[8], f[9], f[10], f[3] if f[4] == '0' else None))
     return out
 
 def draft_saved(t, text):
-    return any(r.split(' ')[1] == text.encode().hex().upper() or r.split(' ')[1] == text.encode().hex() for r in state(t))
+    return any(not r.startswith('active ') and r.split(' ')[1].lower() == text.encode().hex() for r in state(t))
 
 def run(t, label):
     t.send(b'\x0f'); t.expect('Desk · ' + label); t.click_text('Desk · ' + label)
