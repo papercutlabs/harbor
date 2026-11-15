@@ -4219,18 +4219,48 @@ std::string TgChat::Impl::ConvertMarkdownV2ToV1(const std::string& p_Str)
     return text;
   };
 
-  std::string rv;
-  std::string str = p_Str;
-  std::regex rg("(http|https):\\/\\/([^\\s]+)");
-  std::smatch sm;
-  while (regex_search(str, sm, rg))
+  auto ReplaceV2MarkupOutsideUrls = [&](const std::string& p_Text) -> std::string
   {
-    rv += ReplaceV2Markup(sm.prefix().str()); // text non-match
-    rv += sm.str(); // url match
-    str = sm.suffix().str();
+    std::string rv;
+    std::string str = p_Text;
+    std::regex rg("(http|https):\\/\\/([^\\s]+)");
+    std::smatch sm;
+    while (regex_search(str, sm, rg))
+    {
+      rv += ReplaceV2Markup(sm.prefix().str()); // text non-match
+      rv += sm.str(); // url match
+      str = sm.suffix().str();
+    }
+
+    rv += ReplaceV2Markup(str); // text non-match
+    return rv;
+  };
+
+  // code spans and pre blocks emitted by getMarkdownText hold literal text, keep them verbatim
+  std::string rv;
+  size_t pos = 0;
+  while (pos < p_Str.size())
+  {
+    const size_t tick = p_Str.find('`', pos);
+    if (tick == std::string::npos)
+    {
+      rv += ReplaceV2MarkupOutsideUrls(p_Str.substr(pos));
+      break;
+    }
+
+    rv += ReplaceV2MarkupOutsideUrls(p_Str.substr(pos, tick - pos));
+    const std::string fence = (p_Str.compare(tick, 3, "```") == 0) ? "```" : "`";
+    const size_t close = p_Str.find(fence, tick + fence.size());
+    if (close == std::string::npos)
+    {
+      rv += ReplaceV2MarkupOutsideUrls(p_Str.substr(tick));
+      break;
+    }
+
+    rv += p_Str.substr(tick, close + fence.size() - tick);
+    pos = close + fence.size();
   }
 
-  rv += ReplaceV2Markup(str); // text non-match
   return rv;
 }
 

@@ -60,10 +60,25 @@ try:
     x,y=point(t,'final')
     drag(t,a,(x+len('final')-1,y))
     assert clipboard()==source.replace('*','')+'\n\n你好 café e\u0301 🙂 final',repr(clipboard())
+    # Exact TDLib getMarkdownText shape: the closing fence follows the command directly.
+    command='sh ~/Downloads/create-hive-next-repos.sh'
+    block="It's in your Downloads now:\n\n```shell\n"+command+"```\n\nIt should end with Done."
+    shown="It's in your Downloads now:\n\n"+command+"\n\nIt should end with Done."
+    t.send('\x1b[200~'+block+'\x1b[201~');t.send(b'\r');t.expect('It should end with Done.')
+    assert '```' not in t.text,t.text
+    x,y=point(t,command);code=t.screen.buffer[y][x]
+    px,py=point(t,'It should end');prose=t.screen.buffer[py][px]
+    bx,by=point(t,"It's in your");before=t.screen.buffer[by][bx]
+    assert code.fg!=prose.fg and prose.fg==before.fg,(code.fg,prose.fg,before.fg)
+    drag(t,(x,y),(x+len(command)-1,y))
+    assert clipboard()==command,repr(clipboard())
+    t.click_text('It should end',button=2);t.expect('Message actions');t.click_text('Copy text');t.expect('Copied')
+    assert clipboard()==shown,repr(clipboard())
+    t.snapshot('harbor-code-block-copy-50')
     # Left-click does not open actions; right-click does.
     t.send(b'\x1b');t.click_text('final');assert 'Message actions' not in t.text
     t.click_text('final',button=2);t.expect('Message actions')
-    print('PASS drag auto-copy, reverse selection, no action popup, wrapping/newlines, Unicode, draft preservation, right-click actions')
+    print('PASS drag auto-copy, reverse selection, TDLib code block display and exact copy, no action popup, wrapping/newlines, Unicode, draft preservation, right-click actions')
 finally:
     t.close()
     subprocess.run(['/usr/bin/osascript','-l','JavaScript','-e',clear,name],capture_output=True,timeout=5)

@@ -2125,7 +2125,7 @@ Harbor::Actions(bool minimal)
                         "",
                         [this, message]
                         {
-                          m_Media->CopyText(message.text);
+                          m_Media->CopyText(S(HarborFormatting::Parse(Safe(W(message.text))).text));
                           CloseMenu();
                           Notify("Copied");
                         } });

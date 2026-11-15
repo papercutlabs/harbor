@@ -30,6 +30,37 @@ main()
   a = Parse(L"*你好 café* 🙂");
   assert(a.text == L"你好 café 🙂");
   assert(a.styles.size() == a.text.size());
+  // Shapes emitted by TDLib get_markdown_v3 (td/telegram/MessageEntity.cpp): a pre/preCode
+  // block opens with ``` plus its language and a newline, and closes with ``` straight after
+  // its content, which need not end in a newline.
+  // Exact bundled TDLib getMarkdownText output for preCode(offset 29, length 40, "shell"), run
+  // offline by the parent seat via Client::execute.
+  a = Parse(L"It's in your Downloads now:\n\n```shell\nsh ~/Downloads/create-hive-next-repos.sh```\n\n"
+            L"It should end with Done. Paste me the output.");
+  assert(a.text == L"It's in your Downloads now:\n\nsh ~/Downloads/create-hive-next-repos.sh\n\n"
+                   L"It should end with Done. Paste me the output.");
+  assert(a.text.find(L"```") == std::wstring::npos);
+  for (auto i = a.text.find(L"sh ~"); a.text[i] != L'\n'; ++i)
+    assert(a.styles[i] & Code);
+  for (auto i = a.text.find(L"It should"); i < a.text.size(); ++i)
+    assert(a.styles[i] == Plain);
+  a = Parse(L"```shell\ngit -C ~/src log --format='%h %s' -3```\nThen run it.");
+  assert(a.text == L"git -C ~/src log --format='%h %s' -3\nThen run it.");
+  assert(a.styles[a.text.find(L"-3")] & Code);
+  assert(a.styles[a.text.find(L"\n")] == Plain);
+  assert(a.styles[a.text.find(L"Then")] == Plain);
+  a = Parse(L"```\nls -la```\n```python\ndef f(x):\n    return x ** 2  # \\* `tick` 你好\n```\nDone *ok*");
+  assert(a.text == L"ls -la\ndef f(x):\n    return x ** 2  # \\* `tick` 你好\nDone ok");
+  assert(a.styles[a.text.find(L"ls")] & Code);
+  assert(a.styles[a.text.find(L"    return")] & Code);
+  assert(a.styles[a.text.find(L"你好")] & Code);
+  assert(a.styles[a.text.find(L"Done")] == Plain);
+  assert(a.styles[a.text.find(L"ok")] & Emphasis);
+  a = Parse(L"Run:\n```sh\necho hi```after");
+  assert(a.text == L"Run:\necho hi\nafter");
+  assert(a.styles[a.text.find(L"after")] == Plain);
+  a = Parse(L"```sh\nexit 0```");
+  assert(a.text == L"exit 0");
   std::cout << "PASS native formatting: nested styles, code fences, quotes, escapes, literal punctuation, "
-               "links, Unicode\n";
+               "links, Unicode, TDLib pre blocks\n";
 }

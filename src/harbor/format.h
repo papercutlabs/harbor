@@ -120,16 +120,20 @@ Parse(const std::wstring& source)
   {
     if (source.compare(start, 3, L"```") == 0)
     {
+      // TDLib's getMarkdownText closes a pre block directly after its content, so the closing
+      // fence need not start a line; a newline just before it is the block's own line break.
       size_t header = source.find(L'\n', start + 3),
-             close = header == std::wstring::npos ? header : source.find(L"\n```", header);
+             close = header == std::wstring::npos ? header : source.find(L"```", header + 1);
       if (close != std::wstring::npos)
       {
-        out.Add(source.substr(header + 1, close - header - 1), Code);
-        start = close + 4;
-        if (start < source.size() && source[start] == L'\n')
+        size_t stop = close > header + 1 && source[close - 1] == L'\n' ? close - 1 : close;
+        out.Add(source.substr(header + 1, stop - header - 1), Code);
+        start = close + 3;
+        if (start < source.size())
         {
+          // prose after the block starts its own unstyled line, as Telegram shows it
           out.Add(L'\n', Plain);
-          ++start;
+          start += source[start] == L'\n';
         }
         continue;
       }
