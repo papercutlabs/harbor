@@ -79,14 +79,17 @@ try:
     t.send(b'\x1b'); t.expect('a/b e q /x')
     t.send(b'\x1b[111;5u'); t.expect('Desk · Quota'); t.send(b'\x1b')  # CSI-u Ctrl+O, as cmux/Ghostty send it
     before = state(t)
-    run(t, 'Quota'); t.expect('DESK CHILD')
+    # Use the keyboard here so the cooked child receives only the tested line, without a late mouse release.
+    t.send(b'\x0f'); t.expect('Desk · Quota'); t.send(b'\r'); t.expect('DESK CHILD')
     assert state(t, 0) == before  # saved at handoff
     assert 'COOKED=1' in t.text, t.text
     assert repr([literal]) in t.text, t.text  # argv element arrives whole; no shell ran
     assert not (work/'PWNED').exists() and not (Path(t.config).parent/'PWNED').exists()
     t.resize(100, 38); t.expect('Press Enter')
     # Harbor's input reader is stopped while the child runs: every typed byte reaches the child, none the draft.
-    t.send(b'deskline\r'); t.expect("GOT='deskline\\n'"); t.expect('Back from Desk')
+    t.send(b'deskline\r'); t.expect('Back from Desk')
+    # The child output is transient: validate retained terminal bytes after Harbor has repainted.
+    assert b"GOT='deskline\\n'" in t.raw, [line for line in bytes(t.raw).splitlines() if b"GOT=" in line]
     t.resize(56, 38); t.expect('a/b e q /x')
     assert state(t) == before  # same width as before: every field, scroll included, is exact
     t.resize(48, 38); t.expect('a/b e q /x')
