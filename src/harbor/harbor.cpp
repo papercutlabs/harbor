@@ -405,7 +405,17 @@ Harbor::Init()
   pair(DialogBorder, 19, 25);
   pair(Backdrop, 26, 16);
   // Terminals differ on whether arrows use CSI, application SS3, or CSI-u.
-  for (const auto& key : std::vector<std::pair<std::string, int>>{ { "\033[A", KEY_UP },
+  for (const auto& key : std::vector<std::pair<std::string, int>>{ { "\033[D", KEY_LEFT },
+                                                                   { "\033[C", KEY_RIGHT },
+                                                                   { "\033OD", KEY_LEFT },
+                                                                   { "\033OC", KEY_RIGHT },
+                                                                   { "\033[1;1D", KEY_LEFT },
+                                                                   { "\033[1;1C", KEY_RIGHT },
+                                                                   { "\033[57350u", KEY_LEFT },
+                                                                   { "\033[57351u", KEY_RIGHT },
+                                                                   { "\033[57350;1u", KEY_LEFT },
+                                                                   { "\033[57351;1u", KEY_RIGHT },
+                                                                   { "\033[A", KEY_UP },
                                                                    { "\033[B", KEY_DOWN },
                                                                    { "\033OA", KEY_UP },
                                                                    { "\033OB", KEY_DOWN },
