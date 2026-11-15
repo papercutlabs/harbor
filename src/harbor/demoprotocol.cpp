@@ -204,6 +204,17 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
       n->success = true;
       n->chatId = r->chatId;
       n->chatMessages = { m };
+      if (getenv("HARBOR_DEMO_SEND_ID_REPLACEMENT"))
+      {
+        auto pending = std::make_shared<NewMessagesNotify>(*n);
+        pending->chatMessages.front().id = "temporary-" + m.id;
+        Emit(pending);
+        auto removed = std::make_shared<DeleteMessageNotify>(m_Id);
+        removed->success = true;
+        removed->chatId = r->chatId;
+        removed->msgId = pending->chatMessages.front().id;
+        Emit(removed);
+      }
       Emit(n);
       auto sent = std::make_shared<SendMessageNotify>(m_Id);
       sent->success = true;

@@ -3,12 +3,12 @@ import re
 from native_smoke import Terminal
 
 def selected(t):
-    return next(row.strip() for row in t.screen.display if row.lstrip().startswith('› ') and 'search…' not in row and row.strip()!='›')
+    return next(row.strip(' │') for row in t.screen.display if row.lstrip(' │').startswith('› ') and 'search…' not in row and row.strip()!='›')
 
 def exact_parent(t):
     t.send(b'\x0b'); t.expect('Find a conversation');t.send('Team forum')
     search=next(y for y,row in enumerate(t.screen.display) if '› Team forum' in row)
-    y=next(y for y,row in enumerate(t.screen.display) if y>search+1 and row.lstrip(' ›').startswith('Team forum ') and '>' not in row)
+    y=next(y for y,row in enumerate(t.screen.display) if y>search+1 and row.lstrip(' │›').startswith('Team forum ') and '>' not in row)
     t.send(f'\x1b[<0;8;{y+1}M',wait=.06);t.send(f'\x1b[<0;8;{y+1}m',wait=.1)
     t.expect('Parent group history.')
 

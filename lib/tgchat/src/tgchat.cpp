@@ -2033,6 +2033,15 @@ void TgChat::Impl::ProcessUpdate(td::td_api::object_ptr<td::td_api::Object> upda
   },
   [this](td::td_api::updateMessageSendSucceeded& update_message_send_succeeded)
   {
+    // TDLib replaces the local pending id with a permanent server id. History
+    // may have exposed that pending id before the send completed.
+    auto removed = std::make_shared<DeleteMessageNotify>(m_ProfileId);
+    removed->success = true;
+    removed->chatId = MessageChatId(*update_message_send_succeeded.message_);
+    removed->msgId = StrUtil::NumToHex(update_message_send_succeeded.old_message_id_);
+    removed->isOutgoing = true;
+    CallMessageHandler(removed);
+
     LOG_TRACE("msg send update");
 
     auto message =
@@ -4133,6 +4142,7 @@ void TgChat::Impl::GetChatHistory(int64_t p_ChatId, int64_t p_FromMsgId, int32_t
     for (auto it = messages->messages_.begin(); it != messages->messages_.end(); ++it)
     {
       auto message = td::move_tl_object_as<td::td_api::message>(*it);
+      if (message->sending_state_) continue; // pending ids change after delivery
       const auto messageChat = MessageChatId(*message);
       if (!p_Sequence && TopicNumber(messageChat)) display = messageChat;
       ChatMessage chatMessage;

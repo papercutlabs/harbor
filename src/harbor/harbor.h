@@ -37,6 +37,8 @@ private:
     std::string replyBeforeEdit;
     std::string selected, reply, editing, marked;
     std::vector<ChatMessage> recovery;
+    std::string restoreAnchor;
+    int restoreOffset = 0;
     int scroll = 0;
     int unseen = 0;
     int historyStalls = 0;
@@ -69,7 +71,7 @@ private:
   std::unordered_map<std::string, std::shared_ptr<Protocol>> m_Protocols;
   std::map<std::string, std::map<std::string, ContactInfo>> m_Contacts;
   std::map<std::string, Conversation> m_Chats, m_SavedStates;
-  std::string m_LastState;
+  std::string m_LastState, m_RestoreChat;
   std::set<std::string> m_Connected;
   std::vector<std::string> m_ChatOrder;
   std::string m_Current, m_Menu, m_Status, m_AuthOwner, m_ForwardProfile, m_ForwardChat;
