@@ -11,6 +11,7 @@ Harbor is a native terminal application, not a web mockup. It builds as a separa
 - Option+K chat search, with Ctrl+K as a fallback. Forum topics appear as Group > Topic, with last-message times and pin-first ordering.
 - Colored message formatting, replies, edits, reactions, and message actions.
 - Per-chat drafts and reading positions; automatic initial history loading.
+- Click to position the composer cursor, including wrapped text and attachment captions.
 - Drag to select message text; releasing copies it automatically.
 - Inline photos and video thumbnails, with a terminal color fallback.
 - In-app voice playback, external video opening, and attachment previews with captions.
@@ -18,7 +19,7 @@ Harbor is a native terminal application, not a web mockup. It builds as a separa
 
 ## Build and run
 
-Install the [nchat build dependencies](doc/nchat-upstream-readme.md#dependencies), plus FFmpeg and Python 3. On macOS, Harbor also uses the system audio player and clipboard.
+Install the [nchat build dependencies](doc/nchat-upstream-readme.md#dependencies), plus Go 1.26 or later, FFmpeg and Python 3. On macOS, Harbor also uses the system audio player and clipboard.
 
 ```sh
 git clone https://github.com/papercutlabs/harbor.git
@@ -31,7 +32,7 @@ The build script installs into a new directory under `~/.local/harbor/releases/`
 
 For a real Telegram account, run `harbor -s` once and complete Telegram authentication. After setup, use `harbor`. Configuration defaults to `~/.config/harbor`; the offline demo uses a separate directory. Updates do not require account setup again.
 
-[Interaction guide and terminal support](doc/harbor.md) · [Latest changes](doc/harbor-0.1.14.md)
+[Interaction guide and terminal support](doc/harbor.md) · [Latest changes](doc/harbor-0.1.15.md)
 
 ## Development checks
 

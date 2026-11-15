@@ -46,7 +46,7 @@ Shift+Enter accepts CSI-u/xterm encodings and legacy Escape+Return. Option+Backs
 
 ## Build and validation
 
-Run `utils/build-harbor` with CMake, FFmpeg, Python 3, and the nchat build dependencies installed. The script builds the Harbor target into a new versioned release directory and switches its managed Harbor launchers atomically. It refuses an existing release directory and does not overwrite loaded libraries or unmanaged commands.
+Run `utils/build-harbor` with CMake, Go 1.26 or later, FFmpeg, Python 3, and the nchat build dependencies installed. The script builds the Harbor target into a new versioned release directory and switches its managed Harbor launchers atomically. It refuses an existing release directory and does not overwrite loaded libraries or unmanaged commands.
 
 Native PTY checks run against the offline demo protocol, with temporary account directories. `HARBOR_EXECUTABLE=/absolute/path/to/harbor` selects a specific installed binary:
 
@@ -61,3 +61,5 @@ Native PTY checks run against the offline demo protocol, with temporary account 
 - `harbor-media-test`: subprocess quoting/timeouts, file parsing, image/video decoding and actual voice playback/pause. Its optional clipboard test uses a named test pasteboard.
 
 Validation scope: automated checks use the real native executable and an offline Protocol, rather than mocked UI functions. The user's live screenshots establish Telegram authentication, text delivery, receipt rendering, and inline image rendering in cmux. We do not send test messages to live chats. Terminal-protocol capture proves the emitted PNG/crop data; exact on-screen graphics behavior remains dependent on the emulator. Video playback opens the system handler; it is not decoded into an in-terminal video player.
+
+Harbor uses the pinned Ultraviolet input reader through a statically linked Go/C bridge; ncurses only draws the interface. The reader normalizes legacy and Kitty keyboard input, SGR mouse events, and bracketed paste. Unsupported control reports and key releases do not become draft text. Run `go test -race ./...` in `src/harbor/input` for stream and stdin-ownership tests. Click the composer or attachment caption to position its cursor using the same layout map as rendering.
