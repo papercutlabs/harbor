@@ -20,7 +20,8 @@ if mode == "nonblock":  # as a Node child can: O_NONBLOCK on the shared terminal
     fcntl.fcntl(0, fcntl.F_SETFL, fcntl.fcntl(0, fcntl.F_GETFL) | os.O_NONBLOCK); sys.exit(4)
 if mode == "interrupt":
     print("WAITING"); sys.stdout.flush(); signal.pause()
-print("Press Enter"); sys.stdout.flush(); sys.stdin.readline()
+print("Press Enter"); sys.stdout.flush(); print("GOT=" + repr(sys.stdin.readline())); sys.stdout.flush()
+import time; time.sleep(.3)
 ''')
 commands = work/'desk-commands'
 py = sys.executable
@@ -83,7 +84,9 @@ try:
     assert 'COOKED=1' in t.text, t.text
     assert repr([literal]) in t.text, t.text  # argv element arrives whole; no shell ran
     assert not (work/'PWNED').exists() and not (Path(t.config).parent/'PWNED').exists()
-    t.resize(100, 38); t.expect('Press Enter'); t.send(b'\r'); t.expect('Back from Desk')
+    t.resize(100, 38); t.expect('Press Enter')
+    # Harbor's input reader is stopped while the child runs: every typed byte reaches the child, none the draft.
+    t.send(b'deskline\r'); t.expect("GOT='deskline\\n'"); t.expect('Back from Desk')
     t.resize(56, 38); t.expect('a/b e q /x')
     assert state(t) == before  # same width as before: every field, scroll included, is exact
     t.resize(48, 38); t.expect('a/b e q /x')

@@ -1940,6 +1940,8 @@ void
 Harbor::SuspendTerminal()
 {
   SaveState();
+  // As for a login UI: the child owns stdin until it ends, so the reader is stopped and joined, not left to race it.
+  HarborInputStop();
   m_Media->Stop();
   m_Media->ClearGraphics();
   printf("\033[?1002l\033[<u\033[?2004l");
@@ -1953,6 +1955,8 @@ void
 Harbor::ResumeTerminal()
 {
   reset_prog_mode();
+  if (!HarborInputStart())
+    throw std::runtime_error("Could not resume terminal input reader");
   mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, nullptr);
   printf("\033[?1003l\033[?1002h\033[?2004h\033[>1u");
   fflush(stdout);
