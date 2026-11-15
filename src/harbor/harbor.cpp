@@ -1828,8 +1828,8 @@ Harbor::UpdatePrompt()
   m_Menu = "update";
   m_Option = 0;
   m_MenuOffset = 0;
-  m_Options = { { "Restart into Harbor " + m_UpdateVersion,
-                  "Your draft and reading position are saved",
+  m_Options = { { "Restart",
+                  "",
                   [this]
                   {
                     CheckUpdate();
@@ -1843,7 +1843,7 @@ Harbor::UpdatePrompt()
                     HarborUpdate::RestartTarget() = m_UpdateTarget;
                     m_Running = false;
                   } },
-                { "Later", "Keep using this version", [this] { CloseMenu(); } } };
+                { "Later", "", [this] { CloseMenu(); } } };
   m_Dirty = true;
 }
 void
@@ -2293,7 +2293,7 @@ Harbor::DrawMenu()
   for (int row = 0; row < m_H; ++row)
     mvchgat(row, 0, m_W, A_NORMAL, Backdrop, nullptr);
   bool picker = m_Menu == "chats" || m_Menu == "forward";
-  bool compact = m_Menu == "actions" || m_Menu == "message-tools" || picker;
+  bool compact = m_Menu == "actions" || m_Menu == "message-tools" || m_Menu == "update" || picker;
   int width = std::min(m_MainW - 4, picker ? 64 : compact ? 38 : 64);
   int x = m_MainX + (m_MainW - width) / 2;
   int y =

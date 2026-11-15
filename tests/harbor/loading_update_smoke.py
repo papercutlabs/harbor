@@ -45,8 +45,10 @@ with tempfile.TemporaryDirectory(prefix='harbor-update-test-') as directory:
         os.replace(newer,launcher)
         t.expect('Harbor 9.0.0 ready',timeout=5)
         t.click_text('Harbor 9.0.0 ready');t.expect('Update ready')
+        assert 'Restart into' not in t.text and 'Your draft and reading' not in t.text
+        assert 'Keep using this version' not in t.text
         t.click_text('Later');t.expect('Draft survives the update')
-        t.click_text('Harbor 9.0.0 ready');t.click_text('Restart into Harbor')
+        t.click_text('Harbor 9.0.0 ready');t.click_text('Restart')
         t.pump(1.5)
         assert 'unable to acquire lock' not in t.text
         assert 'Could not restart' not in t.text
