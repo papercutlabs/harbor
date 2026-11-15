@@ -1,4 +1,6 @@
 #include "harbor.h"
+#include "input.h"
+#include <sys/ioctl.h>
 #include "apputil.h"
 #include "clipboard.h"
 #include "fileutil.h"
@@ -66,8 +68,6 @@ enum
 {
   FindKey = KEY_MAX + 101,
   NewlineKey,
-  PasteStartKey,
-  PasteEndKey,
   DeleteWordKey
 };
 std::wstring
@@ -367,9 +367,6 @@ Harbor::Init()
   raw();
   noecho();
   nonl();
-  keypad(stdscr, TRUE);
-  timeout(20);
-  set_escdelay(60);
   curs_set(1);
   start_color();
   use_default_colors();
@@ -415,55 +412,11 @@ Harbor::Init()
   pair(Dialog, 17, 25);
   pair(DialogBorder, 19, 25);
   pair(Backdrop, 26, 16);
-  // Terminals differ on whether arrows use CSI, application SS3, or CSI-u.
-  for (const auto& key : std::vector<std::pair<std::string, int>>{ { "\033[D", KEY_LEFT },
-                                                                   { "\033[C", KEY_RIGHT },
-                                                                   { "\033OD", KEY_LEFT },
-                                                                   { "\033OC", KEY_RIGHT },
-                                                                   { "\033[1;1D", KEY_LEFT },
-                                                                   { "\033[1;1C", KEY_RIGHT },
-                                                                   { "\033[57350u", KEY_LEFT },
-                                                                   { "\033[57351u", KEY_RIGHT },
-                                                                   { "\033[57350;1u", KEY_LEFT },
-                                                                   { "\033[57351;1u", KEY_RIGHT },
-                                                                   { "\033[A", KEY_UP },
-                                                                   { "\033[B", KEY_DOWN },
-                                                                   { "\033OA", KEY_UP },
-                                                                   { "\033OB", KEY_DOWN },
-                                                                   { "\033[1;1A", KEY_UP },
-                                                                   { "\033[1;1B", KEY_DOWN },
-                                                                   { "\033[57352u", KEY_UP },
-                                                                   { "\033[57353u", KEY_DOWN },
-                                                                   { "\033[57352;1u", KEY_UP },
-                                                                   { "\033[57353;1u", KEY_DOWN } })
-    define_key(key.first.c_str(), key.second);
-  define_key("\033k", FindKey);
-  define_key("\033[27;3;107~", FindKey);
-  define_key("\033[107;3u", FindKey);
-  // Ghostty/cmux use CSI-u even for ordinary control chords once enhanced keys are enabled.
-  for (int code = 1; code <= 26; code++)
+  if (!HarborInputStart())
   {
-    const std::string sequence = "\033[" + std::to_string('a' + code - 1) + ";5u";
-    define_key(sequence.c_str(), KEY_MAX + 300 + code);
+    endwin();
+    throw std::runtime_error("Could not start terminal input reader");
   }
-  define_key("\033[13u", KEY_MAX + 313);
-  define_key("\033[27u", KEY_MAX + 327);
-  define_key("\033[127u", KEY_BACKSPACE);
-  define_key("\033[127;2u", KEY_BACKSPACE);
-  define_key("\033\177", DeleteWordKey);
-  define_key("\033\b", DeleteWordKey);
-  define_key("\033[127;3u", DeleteWordKey);
-  define_key("\033[8;3u", DeleteWordKey);
-  define_key("\033[27;3;127~", DeleteWordKey);
-  define_key("\033[27;3;8~", DeleteWordKey);
-  define_key("\033[13;2u", NewlineKey);
-  // Legacy terminals encode modified Return as Escape followed by Return.
-  // Decode it atomically: separate Esc/Return events browse and open message actions.
-  define_key("\033\r", NewlineKey);
-  define_key("\033[27;2;13~", NewlineKey);
-  define_key("\033[13;2~", NewlineKey);
-  define_key("\033[200~", PasteStartKey);
-  define_key("\033[201~", PasteEndKey);
   mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, nullptr);
   mouseinterval(0);
   printf("\033[?1003l\033[?1002h\033[?2004h\033[>1u");
@@ -480,6 +433,7 @@ Harbor::Cleanup()
   if (!m_Ready)
     return;
   SaveState();
+  HarborInputStop();
   m_Media->Stop();
   m_Media->ClearGraphics();
   printf("\033[?1002l\033[<u\033[?2004l");
@@ -530,13 +484,6 @@ Harbor::Run()
     }
     if (m_Media->Poll())
       m_Dirty = true;
-    if (m_Pasting && now - m_PasteStart > 10000)
-    {
-      m_Pasting = false;
-      Paste(m_Paste);
-      m_Paste.clear();
-      Notify("Paste captured; review before sending");
-    }
     if (m_AnimatedUntil)
     {
       m_Dirty = true;
@@ -549,38 +496,7 @@ Harbor::Run()
       m_LastDraw = now;
       m_Dirty = false;
     }
-    wint_t k;
-    int result = get_wch(&k);
-    if (result != ERR)
-    {
-      if (m_Pasting)
-      {
-        if (k == PasteEndKey)
-        {
-          m_Pasting = false;
-          Paste(m_Paste);
-          m_Paste.clear();
-        }
-        else if (result != KEY_CODE_YES && m_Paste.size() < 4 * 1024 * 1024)
-          m_Paste += wchar_t(k);
-      }
-      else
-      {
-        m_KeyIsSpecial = result == KEY_CODE_YES;
-        if (m_KeyIsSpecial && k > KEY_MAX + 300 && k <= KEY_MAX + 327)
-        {
-          k -= KEY_MAX + 300;
-          m_KeyIsSpecial = false;
-        }
-        KeyPress(k);
-      }
-    }
-  }
-  for (auto& p : m_Protocols)
-  {
-    auto r = std::make_shared<SetStatusRequest>();
-    r->isOnline = false;
-    Request(p.first, r);
+    ReadInput();
   }
 }
 void
@@ -966,6 +882,7 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
           break;
         }
         m_AuthOwner = p;
+        HarborInputStop();
         endwin();
         m_AuthSuspended = true;
       }
@@ -973,6 +890,8 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
       {
         m_AuthOwner.clear();
         m_AuthSuspended = false;
+        if (!HarborInputStart())
+          throw std::runtime_error("Could not resume terminal input reader");
         refresh();
       }
       break;
@@ -1615,8 +1534,7 @@ Harbor::EditKey(wint_t k)
   {
     Insert(std::wstring(1, wchar_t(k)));
   }
-  else if (k > KEY_MAX && k <= 0x10ffff && k != FindKey && k != NewlineKey && k != PasteStartKey &&
-           k != PasteEndKey)
+  else if (k > KEY_MAX && k <= 0x10ffff && k != FindKey && k != NewlineKey)
   {
     Insert(std::wstring(1, wchar_t(k)));
   }
@@ -2562,11 +2480,14 @@ Harbor::DrawMenu()
     auto point = layout.cursors[c ? std::min(c->cursor, c->draft.size()) : 0];
     int first = std::max(0, point.row - 1);
     for (int i = 0; i < 2; ++i)
+    {
+      m_Hits.push_back({ start + 1 + i, x + 2, width - 4, "caption", std::to_string(first + i) });
       Text(start + 1 + i,
            x + 2,
            width - 4,
            L" " + (first + i < int(layout.lines.size()) ? layout.lines[first + i] : L""),
            Selected);
+    }
     start += captionHeight;
   }
   m_OptionY = start;
@@ -2666,13 +2587,6 @@ Harbor::KeyPress(wint_t k)
     clearok(stdscr, TRUE);
     return;
   }
-  if (k == PasteStartKey)
-  {
-    m_Pasting = true;
-    m_Paste.clear();
-    m_PasteStart = TimeUtil::GetCurrentTimeMSec();
-    return;
-  }
   if (k == 17)
   {
     m_Running = false;
@@ -2704,7 +2618,6 @@ Harbor::KeyPress(wint_t k)
 
   if (k == KEY_MOUSE)
   {
-    Mouse();
     return;
   }
   if (k == FindKey || k == 11)
@@ -2906,13 +2819,132 @@ Harbor::CopySelection()
   }
 }
 void
-Harbor::Mouse()
+Harbor::ReadInput()
 {
-  MEVENT e;
-  if (getmouse(&e) != OK)
-    return;
+  struct winsize size = {};
+  if (ioctl(STDIN_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_row && size.ws_col &&
+      (size.ws_row != m_H || size.ws_col != m_W))
+  {
+    resizeterm(size.ws_row, size.ws_col);
+    clearok(stdscr, TRUE);
+    m_Dirty = true;
+  }
+  auto event = HarborInputPoll(20);
+  if (event.kind == -1)
+    m_Running = false;
+  else if (event.kind == 2)
+  {
+    m_KeyIsSpecial = false;
+    for (auto ch : W(event.text ? event.text : ""))
+      KeyPress(ch);
+  }
+  else if (event.kind == 3)
+    Paste(W(event.text ? event.text : ""));
+  else if (event.kind == 4)
+  {
+    MEVENT mouse = {};
+    mouse.x = event.x;
+    mouse.y = event.y;
+    if (event.button == 1 || (event.button == 0 && event.action == 2 && m_MouseDown))
+      mouse.bstate = event.action == 2 ? BUTTON1_RELEASED : BUTTON1_PRESSED;
+    else if (event.button == 3)
+      mouse.bstate = event.action == 2 ? BUTTON3_RELEASED : BUTTON3_PRESSED;
+    else if (event.button == 4)
+      mouse.bstate = BUTTON4_PRESSED;
+#ifdef BUTTON5_PRESSED
+    else if (event.button == 5)
+      mouse.bstate = BUTTON5_PRESSED;
+#endif
+    if (event.action == 3)
+      mouse.bstate = REPORT_MOUSE_POSITION;
+    Mouse(mouse);
+  }
+  else if (event.kind == 1)
+  {
+    const int keys[] = { KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_HOME,
+                         KEY_END, KEY_PPAGE, KEY_NPAGE, KEY_DC, KEY_IC };
+    wint_t key = event.code;
+    m_KeyIsSpecial = event.code < 0;
+    if (m_KeyIsSpecial)
+      key = keys[-event.code - 1];
+    // Legacy BS is represented by the decoder as Ctrl+H. Preserve the same
+    // word-delete binding for Alt+Backspace on terminals that send BS.
+    else if (event.code == 'h' && (event.mods & 6) == 6)
+    {
+      key = DeleteWordKey;
+      m_KeyIsSpecial = true;
+    }
+    else if (event.code == 127 || event.code == 8)
+    {
+      key = event.mods & 2 ? DeleteWordKey : KEY_BACKSPACE;
+      m_KeyIsSpecial = true;
+    }
+    else if (event.code == 13 && event.mods & 3)
+    {
+      key = NewlineKey;
+      m_KeyIsSpecial = true;
+    }
+    else if ((event.mods & 2) && (event.code == 'k' || event.code == 'K'))
+    {
+      key = FindKey;
+      m_KeyIsSpecial = true;
+    }
+    else if ((event.mods & 4) && event.code >= 'a' && event.code <= 'z')
+      key = event.code - 'a' + 1;
+    else if (event.mods & (2 | 4 | 8 | 32))
+    {
+      free(event.text);
+      return; // Unbound modified keys are commands, never draft text.
+    }
+    KeyPress(key);
+  }
+  free(event.text);
+}
+
+void
+Harbor::Mouse(const MEVENT& e)
+{
+  m_Dirty = true;
 
   auto* c = Current();
+  auto placeCursor = [&](const TextLayout& layout, int row, int col)
+  {
+    size_t best = c->draft.size();
+    int distance = INT_MAX;
+    for (size_t i = 0; i < layout.cursors.size(); ++i)
+      if (layout.cursors[i].row == row && (i == c->draft.size() || Width(c->draft[i]) > 0))
+      {
+        int delta = std::abs(layout.cursors[i].col - col);
+        if (delta < distance)
+        {
+          distance = delta;
+          best = i;
+        }
+      }
+    c->cursor = best;
+    c->selected.clear();
+    m_Browse = m_MouseDown = m_MouseDragging = m_HasSelection = false;
+  };
+  if (c && (e.bstate & BUTTON1_PRESSED))
+  {
+    if (m_Menu.empty() && e.y >= m_ComposerY + 1 &&
+        e.y < m_ComposerY + 1 + m_ComposerRows && e.x >= m_MainX + 2 && e.x < m_W - 2)
+    {
+      auto layout = Layout(c->draft, std::max(1, m_MainW - 11));
+      int row = std::min(int(layout.lines.size()) - 1, m_ComposerFirstLine + e.y - m_ComposerY - 1);
+      placeCursor(layout, row, std::max(0, e.x - m_MainX - 6));
+      return;
+    }
+    if (m_Menu == "attachments")
+      for (const auto& hit : m_Hits)
+        if (hit.type == "caption" && e.y == hit.y && e.x >= hit.x && e.x < hit.x + hit.w)
+        {
+          auto layout = Layout(c->draft, std::max(1, m_DialogW - 6));
+          int row = std::min(int(layout.lines.size()) - 1, std::stoi(hit.value));
+          placeCursor(layout, row, std::max(0, e.x - m_DialogX - 3));
+          return;
+        }
+  }
   if (e.bstate & (BUTTON3_PRESSED | BUTTON3_CLICKED | BUTTON3_DOUBLE_CLICKED))
   {
     m_MouseDown = m_MouseDragging = m_HasSelection = false;
@@ -3073,16 +3105,29 @@ Harbor::KeyDump()
   initscr();
   raw();
   noecho();
-  keypad(stdscr, TRUE);
-  printw("Harbor key inspector · Ctrl+Q exits\n");
-  wint_t key;
-  while (get_wch(&key) != ERR)
+  if (!HarborInputStart())
   {
-    if (key == 17)
-      break;
-    printw("code=%u\n", unsigned(key));
-    refresh();
+    endwin();
+    return;
   }
+  printw("Harbor input inspector · Ctrl+Q exits\n");
+  refresh();
+  while (true)
+  {
+    auto event = HarborInputPoll(1000);
+    bool quit = event.kind == -1 ||
+                (event.kind == 1 && (event.code == 17 || (event.code == 'q' && (event.mods & 4))));
+    if (!quit && event.kind)
+    {
+      printw("kind=%d code=%d mods=%d x=%d y=%d button=%d action=%d\n",
+             event.kind, event.code, event.mods, event.x, event.y, event.button, event.action);
+      refresh();
+    }
+    free(event.text);
+    if (quit)
+      break;
+  }
+  HarborInputStop();
   endwin();
 }
 

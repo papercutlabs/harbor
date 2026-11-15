@@ -101,10 +101,9 @@ private:
   bool CellSelected(const CopyCell&) const;
   void CopySelection();
   std::unique_ptr<HarborMedia> m_Media;
-  bool m_Running = true, m_Ready = false, m_Dirty = true, m_Browse = false, m_Pasting = false,
+  bool m_Running = true, m_Ready = false, m_Dirty = true, m_Browse = false,
        m_Motion = true, m_KeyIsSpecial = false;
-  std::wstring m_Paste;
-  int64_t m_PasteStart = 0, m_StatusUntil = 0, m_LastDraw = 0, m_AnimatedUntil = 0;
+  int64_t m_StatusUntil = 0, m_LastDraw = 0, m_AnimatedUntil = 0;
   int m_H = 0, m_W = 0, m_MainX = 0, m_MainW = 0, m_Top = 5, m_Bottom = 0, m_ComposerY = 0,
       m_ComposerRows = 1;
   int m_DialogY = 0, m_DialogX = 0, m_DialogW = 0, m_DialogH = 0, m_OptionY = 0, m_ComposerFirstLine = 0;
@@ -134,7 +133,8 @@ private:
   void Text(int, int, int, const std::wstring&, int color, bool bold = false);
   void Fill(int, int, int, int color);
   void KeyPress(wint_t);
-  void Mouse();
+  void Mouse(const MEVENT& e);
+  void ReadInput();
   void EditKey(wint_t);
   void Insert(const std::wstring&);
   void Paste(const std::wstring&);

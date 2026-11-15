@@ -7,7 +7,7 @@ if [[ -e "$harbor_prefix" ]]; then
   printf 'Choose a new release directory; this one already exists: %s\n' "$harbor_prefix" >&2
   exit 1
 fi
-for dependency in cmake ffmpeg python3; do
+for dependency in cmake ffmpeg python3 go; do
   if ! command -v "$dependency" >/dev/null; then
     printf 'Missing dependency: %s\n' "$dependency" >&2
     exit 1
