@@ -32,7 +32,7 @@ The build script installs into a new directory under `~/.local/harbor/releases/`
 
 For a real Telegram account, run `harbor -s` once and complete Telegram authentication. After setup, use `harbor`. Configuration defaults to `~/.config/harbor`; the offline demo uses a separate directory. Updates do not require account setup again.
 
-[Interaction guide and terminal support](doc/harbor.md) · [Latest changes](doc/harbor-0.1.16.md)
+[Interaction guide and terminal support](doc/harbor.md) · [Latest changes](doc/harbor-0.1.17.md)
 
 ## Development checks
 
@@ -43,11 +43,16 @@ python3 -m venv .venv
 .venv/bin/pip install -r tests/harbor/requirements.txt
 .venv/bin/python tests/harbor/native_smoke.py
 .venv/bin/python tests/harbor/selection_smoke.py
+.venv/bin/python tests/harbor/desk_handoff_smoke.py
 ```
 
 Additional PTY checks cover formatting, history loading, updates, media, and word deletion. They use isolated offline demo accounts and do not send Telegram messages. macOS clipboard checks use a private named pasteboard. Set `HARBOR_EXECUTABLE` to test a specific installed binary.
 
 The native implementation has been exercised on macOS/cmux. Other terminal and Linux paths are present but have less runtime coverage. Video playback opens an external player; it is not an in-terminal video player. The update prompt applies already-installed releases rather than downloading or building them automatically.
+
+## Office Desk entries
+
+Started by Office Desk, Harbor receives `HARBOR_DESK_COMMANDS`, a file of tab-separated lines `label<TAB>hint<TAB>argv0<TAB>argv…`. Each line becomes a `Desk · <label>` entry in the Commands menu. Choosing one saves state, releases the terminal (mouse, paste and enhanced-key modes, graphics), runs that argv directly on the same terminal with no shell, then restores the modes and repaints. The Harbor process, chats, drafts, cursors, reply/edit context and reading positions are untouched. A child that could not start or exited non-zero leaves its own output on screen until a new key (`press any key to return to Harbor`; input queued before the message, such as the release of the click that chose the entry, and mouse reports do not count); an interrupted child (Ctrl+C) returns at once. Each outcome is also reported in the status line. `/` opens Commands from an empty draft; Ctrl+O opens the same menu from any draft and leaves it unchanged. Without the variable Harbor has no Desk entries.
 
 ## Upstream and license
 
