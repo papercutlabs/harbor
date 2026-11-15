@@ -647,12 +647,6 @@ void
 Harbor::Merge(Conversation& c, const std::vector<ChatMessage>& messages)
 {
   const int64_t previousLatest = c.order.empty() ? -1 : c.messages[c.order.back()].timeSent;
-  if (m_Current == Key(c.profile, c.id) && c.loaded && !c.follow && c.restoreAnchor.empty() && !m_Browse)
-  {
-    BuildRows();
-    if (c.scroll + std::max(1, m_Bottom - m_Top) >= int(m_Rows.size()) - 2)
-      c.follow = true;
-  }
   for (const auto& m : messages)
   {
     if (!c.follow && !m.isOutgoing && m.timeSent > previousLatest && !c.messages.count(m.id))
@@ -1439,8 +1433,6 @@ Harbor::Insert(const std::wstring& text)
   if (!c)
     return;
   c->cursor = std::min(c->cursor, c->draft.size());
-  c->follow = true;
-  c->unseen = 0;
   c->draft.insert(c->cursor, Safe(text));
   c->cursor += text.size();
   m_Browse = false;

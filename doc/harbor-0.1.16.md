@@ -1,7 +1,7 @@
 # Harbor 0.1.16
 
-When Office starts Harbor for its compact Desk (`office desk --strip`), the Commands menu carries Desk entries: Quota, Everything, Desk controls and Desk keys. Each runs Office on Harbor's own terminal and returns to the same conversation, draft, cursor, reply or edit and reading position. Ctrl+O opens Commands from any draft, so `/`, `e` and `q` stay literal text.
+Editing a draft no longer resumes following latest or clears unseen messages. Typing, newlines, pasted text and composer cursor interaction leave the conversation at its reading position. Incoming messages no longer infer follow mode from the current viewport position.
 
-If a Desk entry fails, its own error stays on screen until you press a key. Ordinary Harbor, started without Office, has no Desk entries.
+Choose Latest (Ctrl+G or the Latest/new-message action) to resume following. Sending a message still moves to latest. Draft and viewport state are independent and continue to survive chat switching and restart.
 
-Apply the update from Harbor’s update prompt; existing sessions keep running until you choose to restart.
+Native regression tests verify typing, multiline drafts, paste, chat switching, a reply arriving while drafting in older history, and explicit Latest behavior. Restart-position tests also pass.

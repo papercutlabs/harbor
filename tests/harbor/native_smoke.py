@@ -215,8 +215,8 @@ if __name__=='__main__':
     finally:t.close()
     t=Terminal(extra_env={'HARBOR_DEMO_INCOMING_DELAY_MS':'2200'})
     try:
-      t.picker('Marina');t.send(b'\x1b');t.send(b'\x1b');t.pump(1.7)
-      t.expect('A live incoming reply.');check('Incoming reply follows the bottom after returning to compose')
+      t.picker('Marina');t.send(b'\x1b');t.send(b'\x1b');t.send(b'\x07');t.pump(1.7)
+      t.expect('A live incoming reply.');check('Incoming reply follows after explicitly choosing Latest')
     finally:t.close()
     t=Terminal(extra_env={'HARBOR_DEMO_INCOMING_DELAY_MS':'2200'})
     try:
