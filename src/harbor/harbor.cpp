@@ -414,7 +414,17 @@ Harbor::Init()
   pair(DialogBorder, 19, 25);
   pair(Backdrop, 26, 16);
   // Terminals differ on whether arrows use CSI, application SS3, or CSI-u.
-  for (const auto& key : std::vector<std::pair<std::string, int>>{ { "\033[A", KEY_UP },
+  for (const auto& key : std::vector<std::pair<std::string, int>>{ { "\033[D", KEY_LEFT },
+                                                                   { "\033[C", KEY_RIGHT },
+                                                                   { "\033OD", KEY_LEFT },
+                                                                   { "\033OC", KEY_RIGHT },
+                                                                   { "\033[1;1D", KEY_LEFT },
+                                                                   { "\033[1;1C", KEY_RIGHT },
+                                                                   { "\033[57350u", KEY_LEFT },
+                                                                   { "\033[57351u", KEY_RIGHT },
+                                                                   { "\033[57350;1u", KEY_LEFT },
+                                                                   { "\033[57351;1u", KEY_RIGHT },
+                                                                   { "\033[A", KEY_UP },
                                                                    { "\033[B", KEY_DOWN },
                                                                    { "\033OA", KEY_UP },
                                                                    { "\033OB", KEY_DOWN },
@@ -580,6 +590,17 @@ Harbor::LoadState()
   while (std::getline(input, line) && total < 8 * 1024 * 1024)
   {
     total += line.size();
+    if (line.rfind("active ", 0) == 0)
+    {
+      try
+      {
+        m_RestoreChat = StrUtil::StrFromHex(line.substr(7));
+      }
+      catch (...)
+      {
+      }
+      continue;
+    }
     std::istringstream row(line);
     std::string key, draft, selected, reply, editing, backup, backupReply;
     size_t backupCursor = 0;
@@ -606,6 +627,9 @@ Harbor::LoadState()
         c.cursorBeforeEdit = std::min(backupCursor, c.draftBeforeEdit.size());
         c.replyBeforeEdit = backupReply == "-" ? "" : StrUtil::StrFromHex(backupReply);
       }
+      std::string anchor;
+      if (row >> anchor >> c.restoreOffset)
+        c.restoreAnchor = anchor == "-" ? "" : StrUtil::StrFromHex(anchor);
       m_SavedStates[StrUtil::StrFromHex(key)] = c;
     }
     catch (...)
@@ -630,8 +654,26 @@ Harbor::SaveState()
     saved.draftBeforeEdit = c.second.draftBeforeEdit;
     saved.cursorBeforeEdit = c.second.cursorBeforeEdit;
     saved.replyBeforeEdit = c.second.replyBeforeEdit;
+    saved.restoreAnchor = c.second.restoreAnchor;
+    saved.restoreOffset = c.second.restoreOffset;
+    if (c.first == m_Current && !c.second.follow && c.second.restoreAnchor.empty() &&
+        c.second.scroll < int(m_Rows.size()))
+    {
+      int row = c.second.scroll;
+      while (row < int(m_Rows.size()) && m_Rows[row].id.empty())
+        ++row;
+      if (row < int(m_Rows.size()))
+      {
+        saved.restoreAnchor = m_Rows[row].id;
+        int first = row;
+        while (first > 0 && m_Rows[first - 1].id == saved.restoreAnchor)
+          --first;
+        saved.restoreOffset = c.second.scroll - first;
+      }
+    }
   }
   std::ostringstream out;
+  out << "active " << StrUtil::StrToHex(m_RestoreChat.empty() ? m_Current : m_RestoreChat) << '\n';
   for (const auto& item : states)
   {
     const auto& c = item.second;
@@ -642,7 +684,9 @@ Harbor::SaveState()
         << (c.editing.empty() ? "-" : StrUtil::StrToHex(c.editing)) << ' '
         << (c.draftBeforeEdit.empty() ? "-" : StrUtil::StrToHex(S(c.draftBeforeEdit))) << ' '
         << c.cursorBeforeEdit << ' '
-        << (c.replyBeforeEdit.empty() ? "-" : StrUtil::StrToHex(c.replyBeforeEdit)) << '\n';
+        << (c.replyBeforeEdit.empty() ? "-" : StrUtil::StrToHex(c.replyBeforeEdit)) << ' '
+        << (c.restoreAnchor.empty() ? "-" : StrUtil::StrToHex(c.restoreAnchor)) << ' '
+        << c.restoreOffset << '\n';
   }
   if (out.str() == m_LastState)
     return;
@@ -685,7 +729,7 @@ void
 Harbor::Merge(Conversation& c, const std::vector<ChatMessage>& messages)
 {
   const int64_t previousLatest = c.order.empty() ? -1 : c.messages[c.order.back()].timeSent;
-  if (m_Current == Key(c.profile, c.id) && c.loaded && !c.follow && !m_Browse)
+  if (m_Current == Key(c.profile, c.id) && c.loaded && !c.follow && c.restoreAnchor.empty() && !m_Browse)
   {
     BuildRows();
     if (c.scroll + std::max(1, m_Bottom - m_Top) >= int(m_Rows.size()) - 2)
@@ -776,8 +820,14 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
           Fetch(c);
       }
       SortChats();
-      if (m_Current.empty() && !m_ChatOrder.empty())
+      if (!m_RestoreChat.empty() && m_Chats.count(m_RestoreChat))
+        OpenChat(m_RestoreChat);
+      else if (m_Current.empty() && !m_ChatOrder.empty())
+      {
+        auto pending = m_RestoreChat;
         OpenChat(m_ChatOrder.front());
+        m_RestoreChat = pending;
+      }
       break;
     }
     case NewMessagesNotifyType:
@@ -957,8 +1007,24 @@ Harbor::OpenChat(const std::string& key)
   auto it = m_Chats.find(key);
   if (it == m_Chats.end())
     return;
+  if (auto* previous = Current(); previous && !previous->follow &&
+      previous->restoreAnchor.empty() && previous->scroll < int(m_Rows.size()))
+  {
+    int row = previous->scroll;
+    while (row < int(m_Rows.size()) && m_Rows[row].id.empty())
+        ++row;
+    if (row < int(m_Rows.size()))
+    {
+      previous->restoreAnchor = m_Rows[row].id;
+      int first = row;
+      while (first > 0 && m_Rows[first - 1].id == previous->restoreAnchor)
+        --first;
+      previous->restoreOffset = previous->scroll - first;
+    }
+  }
   m_MouseDown = m_MouseDragging = m_HasSelection = false;
   m_Current = key;
+  m_RestoreChat.clear();
   auto& c = it->second;
   auto r = std::make_shared<SetCurrentChatRequest>();
   r->chatId = c.id;
@@ -1161,6 +1227,22 @@ Harbor::Draw()
     if (c->loaded && c->more && !c->fetching && !c->order.empty() && c->historyStalls < 3 &&
         TimeUtil::GetCurrentTimeMSec() >= c->historyRetryAt && int(m_Rows.size()) < visible)
       Fetch(*c, true, true);
+    if (!c->follow && !c->restoreAnchor.empty() && c->loaded)
+    {
+      auto anchor = std::find_if(m_Rows.begin(), m_Rows.end(), [&](const Row& row) {
+        return row.id == c->restoreAnchor;
+      });
+      if (anchor != m_Rows.end())
+      {
+        c->scroll = std::max(0, int(anchor - m_Rows.begin()) + c->restoreOffset);
+        c->restoreAnchor.clear();
+      }
+      else if (c->more && c->historyStalls < 3 && !c->fetching &&
+               TimeUtil::GetCurrentTimeMSec() >= c->historyRetryAt)
+        Fetch(*c, true, true);
+      else if (!c->more)
+        c->restoreAnchor.clear();
+    }
     if (c->follow)
     {
       c->unseen = 0;
@@ -1765,8 +1847,8 @@ Harbor::UpdatePrompt()
   m_Menu = "update";
   m_Option = 0;
   m_MenuOffset = 0;
-  m_Options = { { "Restart into Harbor " + m_UpdateVersion,
-                  "Your draft and reading position are saved",
+  m_Options = { { "Restart",
+                  "",
                   [this]
                   {
                     CheckUpdate();
@@ -1780,7 +1862,7 @@ Harbor::UpdatePrompt()
                     HarborUpdate::RestartTarget() = m_UpdateTarget;
                     m_Running = false;
                   } },
-                { "Later", "Keep using this version", [this] { CloseMenu(); } } };
+                { "Later", "", [this] { CloseMenu(); } } };
   m_Dirty = true;
 }
 void
@@ -2359,7 +2441,7 @@ Harbor::DrawMenu()
   for (int row = 0; row < m_H; ++row)
     mvchgat(row, 0, m_W, A_NORMAL, Backdrop, nullptr);
   bool picker = m_Menu == "chats" || m_Menu == "forward";
-  bool compact = m_Menu == "actions" || m_Menu == "message-tools" || picker;
+  bool compact = m_Menu == "actions" || m_Menu == "message-tools" || m_Menu == "update" || picker;
   int width = std::min(m_MainW - 4, picker ? 64 : compact ? 38 : 64);
   int x = m_MainX + (m_MainW - width) / 2;
   int y =
