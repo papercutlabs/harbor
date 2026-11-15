@@ -142,6 +142,7 @@ private:
   // Optional Desk entries named by HARBOR_DESK_COMMANDS, each run as an argv child on this same terminal.
   std::vector<Option> DeskOptions();
   void DeskHandoff(const std::vector<std::string>& argv);
+  void DeskFailurePause(const std::string& reason);
   void SuspendTerminal();
   void ResumeTerminal();
   void Actions(bool minimal = true);

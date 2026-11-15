@@ -27,6 +27,7 @@
 #include <sstream>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include <unistd.h>
 
 extern char** environ;
@@ -1957,6 +1958,26 @@ Harbor::ResumeTerminal()
   m_Dirty = true;
 }
 void
+Harbor::DeskFailurePause(const std::string& reason)
+{
+  printf("\r\n%s · press any key to return to Harbor", reason.c_str());
+  fflush(stdout);
+  struct termios saved = {};
+  if (tcgetattr(STDIN_FILENO, &saved) != 0)
+    return;
+  struct termios raw = saved;
+  raw.c_lflag &= ~(ICANON | ECHO);
+  raw.c_cc[VMIN] = 1;
+  raw.c_cc[VTIME] = 0;
+  tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+  char key = 0;
+  while (read(STDIN_FILENO, &key, 1) < 0 && errno == EINTR)
+  {
+  }
+  tcflush(STDIN_FILENO, TCIFLUSH); // the rest of a multi-byte key is not Harbor input
+  tcsetattr(STDIN_FILENO, TCSANOW, &saved);
+}
+void
 Harbor::DeskHandoff(const std::vector<std::string>& argv)
 {
   // The Desk view runs on this same terminal while this process, its chats, drafts and reading positions stay as they are.
@@ -1992,6 +2013,11 @@ Harbor::DeskHandoff(const std::vector<std::string>& argv)
     while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
     {
     }
+  // A failed Desk child's own error text is still on screen; keep it readable until a key, then repaint.
+  // A signal (Ctrl+C) or an ordinary exit returns at once. Ctrl+C during the pause is still ignored here.
+  if (spawned != 0 || (WIFEXITED(status) && WEXITSTATUS(status) != 0))
+    DeskFailurePause(spawned != 0 ? "Desk could not start: " + std::string(strerror(spawned))
+                                  : "Desk exited " + std::to_string(WEXITSTATUS(status)));
   sigaction(SIGINT, &oldInt, nullptr);
   sigaction(SIGQUIT, &oldQuit, nullptr);
   sigaction(SIGTSTP, &oldTstp, nullptr);

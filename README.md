@@ -31,7 +31,7 @@ The build script installs into a new directory under `~/.local/harbor/releases/`
 
 For a real Telegram account, run `harbor -s` once and complete Telegram authentication. After setup, use `harbor`. Configuration defaults to `~/.config/harbor`; the offline demo uses a separate directory. Updates do not require account setup again.
 
-[Interaction guide and terminal support](doc/harbor.md) · [Latest changes](doc/harbor-0.1.11.md)
+[Interaction guide and terminal support](doc/harbor.md) · [Latest changes](doc/harbor-0.1.15.md)
 
 ## Development checks
 
@@ -51,7 +51,7 @@ The native implementation has been exercised on macOS/cmux. Other terminal and L
 
 ## Office Desk entries
 
-Started by Office Desk, Harbor receives `HARBOR_DESK_COMMANDS`, a file of tab-separated lines `label<TAB>hint<TAB>argv0<TAB>argv…`. Each line becomes a `Desk · <label>` entry in the Commands menu. Choosing one saves state, releases the terminal (mouse, paste and enhanced-key modes, graphics), runs that argv directly on the same terminal with no shell, then restores the modes and repaints. The Harbor process, chats, drafts, cursors, reply/edit context and reading positions are untouched. A failed, interrupted or missing child is reported in the status line. `/` opens Commands from an empty draft; Ctrl+O opens the same menu from any draft and leaves it unchanged. Without the variable Harbor has no Desk entries.
+Started by Office Desk, Harbor receives `HARBOR_DESK_COMMANDS`, a file of tab-separated lines `label<TAB>hint<TAB>argv0<TAB>argv…`. Each line becomes a `Desk · <label>` entry in the Commands menu. Choosing one saves state, releases the terminal (mouse, paste and enhanced-key modes, graphics), runs that argv directly on the same terminal with no shell, then restores the modes and repaints. The Harbor process, chats, drafts, cursors, reply/edit context and reading positions are untouched. A child that could not start or exited non-zero leaves its own output on screen until a key (`press any key to return to Harbor`); an interrupted child (Ctrl+C) returns at once. Each outcome is also reported in the status line. `/` opens Commands from an empty draft; Ctrl+O opens the same menu from any draft and leaves it unchanged. Without the variable Harbor has no Desk entries.
 
 ## Upstream and license
 
