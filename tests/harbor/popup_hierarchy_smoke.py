@@ -51,7 +51,7 @@ def check_options(cells, options, selected, compact=False, surfaces=True):
         assert text(y + 1, left + 4, len(shown)) == shown, f'description of {label!r} missing'
         body = cells[y + 1][left + 4:left + 4 + len(shown)]
         assert not any(c[3] for c in body), f'description of {label!r} is bold'
-        assert (cells[y + 1][left + 1][0] == MARKER) == is_selected, f'description marker wrong on {label!r}'
+        assert cells[y + 1][left + 1][0] == ' ', f'description of {label!r} has a second selection marker'
         assert cells[y + 1][right][0] == '│', f'description of {label!r} overran the border'
         assert not surfaces or body[0][1] != title[0][1], f'description of {label!r} is not muted'
         assert all(c[2] == cells[y][left + 2][2] for c in body), f'description of {label!r} lost the row surface'
@@ -89,6 +89,17 @@ if __name__ == '__main__':
                 print(f'PASS {cols}x{rows} bold titles, muted indented descriptions, marked selected surface')
             finally:
                 t.close()
+        # Exercise ncurses' actual non-256-colour fallback: hierarchy must survive
+        # without distinct selected/background surfaces or a muted colour pair.
+        t = Terminal(cols=48, rows=38, extra_env={'TERM': 'xterm', 'HARBOR_DESK_COMMANDS': str(commands)})
+        try:
+            t.send(b'\x0f'); t.expect('Commands & shortcuts')
+            check_options(pyte_cells(t.screen), options, 'Desk · Everything', surfaces=False)
+            t.send(b'\x1b[B'); t.send(b'\x1b[B')
+            check_options(pyte_cells(t.screen), options, 'More message tools', surfaces=False)
+            print('PASS xterm 8-colour fallback retains title/hint weights, indent and title-only selection marker')
+        finally:
+            t.close()
         # Exercise the actual mouse hit target, compact menu navigation and picker.
         t = Terminal(cols=48, rows=38, extra_env={'HARBOR_DESK_COMMANDS': str(commands)})
         try:

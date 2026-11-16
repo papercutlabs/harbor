@@ -2513,7 +2513,7 @@ Harbor::DrawMenu()
     for (int line = row; line < row + stride; ++line)
     {
       Text(line, x + 1, width - 2, L"", color);
-      if (selected && !picker)
+      if (selected && !picker && line == row)
         Text(line, x + 1, 1, L"›", LinkSelected, true);
     }
     if (picker)
