@@ -108,10 +108,10 @@ if __name__ == '__main__':
             # Compact options still have bold titles and a single full-width selected surface.
             cells = pyte_cells(t.screen)
             top, left, width = find_dialog(cells)
-            labels = [('Edit message', ''), ('React with a heart', ''), ('Delete message', '')]
+            labels = [('Edit message', ''), ('React…', ''), ('Delete message', '')]
             check_options(cells, labels, 'Edit message', compact=True)
             t.send(b'\x1b[B')
-            check_options(pyte_cells(t.screen), labels, 'React with a heart', compact=True)
+            check_options(pyte_cells(t.screen), labels, 'React…', compact=True)
             t.send(b'\x1b'); t.send(b'\x0b'); t.expect('Find a conversation')
             cells = pyte_cells(t.screen)
             top, left, width = find_dialog(cells)
