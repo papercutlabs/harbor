@@ -62,7 +62,9 @@ enum
   EmphasisSelected,
   Dialog,
   DialogBorder,
-  Backdrop
+  Backdrop,
+  DialogMuted,
+  SelectedMuted
 };
 enum
 {
@@ -412,6 +414,9 @@ Harbor::Init()
   pair(Dialog, 17, 25);
   pair(DialogBorder, 19, 25);
   pair(Backdrop, 26, 16);
+  // Option descriptions use the muted foreground on the dialog and selection surfaces.
+  pair(DialogMuted, 18, 25);
+  pair(SelectedMuted, 18, 23);
   if (!HarborInputStart())
   {
     endwin();
@@ -1920,10 +1925,14 @@ Harbor::DeskOptions()
     if (fields.size() < 3 || fields[0].empty() || fields[2].empty())
       continue;
     std::vector<std::string> argv(fields.begin() + 2, fields.end());
-    options.push_back({ "Desk · " + fields[0], fields[1], [this, argv]
+    const std::string shortcut = fields[0] == "Everything" ? "e · " : fields[0] == "Quota" ? "q · " : fields[0] == "Focus" ? "f · " : "";
+    options.push_back({ "Desk · " + fields[0], shortcut + fields[1], [this, argv, label = fields[0]]
                         {
                           CloseMenu();
-                          DeskHandoff(argv);
+                          if (DeskHandoff(argv) && label == "Focus")
+                            for (const auto& option : DeskOptions())
+                              if (option.label == "Desk · Focus")
+                                Notify(option.hint);
                         } });
   }
   return options;
@@ -2012,7 +2021,7 @@ Harbor::DeskFailurePause(const std::string& reason)
   if (flags >= 0)
     fcntl(STDIN_FILENO, F_SETFL, flags);
 }
-void
+bool
 Harbor::DeskHandoff(const std::vector<std::string>& argv)
 {
   // The Desk view runs on this same terminal while this process, its chats, drafts and reading positions stay as they are.
@@ -2069,6 +2078,7 @@ Harbor::DeskHandoff(const std::vector<std::string>& argv)
     Notify("Desk exited " + std::to_string(WEXITSTATUS(status)) + " · draft kept");
   else
     Notify("Back from Desk");
+  return spawned == 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 void
 Harbor::Actions(bool minimal)
@@ -2492,24 +2502,35 @@ Harbor::DrawMenu()
        i < int(m_Options.size()) && row < y + height - (picker ? 3 : 2) && i < m_MenuOffset + maxItems;
        i++, row += stride)
   {
+    // Titles are always bold; descriptions are muted and indented beneath them.
+    // The selected option fills the dialog's inner width on every row it occupies
+    // and carries a selection arrow, which stays visible when colors fall back
+    // to the terminal default.
     auto label = W(m_Options[i].label);
-    const int color = i == m_Option ? Selected : Dialog;
+    const bool selected = i == m_Option;
+    const int color = selected ? Selected : Dialog;
+    const int quiet = selected ? SelectedMuted : DialogMuted;
+    for (int line = row; line < row + stride; ++line)
+    {
+      Text(line, x + 1, width - 2, L"", color);
+      if (selected && !picker && line == row)
+        Text(line, x + 1, 1, L"›", LinkSelected, true);
+    }
     if (picker)
     {
-      label = (i == m_Option ? L"› " : L"  ") + label;
+      label = (selected ? L"› " : L"  ") + label;
       const auto right = W((m_Options[i].hint.empty() ? "  " : "● ") + m_Options[i].time);
       int reserve = std::max(7, Width(right));
       int room = std::max(1, width - 6 - reserve);
-      Text(row, x + 2, width - 4, L"", color);
-      Text(row, x + 2, room, label, color, i == m_Option);
+      Text(row, x + 2, room, label, color, true);
       if (width >= 60 && room - Width(label) >= 14 && !m_Options[i].preview.empty())
-        Text(row, x + 4 + Width(label), room - Width(label) - 2, W(m_Options[i].preview), color);
-      Text(row, x + width - 2 - reserve, reserve, right, color);
+        Text(row, x + 4 + Width(label), room - Width(label) - 2, W(m_Options[i].preview), quiet);
+      Text(row, x + width - 2 - reserve, reserve, right, quiet);
     }
     else
-      Text(row, x + 2, width - 4, label, color, i == m_Option);
+      Text(row, x + 2, width - 4, label, color, true);
     if (!compact)
-      Text(row + 1, x + 3, width - 5, W(m_Options[i].hint), Dialog);
+      Text(row + 1, x + 4, width - 6, W(m_Options[i].hint), quiet);
     m_Hits.push_back({ row, x + 2, width - 4, "option", std::to_string(i) });
   }
   Text(y + height - 2,
@@ -2545,6 +2566,16 @@ Harbor::KeyPress(wint_t k)
   {
     if (!m_Menu.empty())
     {
+      if (m_Menu == "commands" && (k == 'e' || k == 'q' || k == 'f'))
+      {
+        const std::string label = k == 'e' ? "Desk · Everything" : k == 'q' ? "Desk · Quota" : "Desk · Focus";
+        for (size_t i = 0; i < m_Options.size(); ++i)
+          if (m_Options[i].label == label)
+          {
+            Choose(int(i));
+            return;
+          }
+      }
       if (m_Menu == "attachments")
       {
         Insert(std::wstring(1, wchar_t(k)));
@@ -2885,6 +2916,9 @@ Harbor::ReadInput()
       key = FindKey;
       m_KeyIsSpecial = true;
     }
+    // Exact decoded Super-O (32) opens Commands; existing Ctrl combinations keep their previous behavior.
+    else if (event.mods == 32 && event.code == 'o')
+      key = 15;
     else if ((event.mods & 4) && event.code >= 'a' && event.code <= 'z')
       key = event.code - 'a' + 1;
     else if (event.mods & (2 | 4 | 8 | 32))
