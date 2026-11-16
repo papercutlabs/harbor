@@ -31,6 +31,21 @@ Harbor is the native Telegram TUI in this nchat fork. It shares nchat's Telegram
 | Older/newer history | PageUp/PageDown or mouse wheel |
 | Follow latest | Ctrl+G |
 | Refresh active conversation | Ctrl+R |
+| Copy a code block exactly | Message actions → Copy code (a chooser when there are several) |
+| Visit the replied-to message | Message actions → Go to replied message; Commands → Return to previous position |
+| Search this conversation or topic | Commands → Search or pinned messages; type, then Enter (searches Telegram) |
+| Visit pinned messages | Commands → Search or pinned messages → Pinned messages (opening never pins or unpins) |
+| React, open links, spoilers, quotes | More message tools → React…, Open a link…, Reveal spoiler, Expand quote |
+
+## Formatting
+
+Telegram messages keep their original text and formatting ranges (TDLib UTF-16 offsets) beside nchat's Markdown-style text, so Harbor shows bold, italic, underline, strikethrough, code, block and expandable quotes, spoilers and named links without guessing from markup. A Telegram message without formatting shows literal text, stars and backticks included. Older cached messages without ranges use the previous Markdown reading. Code blocks get a small `‹language›` header; whole-message and code copies never include headers, quote bars or line wrapping. Spoilers show as `▒` until Reveal spoiler, also in previews and reply excerpts. Strikethrough uses a combining long-stroke overlay because ncurses has no strike attribute; `HARBOR_STRIKE=dim` selects a dimmed fallback. The overlay is a Unicode fallback, not a terminal strike capability: how it looks depends on the font, and with `HARBOR_STRIKE=dim` struck text takes the dimmed metadata colour instead of its link or code colour. Tabs inside code display as one space in the conversation; copies keep the original tabs. Forwarding uses the decoded message text (never markup) and refuses while a spoiler is hidden. Picker previews of native messages are shown literally.
+
+Cache schema 13 adds a nullable `messages.richText` column (`ALTER TABLE … ADD COLUMN`). Existing rows are kept and read as before. An older Harbor or nchat reading a schema 13 cache selects named columns, so it ignores the new column and logs only its usual newer-schema notice. Drafts live in Harbor's separate state file and are untouched.
+
+Schema 13 is a Harbor-owned number: upstream nchat stops at 12 and may assign its own 13 later. To reconcile with a future upstream schema, keep the change additive and check the column before adding it; the 12→13 step already checks `pragma_table_info('messages')` for `richText`, so it is idempotent and can be renumbered after upstream's own steps without breaking existing caches.
+
+Live edits re-fetch the message with `sequence=false`, and the message cache does not store such results, so a cached edited message keeps its pre-edit text and richText (the pair stays consistent) until an in-sequence re-fetch replaces both. This gap is pre-existing for text and outside this change; live edit caching is not fixed here.
 
 Forum topics appear alongside ordinary chats as `Group > Topic`. Option+K searches both parts of the name, retains pin ordering, and shows actual last-message times. Previews are shown only where the row has room. Topics open directly and retain independent drafts and history.
 
@@ -52,10 +67,14 @@ Native PTY checks run against the offline demo protocol, with temporary account 
 
 - `tests/harbor/topics_picker_smoke.py`: topics, history/draft/send isolation, pin-first ordering, timestamps/previews, arrow encodings, and stable selection during live updates.
 - `harbor-forum-test`: actual TDLib forum-history and send-topic request fields.
+- `harbor-richtext-producer-test`: actual td_api entities through mention expansion (the shared ProcessMentionEntities helper), the native conversion, the stored encoding and the renderer; the legacy `getMarkdownText` text is unchanged.
+- `harbor-format-test`, `harbor-cache-richtext-test`: UTF-16 ranges, literal zero-entity text, malformed ranges, code/link/spoiler/quote handling; additive cache migration, in-sequence re-fetch (not live edits) and restart reload through MessageCache; the cache test needs SQLite >= 3.35 for `DROP COLUMN`.
+- `tests/harbor/rich_actions_smoke.py`: native formatting at 56 and 110 columns (targets brought into view with PageUp/PageDown, no larger screen), strike overlay, wrapping at 56 columns, drag copy without code headers, concealed spoilers in reply excerpts and picker previews, code/text copies into a private clipboard file, link chooser, reply visit/return, immediate explicit original failure (`HARBOR_DEMO_FETCH_ERROR=1`) without a stale return mark, search and pins (including failures and topic identity), reactions and stale replies, all with drafts kept. `HARBOR_TEST_EVENT_LOG` records search reply receipt, mouse deferral and acceptance or the reason a reply was ignored; the demo request log records each delayed search emission.
+- `tests/harbor/run_checks.py` runs the lanes of `tests/harbor/check_inventory.json` in order and stops at the first failure: static, format, producer, cache, media, input_decoding (`go test` in `src/harbor/input`), native_smoke, formatting, right_click, restart_position, draft_scroll, send_replacement, rich, selection, desk, topics. `HARBOR_CHECK_LANE` selects one. It never builds; it prints each binary's path, size, mtime and sha256 first, so rebuild before running. The producer lane is reported SKIP, with its reason, only in a build tree without a Telegram backend.
 - `tests/harbor/native_smoke.py`: interaction, drafts, restarts, recovery, incoming replies, media actions, graphics transfers, setup protection.
 - `tests/harbor/refinement_smoke.py`: modified Return, word wrapping/cursor geometry, padding-era layout, outside dismissal, editable captions.
 - `tests/harbor/word_delete_smoke.py`: legacy/enhanced Option+Backspace, Ctrl+W, Unicode, cursor-position edits, captions.
-- `tests/harbor/right_click_smoke.py`: three-action context menu, reply/forward/copy, quiet left-click, and unchanged drafts.
+- `tests/harbor/right_click_smoke.py`: primary-action context menu (React…, links, spoiler and quote actions stay in Message tools, which is checked to offer them), reply/forward/copy, quiet left-click, and unchanged drafts.
 - `tests/harbor/selection_smoke.py`: SGR drag/release copying, wrapping, multiple messages, Unicode, and a private test clipboard.
 - `tests/harbor/graphics_smoke.py`: decoded portrait PNG proportions, letterboxing, source cropping during scrolling.
 - `harbor-media-test`: subprocess quoting/timeouts, file parsing, image/video decoding and actual voice playback/pause. Its optional clipboard test uses a named test pasteboard.

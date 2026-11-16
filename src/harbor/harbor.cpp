@@ -239,6 +239,19 @@ Receipt(bool read)
                          (program && (std::string(program) == "ghostty" || std::string(program) == "cmux"));
   return read ? (nerd ? u8" \U000f012d" : " read") : (nerd ? u8" \U000f012c" : " ✓");
 }
+// Offline diagnostic recorder: HARBOR_TEST_EVENT_LOG names a file that receives one line per traced
+// step of an asynchronous reply (receipt on the protocol thread, deferral, application or the reason
+// it was ignored). Unset, nothing is written.
+void
+TestTrace(const std::string& line)
+{
+  static const char* path = getenv("HARBOR_TEST_EVENT_LOG");
+  if (!path)
+    return;
+  static std::mutex mutex;
+  std::lock_guard<std::mutex> lock(mutex);
+  std::ofstream(path, std::ios::app) << TimeUtil::GetCurrentTimeMSec() << ' ' << line << "\n";
+}
 bool
 File(const std::string& p)
 {
@@ -281,6 +294,25 @@ Size(const std::string& p)
   if (stat(p.c_str(), &st))
     return "unavailable";
   return FileUtil::GetSuffixedSize(st.st_size);
+}
+
+bool
+StrikeDim()
+{
+  static const bool dim = [] {
+    const char* choice = getenv("HARBOR_STRIKE");
+    return choice && std::string(choice) == "dim";
+  }();
+  return dim;
+}
+// The oldest message of the contiguously loaded history, skipping out-of-sequence visits.
+std::string
+Contiguous(const std::vector<std::string>& order, const std::set<std::string>& detached)
+{
+  for (const auto& id : order)
+    if (!detached.count(id))
+      return id;
+  return order.empty() ? std::string() : order.front();
 }
 }
 
@@ -343,6 +375,8 @@ Harbor::Protocols()
 void
 Harbor::Receive(std::shared_ptr<ServiceMessage> e)
 {
+  if (e->GetMessageType() == SearchMessagesNotifyType)
+    TestTrace("receive search token=" + std::to_string(std::static_pointer_cast<SearchMessagesNotify>(e)->token));
   std::lock_guard<std::mutex> lock(m_Mutex);
   m_Events.push_back(e);
 }
@@ -452,10 +486,16 @@ void
 Harbor::Run()
 {
   int64_t lastSave = 0;
+  bool deferring = false;
   while (m_Running && !AppUtil::IsTerminateRequested())
   {
     if (!m_MouseDown)
       ProcessEvents();
+    if (m_MouseDown != deferring)
+    {
+      deferring = m_MouseDown;
+      TestTrace(deferring ? "defer events: mouse down" : "resume events");
+    }
     if (m_AuthSuspended)
     {
       TimeUtil::Sleep(.02);
@@ -476,6 +516,7 @@ Harbor::Run()
     if (auto* c = Current())
       if (c->historyRetryAt && c->historyStalls < 3 && now >= c->historyRetryAt)
         m_Dirty = true;
+    Timeouts(now);
     if (now - lastSave > 2000)
     {
       SaveState();
@@ -594,6 +635,16 @@ Harbor::SaveState()
         saved.restoreOffset = c.second.scroll - first;
       }
     }
+    if (c.second.back.set)
+    {
+      // a visit is transient: a restart resumes the reading position the user left for it
+      const auto& mark = c.second.back;
+      saved.scroll = mark.scroll;
+      saved.follow = mark.follow;
+      saved.selected = mark.selected;
+      saved.restoreAnchor = mark.follow ? std::string() : mark.anchor;
+      saved.restoreOffset = mark.offset;
+    }
   }
   std::ostringstream out;
   out << "active " << StrUtil::StrToHex(m_RestoreChat.empty() ? m_Current : m_RestoreChat) << '\n';
@@ -649,20 +700,28 @@ Harbor::SortChats()
             });
 }
 void
-Harbor::Merge(Conversation& c, const std::vector<ChatMessage>& messages)
+Harbor::Merge(Conversation& c, const std::vector<ChatMessage>& messages, bool outOfSequence)
 {
   const int64_t previousLatest = c.order.empty() ? -1 : c.messages[c.order.back()].timeSent;
+  const auto oldest = Contiguous(c.order, c.detached);
+  const int64_t previousOldest = oldest.empty() ? -1 : c.messages[oldest].timeSent;
   for (const auto& m : messages)
   {
     if (!c.follow && !m.isOutgoing && m.timeSent > previousLatest && !c.messages.count(m.id))
       c.unseen++;
+    if (!outOfSequence)
+      c.detached.erase(m.id);
+    else if (!c.messages.count(m.id) && previousOldest >= 0 && m.timeSent < previousOldest)
+      c.detached.insert(m.id);
     c.messages[m.id] = m;
     c.last = std::max(c.last, m.timeSent);
     if (m.timeSent >= c.actualLast)
     {
       c.actualLast = m.timeSent;
-      c.preview =
-        (m.isOutgoing ? "You: " : "") + (m.text.empty() && !m.fileInfo.empty() ? "Attachment" : m.text);
+      const bool attachment = m.text.empty() && !m.fileInfo.empty();
+      RichText::Message decoded;
+      c.previewNative = !attachment && RichText::Decode(m.richText, decoded);
+      c.preview = (m.isOutgoing ? "You: " : "") + (attachment ? "Attachment" : RichText::Preview(m.richText, m.text));
     }
   }
   c.order.clear();
@@ -729,7 +788,10 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
         {
           c.actualLast = actual;
           if (!info.lastMessageText.empty())
+          {
             c.preview = info.lastMessageText;
+            c.previewNative = info.lastMessageNative;
+          }
         }
         c.unread = info.isUnread;
         if (c.loaded && m_Current == Key(p, info.id) && !c.order.empty() &&
@@ -751,7 +813,7 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
     {
       auto n = std::static_pointer_cast<NewMessagesNotify>(e);
       auto& c = Ensure(p, n->chatId);
-      const auto oldest = c.order.empty() ? std::string() : c.order.front();
+      const auto oldest = Contiguous(c.order, c.detached);
       int previousRows = 0;
       const bool older = n->sequence && !n->fromMsgId.empty();
       if (older && !c.follow && m_Current == Key(p, c.id))
@@ -759,9 +821,16 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
         BuildRows();
         previousRows = int(m_Rows.size());
       }
-      Merge(c, n->chatMessages);
+      Merge(c, n->chatMessages, !n->sequence);
       if (n->success)
         c.loaded = true;
+      // an original arriving after the user left its conversation is not kept above loaded history
+      if (!n->sequence && m_Current != Key(p, c.id) && !c.back.set)
+        DropDetached(c);
+      // an explicit failure of the single-message fetch answers a pending visit at once
+      if (!n->sequence && !n->success && n->chatMessages.empty() && !c.visit.empty() && c.visitUntil &&
+          m_Current == Key(p, c.id))
+        VisitFailed(c);
       if (n->sequence)
       {
         c.fetching = false;
@@ -774,7 +843,7 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
         }
         if (n->success && older && n->chatMessages.empty())
           c.more = false;
-        if (older && !n->chatMessages.empty() && !c.order.empty() && c.order.front() == oldest)
+        if (older && !n->chatMessages.empty() && !c.order.empty() && Contiguous(c.order, c.detached) == oldest)
         {
           ++c.historyStalls;
           c.historyRetryAt = TimeUtil::GetCurrentTimeMSec() + 250 * c.historyStalls;
@@ -790,6 +859,9 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
         BuildRows();
         c.scroll += std::max(0, int(m_Rows.size()) - previousRows);
       }
+      // after the history scroll adjustment, so a page landing with the original does not move it
+      if (!c.visit.empty() && c.messages.count(c.visit) && m_Current == Key(p, c.id))
+        Visit(m_Current, c.visit);
       break;
     }
     case SendMessageNotifyType:
@@ -895,6 +967,12 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
       }
       break;
     }
+    case SearchMessagesNotifyType:
+      SearchResults(std::static_pointer_cast<SearchMessagesNotify>(e));
+      break;
+    case AvailableReactionsNotifyType:
+      ReactionResults(std::static_pointer_cast<AvailableReactionsNotify>(e));
+      break;
     case RequestAppExitNotifyType:
       m_Running = false;
       break;
@@ -917,7 +995,7 @@ Harbor::Fetch(Conversation& c, bool older, bool automatic)
   r->chatId = c.id;
   r->limit = 50;
   if (older && !c.order.empty())
-    r->fromMsgId = c.order.front();
+    r->fromMsgId = Contiguous(c.order, c.detached);
   c.fetching = true;
   Request(c.profile, r);
 }
@@ -943,6 +1021,19 @@ Harbor::OpenChat(const std::string& key)
     }
   }
   m_MouseDown = m_MouseDragging = m_HasSelection = false;
+  if (auto* previous = Current(); previous && m_Current != key)
+  {
+    // a pending visit belongs to the conversation being left: its original may still arrive and
+    // stay loaded, but it is neither shown later nor reported unavailable there
+    previous->visit.clear();
+    previous->visitUntil = 0;
+    if (previous->back.set && !previous->back.landed)
+      previous->back = Conversation::Mark();
+    if (!previous->back.set)
+      DropDetached(*previous);
+  }
+  if (m_Current != key)
+    m_Search = m_Reactions = Pending();
   m_Current = key;
   m_RestoreChat.clear();
   auto& c = it->second;
@@ -981,6 +1072,7 @@ Harbor::BuildRows()
 {
   m_Rows.clear();
   m_CopyTexts.clear();
+  m_CopyDecor.clear();
   auto* c = Current();
   if (!c)
     return;
@@ -988,6 +1080,9 @@ Harbor::BuildRows()
   std::string previousDay;
   for (const auto& id : c->order)
   {
+    // Keep fetched originals for reply excerpts, but only draw detached history during a visit.
+    if (c->detached.count(id) && !c->back.set)
+      continue;
     const auto& m = c->messages[id];
     time_t date = m.timeSent / 1000;
     struct tm calendar;
@@ -1008,12 +1103,23 @@ Harbor::BuildRows()
     int room = std::max(1, width - Width(right) - 1);
     m_Rows.push_back({ Pad(left, room) + L" " + right, id, m.isOutgoing, true });
     if (!m.quotedId.empty())
-      m_Rows.push_back(
-        { L"│ " + W(m.quotedText.empty() ? "Reply to a message" : m.quotedText), id, m.isOutgoing, false });
-    if (!m.text.empty())
     {
-      auto formatted = HarborFormatting::Parse(Safe(W(m.text)));
+      auto quoted = c->messages.find(m.quotedId);
+      ChatMessage local;
+      local.text = m.quotedText;
+      std::wstring excerpt = quoted != c->messages.end() ? Excerpt(*c, quoted->second)
+                             : m.quotedText.empty()       ? L"Reply to a message"
+                                                          : Excerpt(*c, local);
+      int room = std::max(4, width - 2);
+      if (Width(excerpt) > room)
+        excerpt = Pad(excerpt, room - 1) + L"…";
+      m_Rows.push_back({ L"│ " + excerpt, id, m.isOutgoing, false });
+    }
+    if (!m.text.empty() || !m.richText.empty())
+    {
+      auto formatted = Format(*c, m);
       m_CopyTexts[id] = formatted.text;
+      m_CopyDecor[id] = formatted.decor;
       auto layout = Layout(formatted.text, width);
       std::map<std::pair<int, int>, unsigned> styles;
       for (size_t i = 0; i < formatted.text.size(); ++i)
@@ -1245,11 +1351,8 @@ Harbor::Draw()
           }
           if (style & Underline)
             attr |= A_UNDERLINE;
-          if (style & Strike)
-          {
+          if (style & Spoiler)
             pair = selected ? Selected : row.sent ? MetadataOut : Metadata;
-            attr |= A_DIM;
-          }
 #ifdef A_ITALIC
           if (style & Italic)
             attr |= A_ITALIC;
@@ -1258,7 +1361,21 @@ Harbor::Draw()
             attr |= A_UNDERLINE;
 #endif
           attrset(COLOR_PAIR(pair) | attr);
-          mvaddnwstr(y, x + 2 + col, &row.text[j], 1);
+          if ((style & Strike) && Width(row.text[j]) > 0 && row.text[j] != L' ' && !StrikeDim())
+          {
+            // ncurses has no strikethrough attribute; a combining long stroke overlay is visible
+            // in ordinary terminals. HARBOR_STRIKE=dim selects the dimmed fallback instead.
+            wchar_t struck[] = { row.text[j], L'\u0336', 0 };
+            cchar_t cell;
+            setcchar(&cell, struck, attr, short(pair), nullptr);
+            mvadd_wch(y, x + 2 + col, &cell);
+          }
+          else
+          {
+            if (style & Strike)
+              attrset(COLOR_PAIR(selected ? Selected : row.sent ? MetadataOut : Metadata) | attr | A_DIM);
+            mvaddnwstr(y, x + 2 + col, &row.text[j], 1);
+          }
           col += Width(row.text[j]);
         }
       }
@@ -1589,6 +1706,7 @@ Harbor::Send()
       m = original->second;
   }
   m.text = S(c->draft);
+  m.richText.clear();
   m.quotedId = c->reply;
   if (!c->reply.empty())
   {
@@ -1690,13 +1808,14 @@ Harbor::RebuildPicker(bool preserveSelection)
                             if (forward)
                             {
                               auto message = m_ForwardMessage;
+                              auto body = m_ForwardText;
                               std::string source = Name(m_ForwardProfile, message.senderId);
                               CloseMenu();
                               OpenChat(key);
                               auto* target = Current();
                               if (target)
                               {
-                                std::wstring draft = L"Forwarded from " + W(source) + L"\n" + W(message.text);
+                                std::wstring draft = L"Forwarded from " + W(source) + L"\n" + body;
                                 if (!message.fileInfo.empty())
                                 {
                                   auto f = ProtocolUtil::FileInfoFromHex(message.fileInfo);
@@ -1728,7 +1847,9 @@ Harbor::RebuildPicker(bool preserveSelection)
                           } });
     m_Options.back().key = key;
     m_Options.back().time = PickerTime(c.actualLast);
-    m_Options.back().preview = S(Safe(HarborFormatting::Parse(W(c.preview)).text));
+    // a native preview is already plain, concealed text; only legacy markup is parsed
+    m_Options.back().preview =
+      S(Safe(c.previewNative ? W(c.preview) : HarborFormatting::Parse(W(c.preview)).text));
   }
   if (!selected.empty())
     for (size_t i = 0; i < m_Options.size(); ++i)
@@ -1791,6 +1912,7 @@ Harbor::Commands()
   m_MenuOffset = 0;
   m_Options = {
     { "More message tools", "For the selected message", [this] { Actions(false); } },
+    { "Search or pinned messages", "Searches Telegram, not just loaded messages", [this] { SearchPrompt(); } },
     { "Find a conversation", "⌥K / Ctrl+K", [this] { ChatPicker(); } },
     { "Jump to latest messages",
       "Ctrl+G",
@@ -1900,6 +2022,15 @@ Harbor::Commands()
     { "Update Harbor", "Restart when an installed update is ready", [this] { UpdatePrompt(); } },
     { "Quit Harbor", "Ctrl+Q", [this] { m_Running = false; } }
   };
+  if (auto* c = Current(); c && c->back.set)
+    m_Options.insert(m_Options.begin() + 1,
+                     { "Return to previous position",
+                       "Back from a reply, search result or pin",
+                       [this]
+                       {
+                         CloseMenu();
+                         ReturnBack();
+                       } });
   auto desk = DeskOptions();
   m_Options.insert(m_Options.begin(), desk.begin(), desk.end());
   m_Dirty = true;
@@ -2122,23 +2253,47 @@ Harbor::Actions(bool minimal)
                             BeginEdit(*target, id);
                             m_Browse = false;
                           } });
+  const auto formatted = Format(*c, message);
+  // the forwarded body is the decoded native text, never markup; a hidden spoiler is not forwarded
+  // until the user reveals it, so neither its secret nor ▒ placeholders reach the composer
+  const bool hiddenSpoiler = formatted.spoilers && !c->revealed.count(id);
+  const std::wstring forwardText = formatted.native ? formatted.copy : W(message.text);
   m_Options.push_back({ "Forward",
                         "Choose a destination",
-                        [this, message, key]
+                        [this, message, key, hiddenSpoiler, forwardText]
                         {
+                          if (hiddenSpoiler)
+                          {
+                            CloseMenu();
+                            Notify("Reveal the spoiler before forwarding · nothing was forwarded");
+                            return;
+                          }
                           m_ForwardMessage = message;
+                          m_ForwardText = forwardText;
                           m_ForwardProfile = m_Chats[key].profile;
                           m_ForwardChat = m_Chats[key].id;
                           ChatPicker(true);
                         } });
   m_Options.push_back({ "Copy text",
                         "",
-                        [this, message]
+                        [this, formatted]
                         {
-                          m_Media->CopyText(message.text);
                           CloseMenu();
-                          Notify("Copied");
+                          Notify(m_Media->CopyText(S(formatted.copy)) ? "Copied" : "Could not copy");
                         } });
+  if (!formatted.codes.empty())
+    m_Options.push_back({ formatted.codes.size() == 1 ? "Copy code" : "Copy code…",
+                          formatted.codes.size() == 1 ? "Exact contents, no markup"
+                                                      : std::to_string(formatted.codes.size()) + " blocks",
+                          [this, key, id] { CodeChooser(key, id); } });
+  if (!message.quotedId.empty())
+    m_Options.push_back({ "Go to replied message",
+                          "Commands › Return goes back",
+                          [this, key, id = message.quotedId]
+                          {
+                            CloseMenu();
+                            Visit(key, id);
+                          } });
   if (!message.fileInfo.empty())
     m_Options.push_back({ "Open / play attachment",
                           "Images preview inline",
@@ -2147,11 +2302,9 @@ Harbor::Actions(bool minimal)
                             CloseMenu();
                             OpenAttachment(m_Chats[key].profile, m_Chats[key].id, id, true);
                           } });
-  auto link = std::regex("https?://[^\\s<>]+");
-  std::smatch match;
-  if (std::regex_search(message.text, match, link))
+  if (formatted.links.size() == 1)
   {
-    std::string url = match.str();
+    std::string url = S(formatted.links.front().arg);
     m_Options.push_back({ "Open link",
                           url,
                           [this, url]
@@ -2160,19 +2313,33 @@ Harbor::Actions(bool minimal)
                             m_Media->Open(url);
                           } });
   }
-  m_Options.push_back({ "React with a heart",
-                        "",
-                        [this, key, id, message]
-                        {
-                          auto r = std::make_shared<SendReactionRequest>();
-                          auto& target = m_Chats[key];
-                          r->chatId = target.id;
-                          r->msgId = id;
-                          r->senderId = message.senderId;
-                          r->emoji = "❤";
-                          Request(target.profile, r);
-                          CloseMenu();
-                        } });
+  else if (formatted.links.size() > 1)
+    m_Options.push_back({ "Open a link…",
+                          std::to_string(formatted.links.size()) + " destinations",
+                          [this, key, id] { LinkChooser(key, id); } });
+  if (formatted.spoilers)
+    m_Options.push_back({ c->revealed.count(id) ? "Hide spoiler" : "Reveal spoiler",
+                          "",
+                          [this, key, id]
+                          {
+                            auto& target = m_Chats[key];
+                            if (!target.revealed.erase(id))
+                              target.revealed.insert(id);
+                            CloseMenu();
+                          } });
+  if (formatted.expandable)
+    m_Options.push_back({ c->expanded.count(id) ? "Collapse quote" : "Expand quote",
+                          "",
+                          [this, key, id]
+                          {
+                            auto& target = m_Chats[key];
+                            if (!target.expanded.erase(id))
+                              target.expanded.insert(id);
+                            CloseMenu();
+                          } });
+  m_Options.push_back({ "React…",
+                        "Reactions this message allows",
+                        [this, key, id] { ReactionChooser(key, id); } });
   if (message.isOutgoing)
     m_Options.push_back({ "Delete message",
                           "Confirmation required",
@@ -2200,13 +2367,417 @@ Harbor::Actions(bool minimal)
                                  {
                                    const bool primary = option.label == "Reply" ||
                                                         option.label == "Forward" ||
-                                                        option.label == "Copy text";
+                                                        option.label == "Copy text" ||
+                                                        option.label.rfind("Copy code", 0) == 0 ||
+                                                        option.label == "Go to replied message";
                                    return minimal ? !primary : primary;
                                  }),
                   m_Options.end());
   if (!minimal)
     m_Menu = "message-tools";
   m_Dirty = true;
+}
+HarborFormatting::Text
+Harbor::Format(const Conversation& c, const ChatMessage& m, bool forceConceal) const
+{
+  RichText::Message native;
+  if (RichText::Decode(m.richText, native))
+    return HarborFormatting::Native(native, !forceConceal && c.revealed.count(m.id), c.expanded.count(m.id));
+  return HarborFormatting::Parse(Safe(W(m.text)));
+}
+std::wstring
+Harbor::Excerpt(const Conversation& c, const ChatMessage& m) const
+{
+  // a reply excerpt never reveals a spoiler or prints a whole code block
+  auto text = Format(c, m, true).copy;
+  for (auto& ch : text)
+    if (ch == L'\n' || ch == L'\t')
+      ch = L' ';
+  text = Safe(text);
+  if (text.empty())
+    return m.fileInfo.empty() ? L"Reply to a message" : L"Attachment";
+  return text;
+}
+void
+Harbor::Remember(Conversation& c)
+{
+  if (c.back.set)
+    return;
+  c.back.set = true;
+  c.back.follow = c.follow;
+  c.back.browse = m_Browse;
+  c.back.selected = c.selected;
+  c.back.scroll = c.scroll;
+  c.back.anchor.clear();
+  c.back.offset = 0;
+  if (!c.follow)
+  {
+    BuildRows();
+    int row = c.scroll;
+    while (row < int(m_Rows.size()) && m_Rows[row].id.empty())
+      ++row;
+    if (row < int(m_Rows.size()))
+    {
+      c.back.anchor = m_Rows[row].id;
+      int first = row;
+      while (first > 0 && m_Rows[first - 1].id == c.back.anchor)
+        --first;
+      c.back.offset = c.scroll - first;
+    }
+  }
+}
+void
+Harbor::Visit(std::string key, std::string id)
+{
+  auto it = m_Chats.find(key);
+  if (it == m_Chats.end() || id.empty())
+    return;
+  if (m_Current != key)
+    OpenChat(key);
+  auto& c = it->second;
+  Remember(c);
+  if (!c.messages.count(id) || c.messages[id].isDeleted)
+  {
+    if (c.visit == id && c.visitUntil)
+      return;
+    // an unloaded original: ask the cache, then Telegram; Visit runs again when it arrives
+    c.visit = id;
+    c.visitUntil = TimeUtil::GetCurrentTimeMSec() + 12000;
+    auto request = std::make_shared<GetMessageRequest>();
+    request->chatId = c.id;
+    request->msgId = id;
+    Request(c.profile, request);
+    Notify("Loading the original message…");
+    return;
+  }
+  c.visit.clear();
+  c.visitUntil = 0;
+  c.back.landed = true;
+  c.restoreAnchor.clear();
+  c.selected = id;
+  Select(0);
+  Notify("Showing the message · / or Ctrl+O → Return to previous position");
+}
+void
+Harbor::ReturnBack()
+{
+  auto* c = Current();
+  if (!c || !c->back.set)
+    return;
+  auto mark = c->back;
+  c->back = Conversation::Mark();
+  c->visit.clear();
+  c->visitUntil = 0;
+  c->selected = mark.selected;
+  m_Browse = mark.browse;
+  c->follow = mark.follow;
+  c->scroll = mark.scroll;
+  c->restoreAnchor = mark.follow ? std::string() : mark.anchor;
+  c->restoreOffset = mark.offset;
+  // Keep fetched originals for reply excerpts; BuildRows hides detached rows after this return.
+  m_Dirty = true;
+}
+// Forget out-of-sequence messages (visited originals, search hits) older than loaded history, so
+// none stays drawn above the contiguous rows without a gap; one the user still refers to (selected,
+// anchored, replied to or being edited) stays.
+void
+Harbor::DropDetached(Conversation& c)
+{
+  for (auto it = c.detached.begin(); it != c.detached.end();)
+  {
+    if (*it == c.selected || *it == c.restoreAnchor || *it == c.reply || *it == c.editing)
+    {
+      ++it;
+      continue;
+    }
+    c.messages.erase(*it);
+    it = c.detached.erase(it);
+  }
+  c.order.erase(std::remove_if(c.order.begin(),
+                               c.order.end(),
+                               [&c](const std::string& id) { return !c.messages.count(id); }),
+                c.order.end());
+}
+void
+Harbor::SearchPrompt()
+{
+  m_Menu = "search";
+  m_Filter.clear();
+  m_Option = 0;
+  m_MenuOffset = 0;
+  RebuildSearch();
+}
+void
+Harbor::RebuildSearch()
+{
+  m_Options.clear();
+  auto query = S(m_Filter);
+  if (!query.empty())
+    m_Options.push_back({ "Search for “" + query + "”",
+                          "On Telegram, this conversation or topic",
+                          [this, query] { StartSearch(query, false); } });
+  m_Options.push_back(
+    { "Pinned messages", "Visit pins; nothing is pinned or unpinned", [this] { StartSearch("", true); } });
+}
+void
+Harbor::StartSearch(const std::string& query, bool pinned)
+{
+  auto* c = Current();
+  if (!c)
+    return;
+  m_Search = Pending();
+  m_Search.key = m_Current;
+  m_Search.query = query;
+  m_Search.pinned = pinned;
+  m_Search.token = ++m_Token;
+  m_Search.until = TimeUtil::GetCurrentTimeMSec() + 20000;
+  auto request = std::make_shared<SearchMessagesRequest>();
+  request->chatId = c->id;
+  request->query = query;
+  request->pinned = pinned;
+  request->token = m_Search.token;
+  Request(c->profile, request);
+  m_Menu = "results";
+  m_Filter.clear();
+  m_Option = 0;
+  m_MenuOffset = 0;
+  m_Options = { { pinned ? "Loading pinned messages…" : "Searching Telegram…", "", [] {} } };
+  m_Dirty = true;
+}
+void
+Harbor::SearchResults(std::shared_ptr<SearchMessagesNotify> n)
+{
+  // only the open results view for the same profile, conversation and request uses a reply
+  auto it = m_Chats.find(m_Search.key);
+  const std::string ignored = !m_Search.token                  ? "no pending search"
+                              : n->token != m_Search.token     ? "pending token " + std::to_string(m_Search.token)
+                              : m_Menu != "results"            ? "menu " + m_Menu
+                              : it == m_Chats.end()            ? "conversation gone"
+                              : it->second.profile != n->profileId ? "profile " + n->profileId
+                              : it->second.id != n->chatId     ? "chat " + n->chatId
+                              : m_Current != m_Search.key      ? "current " + m_Current
+                                                               : "";
+  TestTrace("apply search token=" + std::to_string(n->token) +
+            (ignored.empty() ? " accepted" : " ignored: " + ignored));
+  if (!ignored.empty())
+    return;
+  const auto search = m_Search;
+  m_Search.token = 0;
+  m_Search.until = 0;
+  m_Option = 0;
+  m_MenuOffset = 0;
+  m_Options.clear();
+  auto retry = [this, search] { StartSearch(search.query, search.pinned); };
+  if (!n->success)
+  {
+    m_Options.push_back({ "Search failed · Enter to retry",
+                          n->error.empty() ? "Telegram reported an error; no result is implied" : n->error,
+                          retry });
+    m_Options.push_back({ "Close", "", [this] { CloseMenu(); } });
+    return;
+  }
+  if (n->chatMessages.empty())
+  {
+    m_Options.push_back({ search.pinned ? "No pinned messages here" : "No messages match “" + search.query + "”",
+                          "Telegram searched the whole conversation",
+                          [this] { CloseMenu(); } });
+    return;
+  }
+  auto& c = it->second;
+  for (const auto& m : n->chatMessages)
+  {
+    const std::string key = search.key, id = m.id;
+    auto label = Time(m.timeSent) + " " + (m.isOutgoing ? std::string("You") : Name(c.profile, m.senderId)) +
+                 " · " + S(Excerpt(c, m));
+    m_Options.push_back({ label,
+                          PickerTime(m.timeSent),
+                          [this, key, m]
+                          {
+                            CloseMenu();
+                            auto& target = m_Chats[key];
+                            if (!target.messages.count(m.id))
+                              Merge(target, { m }, true);
+                            Visit(key, m.id);
+                          } });
+  }
+  if (n->totalCount > int32_t(n->chatMessages.size()))
+    m_Options.push_back({ "Showing the newest " + std::to_string(n->chatMessages.size()) + " of " +
+                            std::to_string(n->totalCount),
+                          "Refine the search to see older matches",
+                          [this] { CloseMenu(); } });
+}
+void
+Harbor::ReactionChooser(const std::string& key, const std::string& id)
+{
+  auto it = m_Chats.find(key);
+  if (it == m_Chats.end())
+    return;
+  m_Reactions = Pending();
+  m_Reactions.key = key;
+  m_Reactions.msgId = id;
+  m_Reactions.token = ++m_Token;
+  m_Reactions.until = TimeUtil::GetCurrentTimeMSec() + 10000;
+  auto request = std::make_shared<GetAvailableReactionsRequest>();
+  request->chatId = it->second.id;
+  request->msgId = id;
+  Request(it->second.profile, request);
+  m_Menu = "reactions";
+  m_Option = 0;
+  m_MenuOffset = 0;
+  // opening the chooser sends nothing
+  m_Options = { { "Loading reactions…", "", [] {} } };
+  m_Dirty = true;
+}
+void
+Harbor::ReactionResults(std::shared_ptr<AvailableReactionsNotify> n)
+{
+  auto it = m_Chats.find(m_Reactions.key);
+  if (!m_Reactions.token || m_Menu != "reactions" || it == m_Chats.end() || m_Current != m_Reactions.key ||
+      it->second.profile != n->profileId || it->second.id != n->chatId || m_Reactions.msgId != n->msgId)
+    return;
+  const std::string key = m_Reactions.key, id = m_Reactions.msgId;
+  m_Reactions.token = 0;
+  m_Reactions.until = 0;
+  m_Option = 0;
+  m_MenuOffset = 0;
+  m_Options.clear();
+  if (!n->success)
+  {
+    m_Options.push_back({ "Reactions unavailable here", "", [this] { CloseMenu(); } });
+    return;
+  }
+  if (n->emojis.empty())
+  {
+    m_Options.push_back({ "No reactions allowed here", "", [this] { CloseMenu(); } });
+    return;
+  }
+  std::string mine;
+  auto message = it->second.messages.find(id);
+  if (message != it->second.messages.end())
+  {
+    auto own = message->second.reactions.senderEmojis.find(s_ReactionsSelfId);
+    if (own != message->second.reactions.senderEmojis.end())
+      mine = own->second;
+  }
+  for (const auto& emoji : n->emojis)
+    m_Options.push_back({ emoji + (emoji == mine ? "  ✓ remove" : ""),
+                          "",
+                          [this, key, id, emoji, mine]
+                          {
+                            auto& target = m_Chats[key];
+                            auto r = std::make_shared<SendReactionRequest>();
+                            r->chatId = target.id;
+                            r->msgId = id;
+                            auto message = target.messages.find(id);
+                            if (message != target.messages.end())
+                              r->senderId = message->second.senderId;
+                            r->emoji = emoji == mine ? "" : emoji;
+                            r->prevEmoji = mine;
+                            Request(target.profile, r);
+                            CloseMenu();
+                            Notify(emoji == mine ? "Reaction removed" : "Reacted " + emoji);
+                          } });
+}
+void
+Harbor::CodeChooser(const std::string& key, const std::string& id)
+{
+  auto& c = m_Chats[key];
+  auto it = c.messages.find(id);
+  if (it == c.messages.end())
+    return;
+  const auto codes = Format(c, it->second).codes;
+  auto copy = [this](const std::wstring& content)
+  {
+    CloseMenu();
+    Notify(m_Media->CopyText(S(content)) ? "Copied code" : "Could not copy code");
+  };
+  if (codes.size() == 1)
+  {
+    copy(codes.front().content);
+    return;
+  }
+  m_Menu = "code";
+  m_Option = 0;
+  m_MenuOffset = 0;
+  m_Options.clear();
+  for (const auto& code : codes)
+  {
+    auto first = code.content.substr(0, code.content.find(L'\n'));
+    size_t lines = std::count(code.content.begin(), code.content.end(), L'\n') +
+                   (code.content.empty() || code.content.back() != L'\n');
+    m_Options.push_back({ S(Safe(first)),
+                          (code.arg.empty() ? std::string() : S(code.arg) + " · ") + std::to_string(lines) +
+                            (lines == 1 ? " line" : " lines"),
+                          [copy, content = code.content] { copy(content); } });
+  }
+}
+void
+Harbor::LinkChooser(const std::string& key, const std::string& id)
+{
+  auto& c = m_Chats[key];
+  auto it = c.messages.find(id);
+  if (it == c.messages.end())
+    return;
+  const auto formatted = Format(c, it->second);
+  m_Menu = "links";
+  m_Option = 0;
+  m_MenuOffset = 0;
+  m_Options.clear();
+  for (const auto& link : formatted.links)
+  {
+    auto label = formatted.text.substr(link.begin, link.end - link.begin);
+    std::string url = S(link.arg);
+    m_Options.push_back({ S(Safe(label)) + (label == link.arg ? "" : " → " + url),
+                          url,
+                          [this, url]
+                          {
+                            CloseMenu();
+                            m_Media->Open(url);
+                          } });
+  }
+}
+void
+Harbor::Timeouts(int64_t now)
+{
+  if (m_Search.token && m_Search.until && now > m_Search.until)
+  {
+    const auto search = m_Search;
+    m_Search.token = 0;
+    m_Search.until = 0;
+    if (m_Menu == "results")
+    {
+      m_Option = 0;
+      m_Options = { { "Search did not complete · Enter to retry",
+                      "No answer from Telegram; no result is implied",
+                      [this, search] { StartSearch(search.query, search.pinned); } },
+                    { "Close", "", [this] { CloseMenu(); } } };
+      m_Dirty = true;
+    }
+  }
+  if (m_Reactions.token && m_Reactions.until && now > m_Reactions.until)
+  {
+    m_Reactions.token = 0;
+    m_Reactions.until = 0;
+    if (m_Menu == "reactions")
+    {
+      m_Option = 0;
+      m_Options = { { "Reactions did not load", "Nothing was sent", [this] { CloseMenu(); } } };
+      m_Dirty = true;
+    }
+  }
+  if (auto* c = Current(); c && c->visitUntil && now > c->visitUntil)
+    VisitFailed(*c);
+}
+// A visit that never reached its message forgets the mark Remember took for it, so a later Return
+// does not jump to a position from before the failed attempt.
+void
+Harbor::VisitFailed(Conversation& c)
+{
+  c.visitUntil = 0;
+  c.visit.clear();
+  if (c.back.set && !c.back.landed)
+    c.back = Conversation::Mark();
+  Notify("The original message is unavailable");
 }
 void
 Harbor::FilePicker(const std::string& directory)
@@ -2408,7 +2979,8 @@ Harbor::DrawMenu()
   for (int row = 0; row < m_H; ++row)
     mvchgat(row, 0, m_W, A_NORMAL, Backdrop, nullptr);
   bool picker = m_Menu == "chats" || m_Menu == "forward";
-  bool compact = m_Menu == "actions" || m_Menu == "message-tools" || m_Menu == "update" || picker;
+  bool compact = m_Menu == "actions" || m_Menu == "message-tools" || m_Menu == "update" ||
+                 m_Menu == "reactions" || picker;
   int width = std::min(m_MainW - 4, picker ? 64 : compact ? 38 : 64);
   int x = m_MainX + (m_MainW - width) / 2;
   int y =
@@ -2452,10 +3024,15 @@ Harbor::DrawMenu()
                       : m_Menu == "delete"        ? "Delete message?"
                       : m_Menu == "help"          ? "Keyboard help"
                       : m_Menu == "preview"       ? "Image preview"
+                      : m_Menu == "search"        ? "Search this conversation"
+                      : m_Menu == "results"       ? (m_Search.pinned ? "Pinned messages" : "Search results")
+                      : m_Menu == "reactions"     ? "React"
+                      : m_Menu == "code"          ? "Copy code"
+                      : m_Menu == "links"         ? "Open a link"
                                                   : "Preview attachments";
   Text(y + 1, x + 2, width - 4, W(title), DialogBorder, true);
   int start = y + (picker ? 5 : 3);
-  bool filtering = m_Menu == "chats" || m_Menu == "forward" || m_Menu == "files";
+  bool filtering = m_Menu == "chats" || m_Menu == "forward" || m_Menu == "files" || m_Menu == "search";
   if (filtering)
     Text(y + (picker ? 3 : 2),
          x + 2,
@@ -2581,13 +3158,15 @@ Harbor::KeyPress(wint_t k)
         Insert(std::wstring(1, wchar_t(k)));
         return;
       }
-      if (m_Menu == "chats" || m_Menu == "forward" || m_Menu == "files")
+      if (m_Menu == "chats" || m_Menu == "forward" || m_Menu == "files" || m_Menu == "search")
       {
         m_Filter += wchar_t(k);
         m_Option = 0;
         m_MenuOffset = 0;
         if (m_Menu == "files")
           RebuildFiles();
+        else if (m_Menu == "search")
+          RebuildSearch();
         else
           RebuildPicker(false);
       }
@@ -2682,7 +3261,7 @@ Harbor::KeyPress(wint_t k)
       Choose(m_Option);
       return;
     }
-    if (m_Menu == "chats" || m_Menu == "forward" || m_Menu == "files")
+    if (m_Menu == "chats" || m_Menu == "forward" || m_Menu == "files" || m_Menu == "search")
     {
       if (k == KEY_BACKSPACE || k == 127 || k == 8)
       {
@@ -2697,6 +3276,8 @@ Harbor::KeyPress(wint_t k)
       m_MenuOffset = 0;
       if (m_Menu == "files")
         RebuildFiles();
+      else if (m_Menu == "search")
+        RebuildSearch();
       else
         RebuildPicker(false);
     }
@@ -2823,7 +3404,10 @@ Harbor::CopySelection()
       return;
     if (!copied.empty())
       copied += L"\n\n";
-    copied += text->second.substr(start, end - start);
+    auto decor = m_CopyDecor.find(id);
+    for (size_t i = start; i < end; ++i)
+      if (decor == m_CopyDecor.end() || i >= decor->second.size() || !decor->second[i])
+        copied += text->second[i];
   };
   for (const auto& cell : m_CopyCells)
     if (CellSelected(cell))

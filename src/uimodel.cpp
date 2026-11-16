@@ -2359,7 +2359,11 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
           std::static_pointer_cast<AvailableReactionsNotify>(p_ServiceMessage);
         std::string chatId = availableReactionsNotify->chatId;
         // ignore msgId for now
-        m_AvailableReactions[profileId][chatId] = availableReactionsNotify->emojis;
+        if (availableReactionsNotify->success)
+        {
+          m_AvailableReactions[profileId][chatId] = availableReactionsNotify->emojis;
+        }
+        // on failure keep the previously known set, but allow a new request
         m_AvailableReactionsPending[profileId][chatId] = false;
         LOG_TRACE("available reactions notify %s count %d", chatId.c_str(), availableReactionsNotify->emojis.size());
       }

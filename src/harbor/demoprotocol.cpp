@@ -1,9 +1,30 @@
 #include "demoprotocol.h"
 #include "fileutil.h"
 #include "protocolutil.h"
+#include "richtext.h"
 #include "timeutil.h"
 #include <algorithm>
 #include <cstdlib>
+#include <fstream>
+
+namespace
+{
+// UTF-16 length, the unit native ranges use
+int32_t
+U16(const std::string& utf8)
+{
+  int32_t n = 0;
+  for (char32_t c : RichText::Utf32(utf8))
+    n += c > 0xFFFF ? 2 : 1;
+  return n;
+}
+int
+DelayMs(const char* name)
+{
+  const char* value = getenv(name);
+  return value ? std::max(0, std::min(20000, atoi(value))) : 0;
+}
+}
 
 void
 HarborDemo::Seed()
@@ -56,6 +77,59 @@ HarborDemo::Seed()
     add("hive#550", "asha", "A different topic with separate history.", 90);
   }
   add("kleya", "kleya", "One conversation. A clear place to write. Everything else within reach.", 1);
+  if (getenv("HARBOR_DEMO_RICH"))
+    SeedRich(add);
+}
+
+// Native-formatted messages shaped like TDLib's formattedText: original text plus UTF-16 ranges.
+void
+HarborDemo::SeedRich(const std::function<void(const std::string&, const std::string&, const std::string&, int,
+                                              const std::string&, const std::string&)>& add)
+{
+  auto rich = [&](const std::string& who, int minute, const std::string& text,
+                  std::vector<RichText::Entity> entities, const std::string& quoted = "", bool pinned = false)
+  {
+    RichText::Message native;
+    native.text = text;
+    native.entities = entities;
+    add("rich", who, text, minute, "", "");
+    auto& m = m_Messages["rich"].back();
+    m.richText = RichText::Encode(native);
+    m.quotedId = quoted;
+    m.isPinned = pinned;
+    return m.id;
+  };
+  const auto first = rich("doug", 1, "Original plan: keep drafts unique and offline.",
+                          { { RichText::Bold, 0, 13, "" } }, "", true);
+  for (int i = 0; i < 60; ++i)
+    add("rich", i % 2 ? "self" : "doug", "Filler " + std::to_string(i + 1) + " between the plan and today.", 2 + i,
+        "", "");
+  const std::string prefix = "It's in your Downloads now:\n\n", command = "sh ~/Downloads/create-hive-next-repos.sh",
+                    suffix = "\n\nIt should end with Done. Paste me the output.";
+  rich("doug", 70, prefix + command + suffix, { { RichText::Pre, U16(prefix), U16(command), "shell" } });
+  const std::string intro = "Two steps 🙂:\n", one = "cd ~/src\n\tmake **all** _x_\n", mid = "then\n",
+                    two = "printf '%s\\n' \"done\"";
+  rich("doug", 71, intro + one + mid + two,
+       { { RichText::Pre, U16(intro), U16(one), "" }, { RichText::Pre, U16(intro + one + mid), U16(two), "sh" } });
+  const std::string links = "Read the plan and https://example.org/b then old news";
+  rich("doug", 72, links,
+       { { RichText::TextUrl, 9, 4, "https://example.com/plans/PCL-1312?view=full" },
+         { RichText::Url, 18, 21, "" },
+         { RichText::Strike, 45, 3, "" },
+         { RichText::Underline, 0, 4, "" },
+         { RichText::Italic, 49, 4, "" } }, "", true);
+  const auto secret = rich("doug", 73, "The code word is harbor-42, keep it.", { { RichText::Spoiler, 17, 9, "" } });
+  const std::string lead = "Quoted:\n", quote = "first quoted line\nsecond quoted line\nthird quoted line",
+                    tail = "\nThat was the quote.";
+  rich("doug", 74, lead + quote + tail, { { RichText::ExpandableQuote, U16(lead), U16(quote), "" } });
+  rich("doug", 75, "Replying to the original plan.", {}, first);
+  rich("doug", 76, "**literal** stars and `ticks` stay as typed.", {});
+  rich("doug", 77, "This replies to a message that no longer exists.", {}, "999999");
+  // a reply excerpt and the picker preview must keep these spoilers concealed; the long styled line wraps
+  rich("doug", 78, "Got it, I will keep that word private.", {}, secret);
+  const std::string wrapped = "Wrapped styling: every bold word here stays bold across the narrow edge.";
+  rich("doug", 79, wrapped, { { RichText::Bold, 17, int32_t(U16(wrapped)) - 18, "" } });
+  rich("doug", 80, "Last word: the deploy key is swordfish-7.", { { RichText::Spoiler, 29, 11, "" } });
 }
 
 bool
@@ -70,7 +144,8 @@ HarborDemo::Login()
     m_LiveThread = std::thread(
       [this, milliseconds]
       {
-        for (int waited = 0; waited < milliseconds && !m_Stopping; waited += 10)
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
+        while (std::chrono::steady_clock::now() < deadline && !m_Stopping)
           std::this_thread::sleep_for(std::chrono::milliseconds(10));
         if (m_Stopping)
           return;
@@ -95,7 +170,47 @@ HarborDemo::Logout()
   m_Stopping = true;
   if (m_LiveThread.joinable())
     m_LiveThread.join();
+  for (auto& thread : m_Delayed)
+    if (thread.joinable())
+      thread.join();
+  m_Delayed.clear();
   return true;
+}
+// Offline request recorder: HARBOR_DEMO_REQUEST_LOG names a file that receives one line per request.
+void
+HarborDemo::Record(const std::string& line)
+{
+  if (const char* path = getenv("HARBOR_DEMO_REQUEST_LOG"))
+  {
+    std::lock_guard<std::mutex> lock(m_RecordMutex);
+    std::ofstream(path, std::ios::app) << line << "\n";
+  }
+}
+void
+HarborDemo::Later(int milliseconds, std::shared_ptr<ServiceMessage> message)
+{
+  if (milliseconds <= 0)
+  {
+    Emit(message);
+    return;
+  }
+  m_Delayed.emplace_back(
+    [this, milliseconds, message]
+    {
+      const auto started = std::chrono::steady_clock::now();
+      const auto deadline = started + std::chrono::milliseconds(milliseconds);
+      int waited = 0;
+      for (; std::chrono::steady_clock::now() < deadline && !m_Stopping; waited += 10)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      if (message->GetMessageType() == SearchMessagesNotifyType)
+        Record(std::string(m_Stopping ? "dropped" : "emit") + " search token=" +
+               std::to_string(std::static_pointer_cast<SearchMessagesNotify>(message)->token) +
+               " nominal-ms=" + std::to_string(waited) + " elapsed-ms=" +
+               std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
+                 std::chrono::steady_clock::now() - started).count()));
+      if (!m_Stopping)
+        Emit(message);
+    });
 }
 
 void
@@ -120,6 +235,15 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
         c.isSelf = c.id == "self";
         n->contactInfos.push_back(c);
       }
+      if (getenv("HARBOR_DEMO_RICH"))
+        for (auto pair : std::vector<std::pair<std::string, std::string>>{ { "rich", "Doug formatting" },
+                                                                            { "doug", "Doug" } })
+        {
+          ContactInfo contact;
+          contact.id = pair.first;
+          contact.name = pair.second;
+          n->contactInfos.push_back(contact);
+        }
       if (getenv("HARBOR_DEMO_TOPICS"))
       {
         for (auto pair : std::vector<std::pair<std::string, std::string>>{
@@ -146,7 +270,9 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
         c.id = item.first;
         c.lastMessageTime = item.second.back().timeSent;
         c.actualLastMessageTime = item.second.back().timeSent;
-        c.lastMessageText = item.second.back().text;
+        c.lastMessageText = RichText::Preview(item.second.back().richText, item.second.back().text);
+        RichText::Message decoded;
+        c.lastMessageNative = RichText::Decode(item.second.back().richText, decoded);
         if (getenv("HARBOR_DEMO_TOPICS") && c.id == "studio")
         {
           c.isPinned = true;
@@ -156,6 +282,81 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
         n->chatInfos.push_back(c);
       }
       Emit(n);
+      break;
+    }
+    case GetMessageRequestType:
+    {
+      auto r = std::static_pointer_cast<GetMessageRequest>(request);
+      Record("get-message chat=" + r->chatId + " msg=" + r->msgId);
+      auto& messages = m_Messages[r->chatId];
+      auto it = std::find_if(messages.begin(), messages.end(), [&](const ChatMessage& m) { return m.id == r->msgId; });
+      if (it == messages.end())
+      {
+        // unavailable originals get no reply, as with a deleted Telegram message, or with
+        // HARBOR_DEMO_FETCH_ERROR the explicit failure TDLib reports for a message it cannot load
+        if (getenv("HARBOR_DEMO_FETCH_ERROR"))
+        {
+          auto failure = std::make_shared<NewMessagesNotify>(m_Id);
+          failure->chatId = r->chatId;
+          failure->success = false;
+          failure->sequence = false;
+          Emit(failure);
+        }
+        break;
+      }
+      auto n = std::make_shared<NewMessagesNotify>(m_Id);
+      n->chatId = r->chatId;
+      n->success = true;
+      n->sequence = false;
+      n->chatMessages = { *it };
+      Later(DelayMs("HARBOR_DEMO_FETCH_DELAY_MS"), n);
+      break;
+    }
+    case SearchMessagesRequestType:
+    {
+      auto r = std::static_pointer_cast<SearchMessagesRequest>(request);
+      Record("search chat=" + r->chatId + " query=" + r->query + " pinned=" + (r->pinned ? "1" : "0") +
+             " token=" + std::to_string(r->token));
+      auto n = std::make_shared<SearchMessagesNotify>(m_Id);
+      n->chatId = r->chatId;
+      n->query = r->query;
+      n->pinned = r->pinned;
+      n->token = r->token;
+      if (getenv("HARBOR_DEMO_SEARCH_FAIL"))
+        n->error = "demo search failure";
+      else
+      {
+        n->success = true;
+        const auto& messages = m_Messages[r->chatId];
+        for (auto it = messages.rbegin(); it != messages.rend(); ++it)
+          if (r->pinned ? it->isPinned : (!r->query.empty() && it->text.find(r->query) != std::string::npos))
+            n->chatMessages.push_back(*it);
+        n->totalCount = int32_t(n->chatMessages.size());
+        if (int32_t(n->chatMessages.size()) > r->limit)
+          n->chatMessages.resize(r->limit);
+      }
+      if (!getenv("HARBOR_DEMO_SEARCH_SILENT"))
+        Later(DelayMs("HARBOR_DEMO_SEARCH_DELAY_MS"), n);
+      break;
+    }
+    case GetAvailableReactionsRequestType:
+    {
+      auto r = std::static_pointer_cast<GetAvailableReactionsRequest>(request);
+      Record("available-reactions chat=" + r->chatId + " msg=" + r->msgId);
+      auto n = std::make_shared<AvailableReactionsNotify>(m_Id);
+      n->chatId = r->chatId;
+      n->msgId = r->msgId;
+      const auto& messages = m_Messages[r->chatId];
+      auto it = std::find_if(messages.begin(), messages.end(), [&](const ChatMessage& m) { return m.id == r->msgId; });
+      if (it == messages.end() || getenv("HARBOR_DEMO_REACTIONS_FAIL"))
+        n->success = false;
+      else if (it->text.find("Filler") == 0)
+        n->emojis = {}; // a message whose chat allows no reactions
+      else if (it->text.find("quote") != std::string::npos)
+        n->emojis = { "🎉", "🙏" }; // a narrower set than other messages, as a chat may allow
+      else
+        n->emojis = { "👍", "🔥", "🎉" };
+      Later(DelayMs("HARBOR_DEMO_REACTIONS_DELAY_MS"), n);
       break;
     }
     case GetMessagesRequestType:
@@ -281,6 +482,8 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
     case SendReactionRequestType:
     {
       auto r = std::static_pointer_cast<SendReactionRequest>(request);
+      Record("send-reaction chat=" + r->chatId + " msg=" + r->msgId + " emoji=" + r->emoji +
+             " prev=" + r->prevEmoji);
       auto n = std::make_shared<NewMessageReactionsNotify>(m_Id);
       n->chatId = r->chatId;
       n->msgId = r->msgId;
