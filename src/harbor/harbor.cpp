@@ -62,7 +62,9 @@ enum
   EmphasisSelected,
   Dialog,
   DialogBorder,
-  Backdrop
+  Backdrop,
+  DialogMuted,
+  SelectedMuted
 };
 enum
 {
@@ -412,6 +414,9 @@ Harbor::Init()
   pair(Dialog, 17, 25);
   pair(DialogBorder, 19, 25);
   pair(Backdrop, 26, 16);
+  // Option descriptions use the muted foreground on the dialog and selection surfaces.
+  pair(DialogMuted, 18, 25);
+  pair(SelectedMuted, 18, 23);
   if (!HarborInputStart())
   {
     endwin();
@@ -2497,24 +2502,35 @@ Harbor::DrawMenu()
        i < int(m_Options.size()) && row < y + height - (picker ? 3 : 2) && i < m_MenuOffset + maxItems;
        i++, row += stride)
   {
+    // Titles are always bold; descriptions are muted and indented beneath them.
+    // The selected option fills the dialog's inner width on every row it occupies
+    // and carries a selection arrow, which stays visible when colors fall back
+    // to the terminal default.
     auto label = W(m_Options[i].label);
-    const int color = i == m_Option ? Selected : Dialog;
+    const bool selected = i == m_Option;
+    const int color = selected ? Selected : Dialog;
+    const int quiet = selected ? SelectedMuted : DialogMuted;
+    for (int line = row; line < row + stride; ++line)
+    {
+      Text(line, x + 1, width - 2, L"", color);
+      if (selected && !picker)
+        Text(line, x + 1, 1, L"›", LinkSelected, true);
+    }
     if (picker)
     {
-      label = (i == m_Option ? L"› " : L"  ") + label;
+      label = (selected ? L"› " : L"  ") + label;
       const auto right = W((m_Options[i].hint.empty() ? "  " : "● ") + m_Options[i].time);
       int reserve = std::max(7, Width(right));
       int room = std::max(1, width - 6 - reserve);
-      Text(row, x + 2, width - 4, L"", color);
-      Text(row, x + 2, room, label, color, i == m_Option);
+      Text(row, x + 2, room, label, color, true);
       if (width >= 60 && room - Width(label) >= 14 && !m_Options[i].preview.empty())
-        Text(row, x + 4 + Width(label), room - Width(label) - 2, W(m_Options[i].preview), color);
-      Text(row, x + width - 2 - reserve, reserve, right, color);
+        Text(row, x + 4 + Width(label), room - Width(label) - 2, W(m_Options[i].preview), quiet);
+      Text(row, x + width - 2 - reserve, reserve, right, quiet);
     }
     else
-      Text(row, x + 2, width - 4, label, color, i == m_Option);
+      Text(row, x + 2, width - 4, label, color, true);
     if (!compact)
-      Text(row + 1, x + 3, width - 5, W(m_Options[i].hint), Dialog);
+      Text(row + 1, x + 4, width - 6, W(m_Options[i].hint), quiet);
     m_Hits.push_back({ row, x + 2, width - 4, "option", std::to_string(i) });
   }
   Text(y + height - 2,
