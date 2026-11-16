@@ -1920,7 +1920,8 @@ Harbor::DeskOptions()
     if (fields.size() < 3 || fields[0].empty() || fields[2].empty())
       continue;
     std::vector<std::string> argv(fields.begin() + 2, fields.end());
-    options.push_back({ "Desk · " + fields[0], fields[1], [this, argv]
+    const std::string shortcut = fields[0] == "Everything" ? "e · " : fields[0] == "Quota" ? "q · " : "";
+    options.push_back({ "Desk · " + fields[0], shortcut + fields[1], [this, argv]
                         {
                           CloseMenu();
                           DeskHandoff(argv);
@@ -2545,6 +2546,16 @@ Harbor::KeyPress(wint_t k)
   {
     if (!m_Menu.empty())
     {
+      if (m_Menu == "commands" && (k == 'e' || k == 'q'))
+      {
+        const std::string label = k == 'e' ? "Desk · Everything" : "Desk · Quota";
+        for (size_t i = 0; i < m_Options.size(); ++i)
+          if (m_Options[i].label == label)
+          {
+            Choose(int(i));
+            return;
+          }
+      }
       if (m_Menu == "attachments")
       {
         Insert(std::wstring(1, wchar_t(k)));
@@ -2885,6 +2896,9 @@ Harbor::ReadInput()
       key = FindKey;
       m_KeyIsSpecial = true;
     }
+    // Exact decoded Super-O (32) opens Commands; existing Ctrl combinations keep their previous behavior.
+    else if (event.mods == 32 && event.code == 'o')
+      key = 15;
     else if ((event.mods & 4) && event.code >= 'a' && event.code <= 'z')
       key = event.code - 'a' + 1;
     else if (event.mods & (2 | 4 | 8 | 32))

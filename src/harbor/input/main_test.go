@@ -21,6 +21,10 @@ func TestStreamDecoder(t *testing.T) {
 			k, ok := e.(uv.KeyPressEvent)
 			return ok && k.Code == uv.KeyRight && k.Mod == uv.ModCtrl
 		}},
+		{"command O", []string{"\x1b[111;9u"}, func(e uv.Event) bool {
+			k := translate(e)
+			return k.kind == 1 && k.code == 'o' && k.mods == 32
+		}},
 		{"kitty repeat", []string{"\x1b[57350;1:2u"}, func(e uv.Event) bool { k, ok := e.(uv.KeyPressEvent); return ok && k.Code == uv.KeyLeft }},
 		{"kitty release", []string{"\x1b[57350;1:3u"}, func(e uv.Event) bool { _, ok := e.(uv.KeyReleaseEvent); return ok && translate(e).kind == 0 }},
 		{"unknown CSI", []string{"\x1b[99999z"}, func(e uv.Event) bool { return translate(e).kind == 0 }},
