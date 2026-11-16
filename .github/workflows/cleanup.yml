@@ -28,6 +28,8 @@ on:
 
 jobs:
   sweep:
+    # Keep artifact deletion manual while enabling the fork's build workflows.
+    if: github.event_name == 'workflow_dispatch'
     name: Delete aged artifacts
     runs-on: ubuntu-latest
     permissions:
