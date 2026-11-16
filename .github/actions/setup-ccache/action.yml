@@ -1,4 +1,5 @@
 name: setup-ccache
+description: Install ccache and restore the compiler cache for hosted builds.
 
 inputs:
   max_size:

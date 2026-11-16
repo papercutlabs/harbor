@@ -13,6 +13,9 @@ on:
       - 'doc/**'
       - '**/*.md'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -24,7 +27,17 @@ jobs:
     - name: Checkout
       # Check https://github.com/actions/checkout/releases for newer major versions.
       uses: actions/checkout@v5
+      with:
+        persist-credentials: false
     - name: Setup ccache
       uses: ./.github/actions/setup-ccache
     - name: Build macOS
       run: ./make.sh all -y
+    - name: Smoke test Harbor commands and popup hierarchy
+      env:
+        HARBOR_EXECUTABLE: ${{ github.workspace }}/build/bin/harbor
+      run: |
+        python3 -m venv "$RUNNER_TEMP/harbor-smoke-venv"
+        "$RUNNER_TEMP/harbor-smoke-venv/bin/python" -m pip install -r tests/harbor/requirements.txt
+        "$RUNNER_TEMP/harbor-smoke-venv/bin/python" tests/harbor/popup_hierarchy_smoke.py
+        "$RUNNER_TEMP/harbor-smoke-venv/bin/python" tests/harbor/command_keys_smoke.py
