@@ -1920,11 +1920,14 @@ Harbor::DeskOptions()
     if (fields.size() < 3 || fields[0].empty() || fields[2].empty())
       continue;
     std::vector<std::string> argv(fields.begin() + 2, fields.end());
-    const std::string shortcut = fields[0] == "Everything" ? "e · " : fields[0] == "Quota" ? "q · " : "";
-    options.push_back({ "Desk · " + fields[0], shortcut + fields[1], [this, argv]
+    const std::string shortcut = fields[0] == "Everything" ? "e · " : fields[0] == "Quota" ? "q · " : fields[0] == "Focus" ? "f · " : "";
+    options.push_back({ "Desk · " + fields[0], shortcut + fields[1], [this, argv, label = fields[0]]
                         {
                           CloseMenu();
-                          DeskHandoff(argv);
+                          if (DeskHandoff(argv) && label == "Focus")
+                            for (const auto& option : DeskOptions())
+                              if (option.label == "Desk · Focus")
+                                Notify(option.hint);
                         } });
   }
   return options;
@@ -2013,7 +2016,7 @@ Harbor::DeskFailurePause(const std::string& reason)
   if (flags >= 0)
     fcntl(STDIN_FILENO, F_SETFL, flags);
 }
-void
+bool
 Harbor::DeskHandoff(const std::vector<std::string>& argv)
 {
   // The Desk view runs on this same terminal while this process, its chats, drafts and reading positions stay as they are.
@@ -2070,6 +2073,7 @@ Harbor::DeskHandoff(const std::vector<std::string>& argv)
     Notify("Desk exited " + std::to_string(WEXITSTATUS(status)) + " · draft kept");
   else
     Notify("Back from Desk");
+  return spawned == 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 void
 Harbor::Actions(bool minimal)
@@ -2546,9 +2550,9 @@ Harbor::KeyPress(wint_t k)
   {
     if (!m_Menu.empty())
     {
-      if (m_Menu == "commands" && (k == 'e' || k == 'q'))
+      if (m_Menu == "commands" && (k == 'e' || k == 'q' || k == 'f'))
       {
-        const std::string label = k == 'e' ? "Desk · Everything" : "Desk · Quota";
+        const std::string label = k == 'e' ? "Desk · Everything" : k == 'q' ? "Desk · Quota" : "Desk · Focus";
         for (size_t i = 0; i < m_Options.size(); ++i)
           if (m_Options[i].label == label)
           {
