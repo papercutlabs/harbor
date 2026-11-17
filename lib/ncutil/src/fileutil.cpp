@@ -220,7 +220,11 @@ std::string FileUtil::GetMimeType(const std::string& p_Path)
   if (cookie == NULL) return "";
 
   std::string mime;
-  if (magic_load(cookie, NULL) == 0)
+  // Portable Harbor bundles carry libmagic's data beside the executable. The
+  // static library's producer-prefix default is not present on the receiving host.
+  const std::string bundledMagic = DirName(GetSelfPath()) + "/../share/harbor/magic.mgc";
+  const char* magicPath = Exists(bundledMagic) ? bundledMagic.c_str() : NULL;
+  if (magic_load(cookie, magicPath) == 0)
   {
     const char* rv = magic_file(cookie, p_Path.c_str());
     if (rv != NULL)
