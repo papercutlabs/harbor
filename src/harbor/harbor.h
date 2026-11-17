@@ -110,6 +110,9 @@ private:
   std::string m_LastState, m_RestoreChat;
   std::set<std::string> m_Connected;
   std::vector<std::string> m_ChatOrder;
+  std::string m_Title;
+  std::string TerminalTitle(const std::string&);
+  void SetTitle(const std::string&);
   std::string m_Current, m_Menu, m_Status, m_AuthOwner, m_ForwardProfile, m_ForwardChat;
   std::wstring m_Filter;
   std::vector<Option> m_Options;

@@ -10,7 +10,7 @@ try:
     second = next(y for y, row in enumerate(t.screen.display) if 'second' in row)
     assert second == first + 1
     assert sum(row.count('›') for row in t.screen.display) == 1
-    t.send(b'\x15')
+    t.clear_draft(2)
     # Enter a draft whose final word would cross the right edge.
     t.send('one two three four five six seven eight nine ten')
     t.expect('eight nine ten')

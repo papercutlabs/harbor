@@ -69,9 +69,9 @@ def held(t):
 t = Terminal(cols=56, rows=38, extra_env={'HARBOR_DESK_COMMANDS': str(commands)})
 try:
     pid = t.pid
-    t.picker('Marina')  # / acts only in a selected conversation (existing behaviour)
-    # Empty composer: / opens Commands with the Desk section; Esc leaves the draft empty.
-    t.send('/'); t.expect('Desk · Quota'); t.send(b'\x1b')
+    t.picker('Marina')
+    # Empty composer: Option-/ opens Commands with the Desk section; Esc leaves the draft empty.
+    t.send(b'\x1b/'); t.expect('Desk · Quota'); t.send(b'\x1b')
     # Nonempty draft: /, e and q are literal; Ctrl+O opens the same menu without touching the draft.
     t.send('a/b e q /x'); t.expect('a/b e q /x')
     t.send(b'\x0f'); t.expect('Desk · Quota')
@@ -115,7 +115,7 @@ home = work/'ordinary-home'
 home.mkdir()
 t = Terminal(cols=56, rows=38, extra_env={'HOME': str(home), 'HARBOR_DESK_COMMANDS': ''})
 try:
-    t.send('/'); t.expect('Quit Harbor'); assert 'Desk ·' not in t.text, t.text
+    t.send(b'\x1b/'); t.expect('Quit Harbor'); assert 'Desk ·' not in t.text, t.text
     t.send(b'\x1b'); t.picker('Marina'); t.send('standalone draft')
     installed = home/'.office/desk/harbor-desk-commands'
     installed.parent.mkdir(parents=True)

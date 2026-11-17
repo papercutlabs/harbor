@@ -13,7 +13,9 @@ def composer(t, expected):
 
 
 def reset(t, text=''):
-    t.send(b'\x05\x15')  # End, then delete back to start: independent of previous cursor.
+    # This fixture creates up to two hard lines. Clear each explicitly now that
+    # Ctrl+U correctly preserves earlier lines instead of clearing the draft.
+    t.clear_draft(lines=2)
     if text:
         t.send(text)
 
