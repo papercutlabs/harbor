@@ -1,3 +1,16 @@
+---
+dod:
+  - id: repeated
+    text: Repeated visits reuse one child and keep Harbor state and alternate screen.
+  - id: custody
+    text: Release or exact child reap precedes Harbor input resumption, including malformed and EOF cases.
+  - id: truth
+    text: Cached observations keep freshness and owner changes invalidate retained controllers.
+  - id: terminal
+    text: Resize, flags, typeahead and keyboard modes survive transfers.
+  - id: evidence
+    text: Focused offline tests and hosted native qualification cover integration and failure cases.
+---
 # Harbor view switching correction
 
 Teren reports that Everything feels like loading a second script. Harbor currently leaves its screen and creates an Office process on every visit. Preserve Harbor's process and all conversation state, and keep one directly owned Office child between visits. The first visit starts it lazily; subsequent visits reuse its imports and controller.
