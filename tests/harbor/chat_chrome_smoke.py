@@ -40,7 +40,7 @@ clean = 'Studio 🌊 ]2;pwned [2J 31m end'
 t = Terminal(cols=56, rows=38, extra_env={'HARBOR_DEMO_STUDIO_NAME': hostile})
 try:
     t.picker('Marina'); t.expect('Marina')
-    assert 'HARBOR / TELEGRAM' not in t.text and 'connected' not in t.text, t.text
+    assert 'HARBOR / TELEGRAM' not in t.text and 'connected' not in t.text.lower(), t.text
     assert 'Marina' in t.screen.display[0], t.screen.display[:3]  # the chat header now takes the reclaimed first row
     assert t.screen.display[2].strip() == '', t.screen.display[:4]  # one spacer, then history from row 3
     print('PASS brand/connected row removed; chat header and history reclaim its rows')

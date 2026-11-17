@@ -767,7 +767,6 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
         auto r = std::make_shared<SetStatusRequest>();
         r->isOnline = true;
         Request(p, r);
-        Notify("Connected");
       }
       else
         Notify("Connection failed; retry with harbor -s");
