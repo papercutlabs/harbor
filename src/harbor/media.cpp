@@ -470,7 +470,8 @@ HarborMedia::Play(const std::string& path)
     [path]
     {
       const auto output =
-        FileUtil::GetTempDir() + "/voice-" + std::to_string(std::hash<std::string>{}(path)) + ".wav";
+        FileUtil::GetTempDir() + "/voice-" + std::to_string(getpid()) + "-" +
+        std::to_string(std::hash<std::string>{}(path)) + ".wav"; // windows share temp/
       if (Regular(output))
         return output;
       auto result = HarborCapture(
@@ -575,7 +576,8 @@ HarborMedia::PasteboardImage()
 {
 #ifdef __APPLE__
   const auto path =
-    FileUtil::GetTempDir() + "/clipboard-" + std::to_string(TimeUtil::GetCurrentTimeMSec()) + ".png";
+    FileUtil::GetTempDir() + "/clipboard-" + std::to_string(getpid()) + "-" +
+    std::to_string(TimeUtil::GetCurrentTimeMSec()) + ".png";
   const std::string script =
     "ObjC.import('AppKit'); function run(argv) { var p=argv[1] ? $.NSPasteboard.pasteboardWithName(argv[1]) "
     ": $.NSPasteboard.generalPasteboard; var "

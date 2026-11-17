@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -32,6 +33,8 @@ public:
   void MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMessage);
 
   static void RunKeyDump();
+  // Harbor shared-session window only (defined in src/harbor/harbor.cpp).
+  void SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended);
 
 private:
   std::shared_ptr<Harbor> m_Harbor;

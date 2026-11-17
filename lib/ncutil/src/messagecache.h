@@ -111,6 +111,7 @@ private:
     std::string fromMsgId;
     int64_t fromMsgIdTimeSent = 0;
     int limit = 0;
+    uint64_t requestId = 0; // echoed to the notify, see RequestMessage::requestId
   };
 
   class FetchOneMessageRequest : public Request
@@ -120,6 +121,7 @@ private:
     std::string profileId;
     std::string chatId;
     std::string msgId;
+    uint64_t requestId = 0;
   };
 
   class FindCachedMessageRequest : public Request
@@ -272,9 +274,9 @@ public:
   static bool FetchContacts(const std::string& p_ProfileId);
   static bool FetchMessagesFrom(const std::string& p_ProfileId, const std::string& p_ChatId,
                                 const std::string& p_FromMsgId,
-                                const int p_Limit, const bool p_Sync);
+                                const int p_Limit, const bool p_Sync, const uint64_t p_RequestId = 0);
   static bool FetchOneMessage(const std::string& p_ProfileId, const std::string& p_ChatId,
-                              const std::string& p_MsgId, const bool p_Sync);
+                              const std::string& p_MsgId, const bool p_Sync, const uint64_t p_RequestId = 0);
   static bool GetOneMessage(const std::string& p_ProfileId, const std::string& p_ChatId,
                             const std::string& p_MsgId, std::vector<ChatMessage>& p_ChatMessages);
   static void FindMessage(const std::string& p_ProfileId, const std::string& p_ChatId, const std::string& p_FromMsgId,

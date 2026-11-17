@@ -7,6 +7,8 @@
 #include "richtext.h"
 #include <cassert>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -179,6 +181,28 @@ main()
     assert(row.id == "n1"   ? row.richText == RichText::Encode(edited)
            : row.id == "n2" ? row.richText == "R1 0\n**typed stars**"
                             : row.id == "old1" && row.richText.empty());
+  // Actual queued cache replies must echo the initiating window identity independently.
+  std::mutex repliesMutex;
+  std::condition_variable repliesReady;
+  std::map<uint64_t, std::shared_ptr<NewMessagesNotify>> replies;
+  MessageCache::SetMessageHandler([&](std::shared_ptr<ServiceMessage> event)
+  {
+    if (event->GetMessageType() != NewMessagesNotifyType) return;
+    std::lock_guard<std::mutex> lock(repliesMutex);
+    replies[event->requestId] = std::static_pointer_cast<NewMessagesNotify>(event);
+    repliesReady.notify_all();
+  });
+  const uint64_t pageId = 0x0000000700000021ULL, oneId = 0x0000000800000022ULL;
+  assert(MessageCache::FetchMessagesFrom(profile, chat, "", 10, false, pageId));
+  assert(MessageCache::FetchOneMessage(profile, chat, "n1", false, oneId));
+  {
+    std::unique_lock<std::mutex> lock(repliesMutex);
+    assert(repliesReady.wait_for(lock, std::chrono::seconds(5), [&] { return replies.size() == 2; }));
+    assert(replies.count(pageId) && replies.count(oneId));
+    assert(replies[pageId]->chatMessages.size() == 3 && replies[oneId]->chatMessages.size() == 1);
+    assert(replies[oneId]->chatMessages.front().quotedRichText == m.quotedRichText);
+  }
+  std::cout << "PASS queued cache page/single-message replies echo separate window identities\n";
   MessageCache::SetMessageHandler(nullptr);
   auto restarted = Load("n1", "now **bold**");
   assert(restarted.richText == RichText::Encode(edited));

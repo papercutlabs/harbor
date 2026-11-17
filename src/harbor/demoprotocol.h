@@ -51,6 +51,7 @@ private:
   }
   std::string m_Id = "HarborDemo_local";
   int m_NextId = 100;
+  int m_SendCount = 0;
   std::thread m_LiveThread;
   std::atomic<bool> m_Stopping{ false };
   std::map<std::string, std::vector<ChatMessage>> m_Messages;

@@ -1,4 +1,5 @@
 #include "harbor.h"
+#include "wire.h"
 #include "input.h"
 #include <sys/ioctl.h>
 #include "apputil.h"
@@ -324,7 +325,6 @@ Harbor::Harbor()
 {
   m_Directory = FileUtil::GetCurrentWorkingDir();
   m_Motion = getenv("HARBOR_REDUCED_MOTION") == nullptr;
-  LoadState();
 }
 Harbor::~Harbor() = default;
 std::string
@@ -382,6 +382,12 @@ Harbor::Receive(std::shared_ptr<ServiceMessage> e)
     TestTrace("receive search token=" + std::to_string(std::static_pointer_cast<SearchMessagesNotify>(e)->token));
   std::lock_guard<std::mutex> lock(m_Mutex);
   m_Events.push_back(e);
+  if (e->GetMessageType() == SendMessageNotifyType)
+  {
+    auto n = std::static_pointer_cast<SendMessageNotify>(e);
+    TestTrace("receive send request=" + std::to_string(n->requestId) +
+              " pending=" + std::to_string(n->pending) + " success=" + std::to_string(n->success));
+  }
 }
 void
 Harbor::Request(const std::string& p, std::shared_ptr<RequestMessage> r)
@@ -401,7 +407,10 @@ Harbor::Notify(const std::string& s)
 void
 Harbor::Init()
 {
+  // SetSession selects the view slot before Init; classic Harbor keeps slot 0.
+  LoadState();
   setlocale(LC_ALL, "");
+  m_HaveInitialTerminalMode = tcgetattr(STDIN_FILENO, &m_InitialTerminalMode) == 0;
   initscr();
   raw();
   noecho();
@@ -466,10 +475,24 @@ Harbor::Init()
   printf("\033[?1003l\033[?1002h\033[?2004h\033[>1u");
   fflush(stdout);
   m_Ready = true;
-  for (auto& p : m_Protocols)
-  {
-    MessageCache::FetchContacts(p.first);
-  }
+  if (!m_Remote) // a window's contacts come from the backend after ConnectNotify
+    for (auto& p : m_Protocols)
+    {
+      MessageCache::FetchContacts(p.first);
+    }
+}
+void
+Harbor::SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended)
+{
+  m_Remote = true;
+  m_Slot = p_Slot;
+  m_OnAuthSuspended = p_OnAuthSuspended;
+}
+std::string
+Harbor::StatePath() const
+{
+  const auto path = FileUtil::GetApplicationDir() + "/harbor-state";
+  return m_Slot == 0 ? path : path + "." + std::to_string(m_Slot);
 }
 void
 Harbor::Cleanup()
@@ -477,6 +500,8 @@ Harbor::Cleanup()
   if (!m_Ready)
     return;
   m_DeskHost.Stop();
+  if (m_Remote)
+    ProcessEvents(); // the connection is frozen; consume final outcomes/recoveries before saving
   SaveState();
   HarborInputStop();
   m_Media->Stop();
@@ -485,6 +510,7 @@ Harbor::Cleanup()
   mousemask(0, nullptr);
   curs_set(1);
   endwin();
+  if (m_HaveInitialTerminalMode) tcsetattr(STDIN_FILENO, TCSANOW, &m_InitialTerminalMode);
   fflush(stdout);
   m_Ready = false;
 }
@@ -554,12 +580,30 @@ Harbor::Run()
 void
 Harbor::LoadState()
 {
-  std::ifstream input(FileUtil::GetApplicationDir() + "/harbor-state");
+  std::ifstream input(StatePath());
   std::string line;
   size_t total = 0;
   while (std::getline(input, line) && total < 8 * 1024 * 1024)
   {
     total += line.size();
+    if (line.rfind("recover ", 0) == 0)
+    {
+      std::istringstream row(line.substr(8));
+      std::string key, hex;
+      if (row >> key >> hex)
+      {
+        try
+        {
+          const auto bytes = StrUtil::StrFromHex(hex);
+          HarborWire::Reader reader(bytes);
+          ChatMessage message;
+          HarborWire::Get(reader, message);
+          if (reader.Done()) m_SavedStates[StrUtil::StrFromHex(key)].recovery.push_back(message);
+        }
+        catch (...) { }
+      }
+      continue;
+    }
     if (line.rfind("active ", 0) == 0)
     {
       try
@@ -614,6 +658,7 @@ Harbor::SaveState()
   for (const auto& c : m_Chats)
   {
     auto& saved = states[c.first];
+    saved.recovery = c.second.recovery;
     saved.draft = c.second.draft;
     saved.cursor = c.second.cursor;
     saved.scroll = c.second.scroll;
@@ -667,10 +712,16 @@ Harbor::SaveState()
         << (c.replyBeforeEdit.empty() ? "-" : StrUtil::StrToHex(c.replyBeforeEdit)) << ' '
         << (c.restoreAnchor.empty() ? "-" : StrUtil::StrToHex(c.restoreAnchor)) << ' '
         << c.restoreOffset << '\n';
+    for (const auto& message : c.recovery)
+    {
+      HarborWire::Writer writer;
+      HarborWire::Put(writer, message);
+      out << "recover " << StrUtil::StrToHex(item.first) << ' ' << StrUtil::StrToHex(writer.buf) << '\n';
+    }
   }
   if (out.str() == m_LastState)
     return;
-  const auto path = FileUtil::GetApplicationDir() + "/harbor-state";
+  const auto path = StatePath();
   std::ofstream file(path + ".tmp", std::ios::trunc);
   file << out.str();
   file.close();
@@ -903,6 +954,8 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
     case SendMessageNotifyType:
     {
       auto n = std::static_pointer_cast<SendMessageNotify>(e);
+      if (n->pending)
+        break; // local TDLib acceptance is not a delivery outcome
       if (n->success)
       {
         if (!n->chatMessage.id.empty())
@@ -998,7 +1051,10 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
         m_AuthOwner = p;
         HarborInputStop();
         endwin();
+        if (m_HaveInitialTerminalMode) tcsetattr(STDIN_FILENO, TCSANOW, &m_InitialTerminalMode);
         m_AuthSuspended = true;
+        if (m_OnAuthSuspended)
+          m_OnAuthSuspended(); // lend this terminal to the session backend's native prompt
       }
       else if (m_AuthOwner == p)
       {
@@ -4107,6 +4163,11 @@ void
 Ui::MessageHandler(std::shared_ptr<ServiceMessage> e)
 {
   m_Harbor->Receive(e);
+}
+void
+Ui::SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended)
+{
+  m_Harbor->SetSession(p_Slot, p_OnAuthSuspended);
 }
 void
 Ui::RunKeyDump()

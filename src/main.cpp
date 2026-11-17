@@ -5,6 +5,7 @@
 //
 // nchat is distributed under the MIT license, see LICENSE for details.
 
+#include <algorithm>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -50,7 +51,9 @@
 #ifdef HARBOR_BUILD
 #include "harbor/demoprotocol.h"
 #include "harbor/update.h"
+#include "harbor/session.h"
 static bool harborDemo = false;
+static int RunHarborWindow(const std::vector<std::string>& p_Args);
 #endif
 
 static std::string GetFeatures();
@@ -171,6 +174,19 @@ int main(int argc, char* argv[])
   bool isRemove = false;
   bool isSetup = false;
   std::vector<std::string> args(argv + 1, argv + argc);
+#ifdef HARBOR_BUILD
+  // Internal backend entry: harbor --session-backend <fd> [args]. Never documented as a command.
+  int sessionFd = -1;
+  int sessionShutdownLock = -1;
+  if (!args.empty() && args.front() == HarborSession::BackendArg)
+  {
+    if (args.size() < 2)
+      return 1;
+    sessionFd = atoi(args[1].c_str());
+    args.erase(args.begin(), args.begin() + 2);
+  }
+  std::vector<std::string> windowArgs; // forwarded to a spawned backend and to a restart
+#endif
   for (auto it = args.begin(); it != args.end(); ++it)
   {
 #ifdef HARBOR_BUILD
@@ -186,6 +202,13 @@ int main(int argc, char* argv[])
       ++it;
       FileUtil::SetApplicationDir(*it);
     }
+#ifdef HARBOR_BUILD
+    else if ((*it == "-e") || (*it == "--verbose") || (*it == "-ee") || (*it == "--extra-verbose"))
+    {
+      Log::SetVerboseLevel(((*it == "-e") || (*it == "--verbose")) ? Log::DEBUG_LEVEL : Log::TRACE_LEVEL);
+      windowArgs.push_back(*it);
+    }
+#endif
     else if ((*it == "-e") || (*it == "--verbose"))
     {
       Log::SetVerboseLevel(Log::DEBUG_LEVEL);
@@ -238,6 +261,23 @@ int main(int argc, char* argv[])
     }
   }
 
+#ifdef HARBOR_BUILD
+  // An ordinary run is a window of the directory's shared session. Setup, removal, export and
+  // keydump keep the classic path under the existing locks.
+  if ((sessionFd < 0) && !isSetup && !isRemove && !isKeyDump && exportDir.empty())
+  {
+    // Creating a directory is non-destructive. Its version is initialised only by
+    // the backend under the existing native directory lock.
+    FileUtil::MkDir(FileUtil::GetApplicationDir());
+    std::vector<std::string> backendArgs;
+    if (harborDemo) backendArgs.push_back("--demo");
+    backendArgs.push_back("-d");
+    backendArgs.push_back(FileUtil::GetApplicationDir());
+    backendArgs.insert(backendArgs.end(), windowArgs.begin(), windowArgs.end());
+    return RunHarborWindow(backendArgs);
+  }
+#endif
+
   bool isDirInited = false;
   static const int dirVersion = 1;
   if (!FileUtil::Exists(FileUtil::GetApplicationDir()))
@@ -246,9 +286,14 @@ int main(int argc, char* argv[])
     isDirInited = true;
   }
 
+
   std::unique_ptr<ScopedDirLock> dirLock = std::make_unique<ScopedDirLock>(FileUtil::GetApplicationDir());
   if (!dirLock->IsLocked())
   {
+#ifdef HARBOR_BUILD
+    HarborSession::FailBackend(sessionFd, "Harbor could not lock " + FileUtil::GetApplicationDir() +
+                               ": another Harbor or nchat session not shared with this window holds it.");
+#endif
     std::cerr <<
       "error: unable to acquire lock for " << FileUtil::GetApplicationDir() << "\n" <<
       "       only one nchat session per account/confdir is supported.\n";
@@ -258,9 +303,24 @@ int main(int argc, char* argv[])
   if (!isDirInited)
   {
     int storedVersion = FileUtil::GetDirVersion(FileUtil::GetApplicationDir());
+#ifdef HARBOR_BUILD
+    if (storedVersion == 0 && !FileUtil::Exists(FileUtil::GetApplicationDir() + "/version"))
+    {
+      const auto entries = FileUtil::ListDirNames(FileUtil::GetApplicationDir());
+      const bool empty = std::all_of(entries.begin(), entries.end(),
+        [](const std::string& name) { return name == "session.lock"; });
+      if (empty)
+      {
+        FileUtil::WriteFile(FileUtil::GetApplicationDir() + "/version", StrUtil::StrToHex(std::to_string(dirVersion)));
+        storedVersion = FileUtil::GetDirVersion(FileUtil::GetApplicationDir());
+      }
+    }
+#endif
     if (storedVersion != dirVersion)
     {
 #ifdef HARBOR_BUILD
+      HarborSession::FailBackend(sessionFd, "Harbor will not replace an existing directory with an unknown format.\n"
+                                 "Choose a new configuration directory with -d, or restore its version file.");
       std::cerr << "Harbor will not replace an existing directory with an unknown format.\n"
                    "Choose a new configuration directory with -d, or restore its version file.\n";
       return 1;
@@ -444,9 +504,42 @@ int main(int argc, char* argv[])
   }
 
   // Start protocol(s) and ui
+#ifdef HARBOR_BUILD
+  if (sessionFd < 0)
+#endif
   ui->Init();
   std::unordered_map<std::string, std::shared_ptr<Protocol>> protocols = ui->GetProtocols();
   bool hasProtocols = !protocols.empty();
+#ifdef HARBOR_BUILD
+  if (sessionFd >= 0)
+  {
+    // Session backend: no UI; serve windows until none is connected.
+    if (!hasProtocols)
+    {
+      HarborSession::FailBackend(sessionFd, "No profiles setup, exiting.");
+    }
+    else
+    {
+      std::map<std::string, std::shared_ptr<Protocol>> protocolsSorted(protocols.begin(), protocols.end());
+      std::vector<std::shared_ptr<Protocol>> served;
+      for (auto& protocol : protocolsSorted)
+      {
+        Status::Set(protocol.first, Status::FlagConnecting);
+        served.push_back(protocol.second);
+      }
+      AppUtil::InitTerminateSignalHandler();
+      HarborSession::RunBackend(sessionFd, FileUtil::GetApplicationDir(), served,
+                                [](const std::function<void(std::shared_ptr<ServiceMessage>)>& handler)
+                                { MessageCache::SetMessageHandler(handler); }, &sessionShutdownLock, [] { return AppUtil::IsTerminateRequested(); });
+      for (auto& protocol : protocolsSorted)
+      {
+        protocol.second->Logout();
+        protocol.second->CloseProfile();
+      }
+    }
+  }
+  else
+#endif
   if (hasProtocols && exportDir.empty())
   {
     // Sort protocols
@@ -543,6 +636,15 @@ int main(int argc, char* argv[])
     else execl(target.c_str(), target.c_str(), "-d", config.c_str(), nullptr);
     std::cerr << "Could not restart Harbor. Your draft was saved; run harbor again.\n";
     return 1;
+  }
+#endif
+#ifdef HARBOR_BUILD
+  if (sessionShutdownLock >= 0)
+  {
+    protocols.clear();
+    profileDirLocks.clear();
+    dirLock.reset();
+    close(sessionShutdownLock);
   }
 #endif
   return rv;
@@ -808,3 +910,84 @@ void ShowVersion()
     "Written by Kristofer Berggren.\n";
   // *INDENT-ON*
 }
+
+#ifdef HARBOR_BUILD
+// One Harbor window: the ordinary UI, attached to the directory's shared session backend. It
+// skips the native initialisers and cleanup (log, config, cache, temp, profiles) that only the
+// backend may run.
+static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs)
+{
+  const std::string appDir = FileUtil::GetApplicationDir();
+  HarborSession::Attachment attachment = HarborSession::Attach(appDir, FileUtil::GetSelfPath(), p_BackendArgs);
+  if (attachment.fd < 0)
+  {
+    std::cerr << attachment.error << "\n";
+    return 1;
+  }
+  if (attachment.profiles.empty())
+  {
+    close(attachment.fd);
+    std::cout << "No profiles setup, exiting.\n";
+    return 1;
+  }
+
+  const int slot = HarborSession::AcquireSlot(appDir);
+  if (slot < 0)
+  {
+    close(attachment.fd);
+    std::cerr << "Could not reserve an independent Harbor view state in " << appDir << ".\n";
+    return 1;
+  }
+  auto connection = std::make_shared<HarborSession::Connection>(attachment.fd, attachment.pending);
+  std::shared_ptr<Ui> ui = std::make_shared<Ui>();
+  ui->SetSession(slot, [connection] { connection->Lent(); });
+  std::function<void(std::shared_ptr<ServiceMessage>)> messageHandler =
+    std::bind(&Ui::MessageHandler, std::ref(*ui), std::placeholders::_1);
+  std::vector<std::shared_ptr<Protocol>> remotes;
+  for (auto& profile : attachment.profiles)
+  {
+    auto remote = std::make_shared<HarborSession::Remote>(connection, profile);
+    remote->SetMessageHandler(messageHandler);
+    ui->AddProtocol(remote);
+    remotes.push_back(remote);
+  }
+
+  AppUtil::InitTerminateSignalHandler();
+  ui->Init();
+  for (auto& remote : remotes) remote->Login(); // starts the shared reader once
+  ui->Run();
+  // Freeze the reader and recover unconfirmed sends before Cleanup drains events
+  // and writes this slot. This also covers restart and caught termination signals.
+  connection->Stop();
+  ui->Cleanup();
+  const bool ended = connection->Ended();
+  const std::string reason = connection->EndReason();
+  ui.reset();
+  remotes.clear();
+
+  if (ended)
+    std::cerr << reason << "\n";
+
+  if (AppUtil::IsTerminateRequested())
+  {
+    const int sig = AppUtil::GetTerminateSignal();
+    signal(sig, SIG_DFL);
+    kill(getpid(), sig);
+  }
+
+  if (!HarborUpdate::RestartTarget().empty() && !AppUtil::IsTerminateRequested() && !ended)
+  {
+    // Restart only this window; it reattaches, or starts a fresh backend if it was the last one.
+    const auto target = HarborUpdate::RestartTarget();
+    std::vector<std::string> args = { target };
+    args.insert(args.end(), p_BackendArgs.begin(), p_BackendArgs.end());
+    std::vector<char*> argv;
+    for (auto& a : args) argv.push_back(const_cast<char*>(a.c_str()));
+    argv.push_back(nullptr);
+    execv(target.c_str(), argv.data());
+    std::cerr << "Could not restart Harbor. Your draft was saved; run harbor again.\n";
+    return 1;
+  }
+  return ended ? 1 : 0;
+}
+#endif
