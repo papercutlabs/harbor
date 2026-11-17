@@ -714,8 +714,8 @@ Harbor::Merge(Conversation& c, const std::vector<ChatMessage>& messages, bool ou
   for (const auto& m : messages)
   {
     // Only a genuinely new incoming message after already-loaded history counts: cached history, replays,
-    // out-of-sequence fetches, own sends and duplicates never do.
-    if (!c.follow && !outOfSequence && previousLatest >= 0 && !m.isOutgoing && !m.isDeleted &&
+    // older single-message fetches, own sends and duplicates never do.
+    if (!c.follow && previousLatest >= 0 && !m.isOutgoing && !m.isDeleted &&
         m.timeSent > previousLatest && !c.messages.count(m.id))
       c.unseen++;
     if (!outOfSequence)
@@ -3513,7 +3513,9 @@ Harbor::KeyPress(wint_t k)
   }
   if (k == 7)
   {
-    CloseMenu();
+    // Latest must not discard a pending attachment's confirmation and caption.
+    if (m_Menu != "attachments")
+      CloseMenu();
     Latest();
     return;
   }
@@ -3957,6 +3959,14 @@ Harbor::Mouse(const MEVENT& e)
       e.x >= m_DialogX && e.x < m_DialogX + m_DialogW && e.y >= m_DialogY && e.y < m_DialogY + m_DialogH;
     if (!inside && (e.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED | BUTTON1_DOUBLE_CLICKED)))
     {
+      // The visible Latest bar changes only the history, keeping attachment confirmation open.
+      if (m_Menu == "attachments")
+        for (const auto& hit : m_Hits)
+          if (hit.type == "latest" && e.y == hit.y && e.x >= hit.x && e.x < hit.x + hit.w)
+          {
+            Latest();
+            return;
+          }
       m_Browse = false;
       if (c)
         c->selected.clear();
