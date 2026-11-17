@@ -4,7 +4,8 @@
     "tests/harbor/native_smoke.py",
     "tests/harbor/rich_actions_smoke.py",
     "tests/harbor/right_click_smoke.py",
-    "tests/harbor/word_navigation_smoke.py"
+    "tests/harbor/word_navigation_smoke.py",
+    "tests/harbor/list_spacing_smoke.py"
   ],
   "lanes": {
     "static": [
@@ -12,7 +13,8 @@
       "tests/harbor/native_smoke.py",
       "tests/harbor/rich_actions_smoke.py",
       "tests/harbor/right_click_smoke.py",
-      "tests/harbor/word_navigation_smoke.py"
+      "tests/harbor/word_navigation_smoke.py",
+      "tests/harbor/list_spacing_smoke.py"
     ],
     "format": [
       "tests/harbor/format_test.cpp"
@@ -61,6 +63,12 @@
     ],
     "word_navigation": [
       "tests/harbor/word_navigation_smoke.py"
+    ],
+    "reply_preview": [
+      "tests/harbor/reply_preview_smoke.py"
+    ],
+    "list_spacing": [
+      "tests/harbor/list_spacing_smoke.py"
     ]
   }
 }

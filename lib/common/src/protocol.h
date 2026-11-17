@@ -205,6 +205,9 @@ struct ChatMessage
   std::string quotedId;
   std::string quotedText;
   std::string quotedSender;
+  std::string quotedChatId; // empty: legacy same-conversation reply; "?": unknown Telegram chat
+  std::string quotedSenderName; // origin name when no public sender identity exists
+  std::string quotedRichText; // native quote entities, including spoilers
   std::string fileInfo;
   std::string richText; // optional native text + formatting ranges, see richtext.h; db cached
   std::string link; // only required for tgchat, sponsored msg, not db cached
@@ -262,6 +265,7 @@ public:
   std::string chatId;
   std::string msgId;
   bool cached = true; // try cache before fetch
+  bool replyPreview = false; // exact read; return separately from visible history
 };
 
 class GetMessagesRequest : public RequestMessage
@@ -527,6 +531,7 @@ public:
   std::string chatId;
   std::vector<ChatMessage> chatMessages;
   std::string fromMsgId;
+  std::string previewMsgId; // identifies an exact reply-preview response, including failure
   bool cached = false;
   bool sequence = false;
 };

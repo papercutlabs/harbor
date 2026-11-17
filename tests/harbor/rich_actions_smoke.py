@@ -127,7 +127,7 @@ for cols in (56, 110):
         assert '‹' not in read(clip) and '›' not in read(clip) and '```' not in read(clip), repr(read(clip))
         assert 'sh ~/Downloads/create-hive-next-repos.s' in read(clip), repr(read(clip))
         # a reply excerpt quoting the spoiler message keeps it concealed
-        visible(t, 'Got it, I will keep that word private.'); t.expect('│ The code word is ▒▒▒'); gone(t, 'harbor-42')
+        visible(t, 'Got it, I will keep that word private.'); t.expect('│ Doug: The code word is ▒▒▒'); gone(t, 'harbor-42')
         visible(t, 'Last word: the deploy key is'); t.expect('Last word: the deploy key is ▒▒▒▒'); gone(t, 'swordfish')
         if cols == 56:
             # real wrapping at 56 columns keeps the bold range on both wrapped lines
@@ -150,14 +150,14 @@ try:
     t.expect('https://example.com/plans/PCL-1312?view=full'); t.send(b'\r'); t.pump(.5)
     assert read(opened) == 'https://example.com/plans/PCL-1312?view=full\n', read(opened)
     tools(t, 'The code word', 'Reveal spoiler'); t.expect('The code word is harbor-42, keep it.')
-    visible(t, 'Got it, I will keep'); assert '│ The code word is harbor' not in t.text, t.text  # excerpt stays concealed
+    visible(t, 'Got it, I will keep'); assert '│ Doug: The code word is harbor' not in t.text, t.text  # excerpt stays concealed
     tools(t, 'That was the quote', 'Expand quote'); t.expect('│ second quoted line')
     t.send('draft stays put')
     actions(t, 'Replying to the original plan.'); t.click_text('Go to replied message')
     t.expect('Original plan: keep drafts unique and offline.', timeout=5)
     assert 'get-message chat=rich msg=' in read(requests), read(requests)
     commands(t, 'Return to previous position'); t.expect('Replying to the original plan.')
-    t.expect('│ Original plan: keep drafts unique'); t.send(b'\x1b'); t.expect('draft stays put')
+    t.expect('│ Doug: Original plan: keep drafts unique'); t.send(b'\x1b'); t.expect('draft stays put')
     actions(t, 'This replies to a message'); t.click_text('Go to replied message')
     t.expect('The original message is unavailable', timeout=16)
     print('PASS link chooser, spoiler reveal, quote toggle, unloaded reply visit/return with draft, unavailable original')

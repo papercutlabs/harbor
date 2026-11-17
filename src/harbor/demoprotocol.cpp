@@ -96,9 +96,42 @@ HarborDemo::SeedRich(const std::function<void(const std::string&, const std::str
     auto& m = m_Messages["rich"].back();
     m.richText = RichText::Encode(native);
     m.quotedId = quoted;
+    m.quotedChatId = "rich";
     m.isPinned = pinned;
     return m.id;
   };
+  if (getenv("HARBOR_DEMO_REPLIES"))
+  {
+    const auto parent = rich("doug", 1, "Older parent outside the loaded page.", {});
+    for (int i = 0; i < 60; ++i)
+      add("rich", "doug", "Older filler " + std::to_string(i), 2 + i, "", "");
+    rich("doug", 70, "First received reply.", {}, parent);
+    rich("doug", 71, "Second reply shares the parent.", {}, parent);
+    // A same-id message exists in this conversation, but the reply belongs to another chat.
+    rich("doug", 72, "Wrong same-chat collision.", {});
+    auto collision = m_Messages["rich"].back();
+    collision.senderId = "leo";
+    collision.text = "Correct cross-chat original.";
+    collision.richText = RichText::Encode({ collision.text, {} });
+    m_Messages["studio"].push_back(collision);
+    rich("doug", 73, "Cross-chat received reply.", {}, collision.id);
+    m_Messages["rich"].back().quotedChatId = "studio";
+    rich("doug", 74, "Legacy reply with lost chat metadata.", {}, collision.id);
+    m_Messages["rich"].back().quotedChatId.clear();
+    rich("doug", 75, "Unknown target with supplied quote.", {}, "0");
+    auto& supplied = m_Messages["rich"].back();
+    supplied.quotedChatId = "?";
+    supplied.quotedSenderName = "Original author";
+    supplied.quotedText = "secret words and public quote";
+    supplied.quotedRichText = RichText::Encode({ supplied.quotedText, { { RichText::Spoiler, 0, 12, "" } } });
+    rich("doug", 76, "Reply to inaccessible original.", {}, "missing");
+    rich("doug", 77, "Reply to deleted original.", {}, "deleted");
+    auto deleted = collision;
+    deleted.id = "deleted";
+    deleted.isDeleted = true;
+    m_Messages["rich"].insert(m_Messages["rich"].begin(), deleted);
+    return;
+  }
   const auto first = rich("doug", 1, "Original plan: keep drafts unique and offline.",
                           { { RichText::Bold, 0, 13, "" } }, "", true);
   for (int i = 0; i < 60; ++i)
@@ -287,17 +320,18 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
     case GetMessageRequestType:
     {
       auto r = std::static_pointer_cast<GetMessageRequest>(request);
-      Record("get-message chat=" + r->chatId + " msg=" + r->msgId);
+      Record("get-message chat=" + r->chatId + " msg=" + r->msgId + (r->replyPreview ? " preview=1" : ""));
       auto& messages = m_Messages[r->chatId];
       auto it = std::find_if(messages.begin(), messages.end(), [&](const ChatMessage& m) { return m.id == r->msgId; });
       if (it == messages.end())
       {
         // unavailable originals get no reply, as with a deleted Telegram message, or with
         // HARBOR_DEMO_FETCH_ERROR the explicit failure TDLib reports for a message it cannot load
-        if (getenv("HARBOR_DEMO_FETCH_ERROR"))
+        if (r->replyPreview || getenv("HARBOR_DEMO_FETCH_ERROR"))
         {
           auto failure = std::make_shared<NewMessagesNotify>(m_Id);
           failure->chatId = r->chatId;
+          failure->previewMsgId = r->replyPreview ? r->msgId : "";
           failure->success = false;
           failure->sequence = false;
           Emit(failure);
@@ -309,6 +343,7 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
       n->success = true;
       n->sequence = false;
       n->chatMessages = { *it };
+      n->previewMsgId = r->replyPreview ? r->msgId : "";
       Later(DelayMs("HARBOR_DEMO_FETCH_DELAY_MS"), n);
       break;
     }

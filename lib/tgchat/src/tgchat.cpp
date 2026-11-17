@@ -8,6 +8,7 @@
 #include "tgchat.h"
 #include "forumutil.h"
 #include "richtextutil.h"
+#include "replyutil.h"
 
 #include <cstdint>
 #include <functional>
@@ -892,6 +893,42 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
         LOG_DEBUG("Get message");
         std::shared_ptr<GetMessageRequest> getMessageRequest =
           std::static_pointer_cast<GetMessageRequest>(p_RequestMessage);
+
+        if (getMessageRequest->replyPreview)
+        {
+          // An exact preview result never enters history or the pending visit path.
+          auto result = std::make_shared<NewMessagesNotify>(m_ProfileId);
+          result->chatId = getMessageRequest->chatId;
+          result->previewMsgId = getMessageRequest->msgId;
+          if (getMessageRequest->cached && MessageCache::GetOneMessage(m_ProfileId,
+                result->chatId, result->previewMsgId, result->chatMessages))
+          {
+            result->success = !result->chatMessages.front().isDeleted;
+            result->cached = true;
+            CallMessageHandler(result);
+            return;
+          }
+          SendQuery(td::td_api::make_object<td::td_api::getMessage>(ChatNumber(result->chatId),
+                      StrUtil::NumFromHex<int64_t>(result->previewMsgId)),
+            [this, result](Object object)
+            {
+              if (object->get_id() == td::td_api::message::ID)
+              {
+                auto message = td::move_tl_object_as<td::td_api::message>(object);
+                ChatMessage converted;
+                TdMessageConvert(*message, converted);
+                if (converted.id == result->previewMsgId)
+                {
+                  result->success = true;
+                  result->chatMessages = { converted };
+                  // Keep the actual topic identity for navigation and cache lookup.
+                  result->chatId = MessageChatId(*message);
+                }
+              }
+              CallMessageHandler(result);
+            });
+          break;
+        }
 
         if (getMessageRequest->cached)
         {
@@ -3730,8 +3767,17 @@ void TgChat::Impl::TdMessageConvert(td::td_api::message& p_TdMessage, ChatMessag
 
   if (p_TdMessage.reply_to_ && (p_TdMessage.reply_to_->get_id() == td::td_api::messageReplyToMessage::ID))
   {
-    auto& reply_to_message = static_cast<const td::td_api::messageReplyToMessage&>(*p_TdMessage.reply_to_);
-    p_ChatMessage.quotedId = StrUtil::NumToHex(reply_to_message.message_id_);
+    auto& reply_to_message = static_cast<td::td_api::messageReplyToMessage&>(*p_TdMessage.reply_to_);
+    TelegramReply::Convert(reply_to_message, p_ChatMessage);
+    // Telegram may supply media context even if the original is inaccessible.
+    if (p_ChatMessage.quotedText.empty() && reply_to_message.content_)
+    {
+      std::string fileInfo;
+      TdMessageContentConvert(*reply_to_message.content_, 0, p_ChatMessage.quotedText, fileInfo,
+                              &p_ChatMessage.quotedRichText);
+      if (p_ChatMessage.quotedText.empty() && !fileInfo.empty())
+        p_ChatMessage.quotedText = "Attachment";
+    }
   }
 
   p_ChatMessage.hasMention = p_TdMessage.contains_unread_mention_;

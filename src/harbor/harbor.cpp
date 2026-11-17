@@ -815,6 +815,33 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
     case NewMessagesNotifyType:
     {
       auto n = std::static_pointer_cast<NewMessagesNotify>(e);
+      if (!n->previewMsgId.empty())
+      {
+        Conversation target;
+        target.profile = p;
+        target.id = n->chatId;
+        ChatMessage reference;
+        reference.quotedChatId = n->chatId;
+        reference.quotedId = n->previewMsgId;
+        auto& original = m_ReplyOriginals[ReplyKey(target, reference)];
+        original.pending = false;
+        original.chat = n->chatId;
+        original.found = n->success && !n->chatMessages.empty() &&
+                         n->chatMessages.front().id == n->previewMsgId &&
+                         !n->chatMessages.front().isDeleted;
+        if (original.found)
+          original.message = n->chatMessages.front();
+        auto visitFrom = original.visitFrom;
+        original.visitFrom.clear();
+        if (!visitFrom.empty() && m_Current == visitFrom)
+        {
+          if (original.found)
+            VisitReply(visitFrom, reference);
+          else
+            Notify("The original message is unavailable");
+        }
+        break;
+      }
       auto& c = Ensure(p, n->chatId);
       const auto oldest = Contiguous(c.order, c.detached);
       int previousRows = 0;
@@ -900,7 +927,14 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
       if (n->success)
       {
         auto& c = Ensure(p, n->chatId);
-        c.messages.erase(n->msgId);
+        auto& deleted = c.messages[n->msgId];
+        deleted.id = n->msgId;
+        deleted.isDeleted = true;
+        ChatMessage reference;
+        reference.quotedChatId = c.id;
+        reference.quotedId = n->msgId;
+        auto& original = m_ReplyOriginals[ReplyKey(c, reference)];
+        original.pending = original.found = false;
         Merge(c, {});
       }
       else
@@ -1030,6 +1064,9 @@ Harbor::OpenChat(const std::string& key)
     // stay loaded, but it is neither shown later nor reported unavailable there
     previous->visit.clear();
     previous->visitUntil = 0;
+    for (auto& original : m_ReplyOriginals)
+      if (original.second.visitFrom == m_Current)
+        original.second.visitFrom.clear();
     if (previous->back.set && !previous->back.landed)
       previous->back = Conversation::Mark();
     if (!previous->back.set)
@@ -1107,12 +1144,7 @@ Harbor::BuildRows()
     m_Rows.push_back({ Pad(left, room) + L" " + right, id, m.isOutgoing, true });
     if (!m.quotedId.empty())
     {
-      auto quoted = c->messages.find(m.quotedId);
-      ChatMessage local;
-      local.text = m.quotedText;
-      std::wstring excerpt = quoted != c->messages.end() ? Excerpt(*c, quoted->second)
-                             : m.quotedText.empty()       ? L"Reply to a message"
-                                                          : Excerpt(*c, local);
+      std::wstring excerpt = ReplyExcerpt(*c, m);
       int room = std::max(4, width - 2);
       if (Width(excerpt) > room)
         excerpt = Pad(excerpt, room - 1) + L"…";
@@ -1128,6 +1160,10 @@ Harbor::BuildRows()
       for (size_t i = 0; i < formatted.text.size(); ++i)
         if (!iswspace(formatted.text[i]))
           styles[{ layout.cursors[i].row, layout.cursors[i].col }] |= formatted.styles[i];
+      // display-only gaps after list items and headings: same message, no source characters
+      std::set<int> spaced;
+      for (auto at : HarborFormatting::Spacers(formatted))
+        spaced.insert(layout.cursors[at].row);
       for (size_t r = 0; r < layout.lines.size(); ++r)
       {
         Row row{ layout.lines[r], id, m.isOutgoing, false };
@@ -1139,6 +1175,8 @@ Harbor::BuildRows()
           col += Width(ch);
         }
         m_Rows.push_back(std::move(row));
+        if (spaced.count(int(r)))
+          m_Rows.push_back({ L"", id, m.isOutgoing, false });
       }
     }
     if (!m.fileInfo.empty())
@@ -1726,6 +1764,7 @@ Harbor::Send()
   m.text = S(c->draft);
   m.richText.clear();
   m.quotedId = c->reply;
+  m.quotedChatId = c->id;
   if (!c->reply.empty())
   {
     auto it = c->messages.find(c->reply);
@@ -1733,6 +1772,7 @@ Harbor::Send()
     {
       m.quotedText = it->second.text;
       m.quotedSender = it->second.senderId;
+      m.quotedRichText = it->second.richText;
     }
   }
   const bool wasEditing = !c->editing.empty();
@@ -2056,12 +2096,20 @@ Harbor::Commands()
 std::vector<Harbor::Option>
 Harbor::DeskOptions()
 {
-  // Only a host that started Harbor with HARBOR_DESK_COMMANDS adds entries; ordinary Harbor has none.
+  // Discover Desk on each menu open, including when Desk started after this Harbor window.
+  // An explicit host path takes precedence over the current user's installed Desk commands.
   // Each line: label<TAB>hint<TAB>argv0<TAB>argv1... The argv is executed directly; no shell is involved.
   std::vector<Option> options;
   const char* path = getenv("HARBOR_DESK_COMMANDS");
+  std::string installedPath;
   if (path == nullptr || *path == '\0')
-    return options;
+  {
+    const char* home = getenv("HOME");
+    if (home == nullptr || *home == '\0')
+      return options;
+    installedPath = std::string(home) + "/.office/desk/harbor-desk-commands";
+    path = installedPath.c_str();
+  }
   std::ifstream input(path);
   std::string line;
   while (std::getline(input, line))
@@ -2356,10 +2404,10 @@ Harbor::Actions(bool minimal)
   if (!message.quotedId.empty())
     m_Options.push_back({ "Go to replied message",
                           "Commands › Return goes back",
-                          [this, key, id = message.quotedId]
+                          [this, key, message]
                           {
                             CloseMenu();
-                            Visit(key, id);
+                            VisitReply(key, message);
                           } });
   if (!message.fileInfo.empty())
     m_Options.push_back({ "Open / play attachment",
@@ -2465,6 +2513,133 @@ Harbor::Excerpt(const Conversation& c, const ChatMessage& m) const
     return m.fileInfo.empty() ? L"Reply to a message" : L"Attachment";
   return text;
 }
+namespace
+{
+std::string ReplyChat(std::string chat)
+{
+  // Telegram message ids are unique within the physical chat, across its forum topics.
+  return chat.substr(0, chat.find('#'));
+}
+}
+std::string
+Harbor::ReplyKey(const Conversation& c, const ChatMessage& m) const
+{
+  return Key(c.profile, ReplyChat(m.quotedChatId)) + "/" + m.quotedId;
+}
+const ChatMessage*
+Harbor::LoadedReply(const Conversation& c, const ChatMessage& m) const
+{
+  if (m.quotedChatId.empty() || m.quotedChatId == "?")
+    return nullptr; // legacy rows discarded the chat; never guess by a coincidentally equal id
+  for (const auto& entry : m_Chats)
+  {
+    const auto& chat = entry.second;
+    if (chat.profile != c.profile || ReplyChat(chat.id) != ReplyChat(m.quotedChatId))
+      continue;
+    auto it = chat.messages.find(m.quotedId);
+    if (it != chat.messages.end())
+      return &it->second;
+  }
+  return nullptr;
+}
+std::wstring
+Harbor::ReplyExcerpt(Conversation& c, const ChatMessage& m)
+{
+  auto original = LoadedReply(c, m);
+  auto key = ReplyKey(c, m);
+  if (!original && !m.quotedChatId.empty() && m.quotedChatId != "?" && m.quotedId != "0")
+  {
+    auto inserted = m_ReplyOriginals.emplace(key, ReplyOriginal());
+    if (inserted.second)
+    {
+      auto request = std::make_shared<GetMessageRequest>();
+      request->chatId = m.quotedChatId;
+      request->msgId = m.quotedId;
+      request->replyPreview = true;
+      Request(c.profile, request);
+    }
+    if (inserted.first->second.found)
+      original = &inserted.first->second.message;
+  }
+  ChatMessage snippet;
+  snippet.text = m.quotedText;
+  snippet.richText = m.quotedRichText;
+  // A supplied quote is the selected part of the original, so keep it when available.
+  bool supplied = !snippet.text.empty() || !snippet.richText.empty();
+  std::wstring text;
+  if (supplied)
+    text = Excerpt(c, snippet);
+  else if (original && !original->isDeleted)
+    text = Excerpt(c, *original);
+  else
+  {
+    auto pending = m_ReplyOriginals.find(key);
+    text = pending != m_ReplyOriginals.end() && pending->second.pending
+             ? L"Loading original message…" : L"Original message unavailable";
+  }
+  std::string name = !m.quotedSenderName.empty() ? m.quotedSenderName
+                     : !m.quotedSender.empty() ? Name(c.profile, m.quotedSender)
+                     : original && !original->isDeleted ? Name(c.profile, original->senderId) : "";
+  return name.empty() ? text : Safe(W(name)) + L": " + text;
+}
+void
+Harbor::VisitReply(const std::string& key, const ChatMessage& m)
+{
+  auto it = m_Chats.find(key);
+  if (it == m_Chats.end()) return;
+  auto& c = it->second;
+  if (m.quotedChatId.empty() || m.quotedChatId == "?" || m.quotedId == "0")
+  {
+    Notify("The original message is unavailable");
+    return;
+  }
+  const auto* loaded = LoadedReply(c, m);
+  if (!loaded)
+  {
+    ReplyExcerpt(c, m); // starts the same deduplicated exact read if needed
+    auto& pending = m_ReplyOriginals[ReplyKey(c, m)];
+    if (pending.pending)
+    {
+      pending.visitFrom = key;
+      Notify("Loading the original message…");
+      return;
+    }
+    if (!pending.found)
+    {
+      Notify("The original message is unavailable");
+      return;
+    }
+  }
+  else if (loaded->isDeleted)
+  {
+    Notify("The original message is unavailable");
+    return;
+  }
+  std::string target = m.quotedChatId;
+  // Prefer the loaded original's topic, then the resolved Telegram topic, over the base chat.
+  for (const auto& entry : m_Chats)
+    if (entry.second.profile == c.profile && ReplyChat(entry.second.id) == ReplyChat(target) &&
+        entry.second.messages.count(m.quotedId))
+      target = entry.second.id;
+  auto resolved = m_ReplyOriginals.find(ReplyKey(c, m));
+  if (resolved != m_ReplyOriginals.end() && resolved->second.found)
+    target = resolved->second.chat;
+  auto& destination = Ensure(c.profile, target);
+  const auto destinationKey = Key(destination.profile, destination.id);
+  if (destinationKey != key)
+  {
+    Remember(c);
+    // This mark returns to the source we have already reached, not an unfinished target visit.
+    c.back.landed = true;
+    if (resolved != m_ReplyOriginals.end() && resolved->second.found &&
+        !destination.messages.count(m.quotedId))
+      Merge(destination, { resolved->second.message }, true);
+  }
+  Visit(destinationKey, m.quotedId);
+  if (destinationKey != key && destination.back.set)
+    destination.back.returnKey = key;
+}
+
 void
 Harbor::Remember(Conversation& c)
 {
@@ -2535,6 +2710,12 @@ Harbor::ReturnBack()
   c->back = Conversation::Mark();
   c->visit.clear();
   c->visitUntil = 0;
+  if (!mark.returnKey.empty())
+  {
+    OpenChat(mark.returnKey);
+    ReturnBack();
+    return;
+  }
   c->selected = mark.selected;
   m_Browse = mark.browse;
   c->follow = mark.follow;

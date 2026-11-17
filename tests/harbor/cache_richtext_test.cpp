@@ -1,4 +1,4 @@
-// Native formatting through the actual MessageCache: schema 12 -> 13 migration of an existing
+// Native formatting through the actual MessageCache: schema 12 -> 14 migration of an existing
 // database, new formatted rows, an in-sequence re-fetch and reload after a cache restart.
 // Requires SQLite >= 3.35.0 at test time (ALTER TABLE ... DROP COLUMN rewinds the db to schema 12).
 #include "appconfig.h"
@@ -89,6 +89,9 @@ main()
     sqlite3* db = nullptr;
     assert(sqlite3_open(dbPath.c_str(), &db) == SQLITE_OK);
     Exec(db, "ALTER TABLE messages DROP COLUMN richText;");
+    Exec(db, "ALTER TABLE messages DROP COLUMN quotedChatId;");
+    Exec(db, "ALTER TABLE messages DROP COLUMN quotedSenderName;");
+    Exec(db, "ALTER TABLE messages DROP COLUMN quotedRichText;");
     Exec(db, "UPDATE version SET schema = 12;");
     Exec(db, "INSERT INTO messages (chatId, id, senderId, text, quotedId, quotedText, quotedSender, fileInfo, "
              "timeSent, isOutgoing, isRead, isEdited, isDeleted, isPinned) VALUES ('" + chat +
@@ -100,11 +103,11 @@ main()
   // 2. reopening migrates additively: the legacy row keeps its text and has no native data
   Open();
   auto legacy = Load("old1", "**legacy** markdown");
-  assert(legacy.richText.empty());
+  assert(legacy.richText.empty() && legacy.quotedChatId.empty() && legacy.quotedRichText.empty());
   {
     sqlite3* db = nullptr;
     assert(sqlite3_open(dbPath.c_str(), &db) == SQLITE_OK);
-    assert(Scalar(db, "SELECT schema FROM version;") == 13);
+    assert(Scalar(db, "SELECT schema FROM version;") == 14);
     assert(Scalar(db, "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'richText';") == 1);
     assert(Scalar(db, "SELECT COUNT(*) FROM messages;") == 1);
     sqlite3_close(db);
@@ -119,11 +122,20 @@ main()
   m.senderId = "s";
   m.text = "legacy text consumers still read this";
   m.richText = RichText::Encode(native);
+  m.quotedId = "original";
+  m.quotedChatId = "other-chat";
+  m.quotedSender = "sender";
+  m.quotedSenderName = "Hidden author";
+  m.quotedText = "secret";
+  m.quotedRichText = RichText::Encode({ "secret", { { RichText::Spoiler, 0, 6, "" } } });
   m.timeSent = 2000;
   m.isOutgoing = false;
   MessageCache::AddMessages(profile, chat, "", { m });
   auto loaded = Load("n1", m.text);
   assert(loaded.richText == m.richText);
+  assert(loaded.quotedId == m.quotedId && loaded.quotedChatId == m.quotedChatId &&
+         loaded.quotedSender == m.quotedSender && loaded.quotedSenderName == m.quotedSenderName &&
+         loaded.quotedText == m.quotedText && loaded.quotedRichText == m.quotedRichText);
   RichText::Message decoded;
   assert(RichText::Decode(loaded.richText, decoded) && decoded.text == native.text &&
          decoded.entities.size() == 2 && decoded.entities[0].arg == "shell" &&
@@ -168,7 +180,10 @@ main()
            : row.id == "n2" ? row.richText == "R1 0\n**typed stars**"
                             : row.id == "old1" && row.richText.empty());
   MessageCache::SetMessageHandler(nullptr);
-  assert(Load("n1", "now **bold**").richText == RichText::Encode(edited));
+  auto restarted = Load("n1", "now **bold**");
+  assert(restarted.richText == RichText::Encode(edited));
+  assert(restarted.quotedChatId == m.quotedChatId && restarted.quotedSenderName == m.quotedSenderName &&
+         restarted.quotedRichText == m.quotedRichText);
   assert(Load("old1", "**legacy** markdown").richText.empty());
   assert(Load("n2", plain.text).richText == "R1 0\n**typed stars**");
   MessageCache::Cleanup();
@@ -177,7 +192,7 @@ main()
   std::string line;
   std::getline(in, line);
   assert(line == "draft\tkeep me exactly");
-  std::cout << "PASS cache rich text: schema 12->13 additive migration keeps legacy rows, native rows, "
+  std::cout << "PASS cache rich text: schema 12->14 additive reply/native migration keeps legacy rows, native rows, "
                "zero-entity rows, in-sequence re-fetch and restart reload (single fetch and history page) through MessageCache\n";
   return 0;
 }
