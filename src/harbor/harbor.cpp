@@ -2096,12 +2096,20 @@ Harbor::Commands()
 std::vector<Harbor::Option>
 Harbor::DeskOptions()
 {
-  // Only a host that started Harbor with HARBOR_DESK_COMMANDS adds entries; ordinary Harbor has none.
+  // Discover Desk on each menu open, including when Desk started after this Harbor window.
+  // An explicit host path takes precedence over the current user's installed Desk commands.
   // Each line: label<TAB>hint<TAB>argv0<TAB>argv1... The argv is executed directly; no shell is involved.
   std::vector<Option> options;
   const char* path = getenv("HARBOR_DESK_COMMANDS");
+  std::string installedPath;
   if (path == nullptr || *path == '\0')
-    return options;
+  {
+    const char* home = getenv("HOME");
+    if (home == nullptr || *home == '\0')
+      return options;
+    installedPath = std::string(home) + "/.office/desk/harbor-desk-commands";
+    path = installedPath.c_str();
+  }
   std::ifstream input(path);
   std::string line;
   while (std::getline(input, line))

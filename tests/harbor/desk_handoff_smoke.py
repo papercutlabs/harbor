@@ -110,10 +110,30 @@ try:
 finally:
     t.close()
 
-# Ordinary Harbor: without HARBOR_DESK_COMMANDS there is no Desk section, and Ctrl+O still only opens Commands.
-t = Terminal(cols=56, rows=38)
+# An already-running standalone Harbor discovers a later Desk installation without losing its draft.
+home = work/'ordinary-home'
+home.mkdir()
+t = Terminal(cols=56, rows=38, extra_env={'HOME': str(home), 'HARBOR_DESK_COMMANDS': ''})
 try:
     t.send('/'); t.expect('Quit Harbor'); assert 'Desk ·' not in t.text, t.text
-    print('PASS ordinary Harbor shows no Desk entries')
+    t.send(b'\x1b'); t.picker('Marina'); t.send('standalone draft')
+    installed = home/'.office/desk/harbor-desk-commands'
+    installed.parent.mkdir(parents=True)
+    installed.write_text(commands.read_text())
+    t.send(b'\x0f'); t.expect('Desk · Quota'); t.send(b'\r'); t.expect('DESK CHILD')
+    t.send(b'\r'); t.expect('Back from Desk'); t.expect('standalone draft')
+    print('PASS standalone Harbor discovers installed Desk commands on menu open and preserves its draft')
+finally:
+    t.close()
+
+# Explicit host configuration wins even when installed commands exist; a missing explicit file stays missing.
+other = work/'explicit-commands'
+other.write_text('\t'.join(['Custom', 'Explicit host', py, str(child), 'ok']) + '\n')
+t = Terminal(cols=56, rows=38, extra_env={'HOME': str(home), 'HARBOR_DESK_COMMANDS': str(other)})
+try:
+    t.send(b'\x0f'); t.expect('Desk · Custom'); assert 'Desk · Quota' not in t.text, t.text
+    other.unlink()
+    t.send(b'\x1b'); t.send(b'\x0f'); t.expect('Quit Harbor'); assert 'Desk ·' not in t.text, t.text
+    print('PASS explicit Desk commands take precedence and never fall back when their file is absent')
 finally:
     t.close()
