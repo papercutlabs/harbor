@@ -41,3 +41,4 @@ jobs:
         "$RUNNER_TEMP/harbor-smoke-venv/bin/python" -m pip install -r tests/harbor/requirements.txt
         "$RUNNER_TEMP/harbor-smoke-venv/bin/python" tests/harbor/popup_hierarchy_smoke.py
         "$RUNNER_TEMP/harbor-smoke-venv/bin/python" tests/harbor/command_keys_smoke.py
+        "$RUNNER_TEMP/harbor-smoke-venv/bin/python" tests/harbor/word_navigation_smoke.py

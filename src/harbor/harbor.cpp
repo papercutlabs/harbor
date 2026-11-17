@@ -70,7 +70,9 @@ enum
 {
   FindKey = KEY_MAX + 101,
   NewlineKey,
-  DeleteWordKey
+  DeleteWordKey,
+  BackwardWordKey,
+  ForwardWordKey
 };
 std::wstring
 W(const std::string& s)
@@ -1580,6 +1582,21 @@ Harbor::EditKey(wint_t k)
       c->cursor++;
     while (c->cursor < c->draft.size() && Width(c->draft[c->cursor]) == 0)
       c->cursor++;
+  }
+  else if (k == BackwardWordKey)
+  {
+    // Match Ctrl+W: whitespace separates words; punctuation stays with its word.
+    while (c->cursor && iswspace(c->draft[c->cursor - 1]))
+      --c->cursor;
+    while (c->cursor && !iswspace(c->draft[c->cursor - 1]))
+      --c->cursor;
+  }
+  else if (k == ForwardWordKey)
+  {
+    while (c->cursor < c->draft.size() && iswspace(c->draft[c->cursor]))
+      ++c->cursor;
+    while (c->cursor < c->draft.size() && !iswspace(c->draft[c->cursor]))
+      ++c->cursor;
   }
   else if (k == KEY_HOME || k == 1)
     c->cursor = 0;
@@ -3236,11 +3253,14 @@ Harbor::KeyPress(wint_t k)
     if (m_Menu == "attachments" &&
         (k == KEY_BACKSPACE || k == 127 || k == 8 || k == KEY_DC || k == KEY_LEFT || k == KEY_RIGHT ||
          k == KEY_HOME || k == KEY_END || k == 1 || k == 5 || k == 21 || k == DeleteWordKey || k == 23 ||
-         k == NewlineKey || k == 10))
+         k == NewlineKey || k == 10 || k == BackwardWordKey || k == ForwardWordKey))
     {
       EditKey(k);
       return;
     }
+    // Composer-only commands must not become Unicode text in picker filters.
+    if (k == BackwardWordKey || k == ForwardWordKey)
+      return;
     if (k == 27)
     {
       CloseMenu();
@@ -3316,7 +3336,8 @@ Harbor::KeyPress(wint_t k)
     FilePicker(m_Directory);
     return;
   }
-  if (k == NewlineKey || k == 10 || k == DeleteWordKey || k == 23)
+  if (k == NewlineKey || k == 10 || k == DeleteWordKey || k == 23 ||
+      k == BackwardWordKey || k == ForwardWordKey)
   {
     m_Browse = false;
     EditKey(k);
@@ -3477,7 +3498,17 @@ Harbor::ReadInput()
     wint_t key = event.code;
     m_KeyIsSpecial = event.code < 0;
     if (m_KeyIsSpecial)
+    {
       key = keys[-event.code - 1];
+      if (event.mods == 2 && (event.code == -1 || event.code == -2))
+        key = event.code == -1 ? BackwardWordKey : ForwardWordKey;
+    }
+    // Some terminals send Option-arrows as legacy Escape-b / Escape-f.
+    else if (event.mods == 2 && (event.code == 'b' || event.code == 'f'))
+    {
+      key = event.code == 'b' ? BackwardWordKey : ForwardWordKey;
+      m_KeyIsSpecial = true;
+    }
     // Legacy BS is represented by the decoder as Ctrl+H. Preserve the same
     // word-delete binding for Alt+Backspace on terminals that send BS.
     else if (event.code == 'h' && (event.mods & 6) == 6)
