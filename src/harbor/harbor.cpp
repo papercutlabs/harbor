@@ -1064,6 +1064,9 @@ Harbor::OpenChat(const std::string& key)
     // stay loaded, but it is neither shown later nor reported unavailable there
     previous->visit.clear();
     previous->visitUntil = 0;
+    for (auto& original : m_ReplyOriginals)
+      if (original.second.visitFrom == m_Current)
+        original.second.visitFrom.clear();
     if (previous->back.set && !previous->back.landed)
       previous->back = Conversation::Mark();
     if (!previous->back.set)

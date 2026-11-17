@@ -54,3 +54,22 @@ with tempfile.TemporaryDirectory(prefix='harbor-reply-proof-') as directory:
               'unknown legacy metadata, supplied spoiler quote, deleted/inaccessible parent, stable draft/narrow redraw')
     finally:
         t.close()
+
+# A pending navigation intent ends on leaving, even when the user returns before the reply arrives.
+t = Terminal(cols=90, rows=85, extra_env={
+    'HARBOR_DEMO_RICH': '1', 'HARBOR_DEMO_REPLIES': '1', 'HARBOR_DEMO_FETCH_DELAY_MS': '3000'})
+try:
+    t.picker('Doug formatting')
+    t.click_text('First received reply.', button=2)
+    t.click_text('Go to replied message')
+    t.expect('Loading the original message')
+    t.picker('Kleya')
+    t.picker('Doug formatting')
+    t.pump(3.2)
+    assert 'Showing the message' not in t.text, t.text
+    t.expect('First received reply.')
+    t.click_text('/ commands')
+    assert 'Return to previous position' not in t.text, t.text
+    print('PASS leaving and returning cancels a pending preview jump without a stale return mark')
+finally:
+    t.close()
