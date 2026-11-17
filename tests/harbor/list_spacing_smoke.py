@@ -69,9 +69,32 @@ try:
     # redraws keep the message where it was
     t.send('x'); t.send(b'\x7f')
     assert row(t, 'Steps') == heading and row(t, '2. Second') == second, t.text
-    t.resize(56, 44); t.expect('Done.'); t.resize(40, 44); t.expect('Done.')
+    t.resize(56, 44); t.expect('Done.')
+    wide_x, wide_heading = point(t, 'Steps')
+    wide_first, wide_second = row(t, '1. First'), row(t, '2. Second')
+    assert wide_first == wide_heading + 2 and empty(t, wide_heading + 1, wide_x), t.text
+    assert empty(t, wide_second - 1, wide_x), t.text
+    assert all(not empty(t, y, wide_x) for y in range(wide_first, wide_second - 1)), t.text
+    t.resize(40, 44); t.expect('Done.')
     assert row(t, '2. Second') - row(t, 'Steps') == second - heading, t.text
     print('PASS list and heading spacing: wrapped items, existing gaps, code and quotes, exact selection and copy, redraw')
 finally:
     t.close()
     subprocess.run(['/usr/bin/osascript', '-l', 'JavaScript', '-e', clear, name], capture_output=True, timeout=5)
+
+t = Terminal(cols=40, rows=26)
+try:
+    t.picker('Studio')
+    t.send('\x1b[200~' + '\n'.join(f'{i}. Anchor item {i:02}' for i in range(1, 41)) + '\x1b[201~')
+    t.send(b'\r'); t.expect('Anchor item 40'); t.send(b'\x1b[5~')
+    before = [line.strip() for line in t.screen.display if 'Anchor item' in line]
+    assert before and 'Anchor item 40' not in t.text, t.text
+    t.send('draft'); t.send(b'\x7f' * 5)
+    assert [line.strip() for line in t.screen.display if 'Anchor item' in line] == before, t.text
+    t.resize(56, 26)
+    assert [line.strip() for line in t.screen.display if 'Anchor item' in line] == before, t.text
+    t.resize(40, 26)
+    assert [line.strip() for line in t.screen.display if 'Anchor item' in line] == before, t.text
+    print('PASS spaced message non-follow anchor across draft redraw and 40/56-column resize')
+finally:
+    t.close()
