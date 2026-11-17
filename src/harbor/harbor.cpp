@@ -1675,8 +1675,13 @@ Harbor::EditKey(wint_t k)
   }
   else if (k == 21)
   {
-    c->draft.erase(0, c->cursor);
-    c->cursor = 0;
+    // Cmd/Ctrl-U deletes back to the start of the current hard line only;
+    // at a line start it leaves the preceding newline alone.
+    size_t start = c->cursor;
+    while (start && c->draft[start - 1] != L'\n')
+      --start;
+    c->draft.erase(start, c->cursor - start);
+    c->cursor = start;
   }
   else if (k == KEY_UP || k == KEY_DOWN)
   {
@@ -3747,6 +3752,10 @@ Harbor::ReadInput()
       key = DeleteWordKey;
       m_KeyIsSpecial = true;
     }
+    // Enhanced Super+Backspace (Cmd on macOS) shares Ctrl-U's line delete;
+    // legacy terminals already send Ctrl-U for Cmd-Backspace.
+    else if ((event.code == 127 || event.code == 8) && event.mods == 32)
+      key = 21;
     else if (event.code == 127 || event.code == 8)
     {
       key = event.mods & 2 ? DeleteWordKey : KEY_BACKSPACE;

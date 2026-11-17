@@ -102,6 +102,11 @@ class Terminal:
         end=time.monotonic()+timeout
         while text not in self.text and time.monotonic()<end: self.pump(.1)
         assert text in self.text, f'Missing {text!r}:\n{self.text}'
+    def clear_draft(self, lines=1):
+        # Ctrl+U deletes only the current hard line; Backspace then joins the previous one.
+        self.send(b'\x05')
+        for _ in range(lines-1): self.send(b'\x15');self.send(b'\x7f')
+        self.send(b'\x15')
     def picker(self, name):
         self.send(b'\x0b');self.expect('Find a conversation');self.send(name);self.send(b'\r')
         deadline=time.monotonic()+3
@@ -162,7 +167,7 @@ if __name__=='__main__':
         t.send(b'\x15');t.send('/');t.expect('Commands & shortcuts');t.send(b'\x1b');check('Slash opens commands from an empty composer')
         t.send('literal/');t.expect('literal/');assert 'Commands & shortcuts' not in t.text;t.send(b'\x15');check('Slash is literal in nonempty drafts')
         t.send('line one');t.send(b'\x1b[13;2u');t.send('line two');t.expect('line two');t.expect('line one');check('CSI-u Shift+Enter inserts newline')
-        t.send(b'\x15');t.send('Unicode: 你好 🌊 ǚ ɚ');t.expect('你好');t.expect('ɚ');check('Unicode and special-key code points remain distinct')
+        t.clear_draft(2);t.send('Unicode: 你好 🌊 ǚ ɚ');t.expect('你好');t.expect('ɚ');check('Unicode and special-key code points remain distinct')
         t.send(b'\x1b[107;5u');t.expect('Find a conversation');t.send(b'\x1b');check('Enhanced Ctrl+K finds chats')
         t.send(b'\x1b[107;3u');t.expect('Find a conversation');t.send(b'\x1b');check('Enhanced Option+K finds chats')
         t.send(b'\x15');t.send('Persistent draft')
