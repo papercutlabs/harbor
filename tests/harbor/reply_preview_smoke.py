@@ -38,6 +38,16 @@ with tempfile.TemporaryDirectory(prefix='harbor-reply-proof-') as directory:
         t.pump(.3)
         assert requests.read_text() == log
         assert 'Draft stays here' in t.text and 'secret words' not in t.text
+        t.resize(90, 85)
+        # Save a non-following reading position and message browsing mode, not only the draft.
+        t.send(b'\x1b[<64;20;20M')
+        t.click_text('Cross-chat received reply.', button=2)
+        t.send(b'\x1b')
+        # A scrolled viewport covers the mode label with Latest; Enter must still act on the message.
+        t.send(b'\r')
+        t.expect('Message actions')
+        t.send(b'\x1b')
+        before_return = t.screen.display[5:78]
         t.click_text('Cross-chat received reply.', button=2)
         t.expect('Message actions')
         t.click_text('Go to replied message')
@@ -47,6 +57,11 @@ with tempfile.TemporaryDirectory(prefix='harbor-reply-proof-') as directory:
         t.click_text('Return to previous position')
         t.expect('Cross-chat received reply.')
         t.expect('Draft stays here')
+        # A scrolled viewport covers the mode label with Latest; Enter must still act on the message.
+        t.send(b'\r')
+        t.expect('Message actions')
+        t.send(b'\x1b')
+        assert t.screen.display[5:78] == before_return, (before_return, t.screen.display[5:78])
         output = os.environ.get('HARBOR_REPLY_EVIDENCE')
         if output:
             Path(output).write_text(t.text + '\nREQUESTS\n' + log)

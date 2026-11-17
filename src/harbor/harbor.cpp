@@ -2615,6 +2615,8 @@ Harbor::VisitReply(const std::string& key, const ChatMessage& m)
   if (destinationKey != key)
   {
     Remember(c);
+    // This mark returns to the source we have already reached, not an unfinished target visit.
+    c.back.landed = true;
     if (resolved != m_ReplyOriginals.end() && resolved->second.found &&
         !destination.messages.count(m.quotedId))
       Merge(destination, { resolved->second.message }, true);
