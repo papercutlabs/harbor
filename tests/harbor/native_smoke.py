@@ -136,12 +136,26 @@ class Terminal:
     def close(self):
         try:self.send(b'\x11',.1)
         except OSError:pass
+        exited = False
+        # Keep draining owned PTY output while ncurses restores the terminal; on macOS
+        # endwin's TCSADRAIN can otherwise wait on this very fixture's unread bytes.
         for _ in range(25):
             result,_=os.waitpid(self.pid,os.WNOHANG)
-            if result:break
-            time.sleep(.02)
-        else:
-            os.kill(self.pid,signal.SIGTERM);os.waitpid(self.pid,0)
+            if result:
+                exited = True
+                break
+            self.pump(.02)
+        if not exited:
+            os.kill(self.pid,signal.SIGTERM)
+            for _ in range(50):
+                result,_=os.waitpid(self.pid,os.WNOHANG)
+                if result:
+                    exited = True
+                    break
+                self.pump(.02)
+        if not exited:
+            os.kill(self.pid,signal.SIGKILL)
+            os.waitpid(self.pid,0)
         os.close(self.master)
         if self.dir: self.dir.cleanup()
 

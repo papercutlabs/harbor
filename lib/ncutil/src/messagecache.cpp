@@ -656,7 +656,7 @@ bool MessageCache::FetchContacts(const std::string& p_ProfileId)
 
 bool MessageCache::FetchMessagesFrom(const std::string& p_ProfileId, const std::string& p_ChatId,
                                      const std::string& p_FromMsgId, const int p_Limit,
-                                     const bool p_Sync)
+                                     const bool p_Sync, const uint64_t p_RequestId)
 {
   if (!m_CacheEnabled) return false;
 
@@ -724,6 +724,7 @@ bool MessageCache::FetchMessagesFrom(const std::string& p_ProfileId, const std::
     fetchFromRequest->chatId = p_ChatId;
     fetchFromRequest->fromMsgIdTimeSent = fromMsgIdTimeSent;
     fetchFromRequest->limit = std::min(p_Limit, count);
+    fetchFromRequest->requestId = p_RequestId;
 
     if (p_Sync)
     {
@@ -749,7 +750,7 @@ bool MessageCache::FetchMessagesFrom(const std::string& p_ProfileId, const std::
 }
 
 bool MessageCache::FetchOneMessage(const std::string& p_ProfileId, const std::string& p_ChatId,
-                                   const std::string& p_MsgId, const bool p_Sync)
+                                   const std::string& p_MsgId, const bool p_Sync, const uint64_t p_RequestId)
 {
   if (!m_CacheEnabled) return false;
 
@@ -784,6 +785,7 @@ bool MessageCache::FetchOneMessage(const std::string& p_ProfileId, const std::st
     fetchOneRequest->profileId = p_ProfileId;
     fetchOneRequest->chatId = p_ChatId;
     fetchOneRequest->msgId = p_MsgId;
+    fetchOneRequest->requestId = p_RequestId;
 
     if (p_Sync)
     {
@@ -1597,6 +1599,7 @@ void MessageCache::PerformRequest(std::shared_ptr<Request> p_Request)
         newMessagesNotify->fromMsgId = fromMsgId;
         newMessagesNotify->cached = true;
         newMessagesNotify->sequence = true; // in-sequence history request
+        newMessagesNotify->requestId = fetchFromRequest->requestId;
         CallMessageHandler(newMessagesNotify);
       }
       break;
@@ -1625,6 +1628,7 @@ void MessageCache::PerformRequest(std::shared_ptr<Request> p_Request)
           newMessagesNotify->chatMessages = chatMessages;
           newMessagesNotify->cached = true;
           newMessagesNotify->sequence = false; // out-of-sequence single message
+          newMessagesNotify->requestId = fetchOneRequest->requestId;
           CallMessageHandler(newMessagesNotify);
         }
       }

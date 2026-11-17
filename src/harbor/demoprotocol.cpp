@@ -1,8 +1,10 @@
 #include "demoprotocol.h"
+#include <iostream>
 #include "fileutil.h"
 #include "protocolutil.h"
 #include "richtext.h"
 #include "timeutil.h"
+#include "strutil.h"
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
@@ -168,6 +170,35 @@ HarborDemo::SeedRich(const std::function<void(const std::string&, const std::str
 bool
 HarborDemo::Login()
 {
+  if (getenv("HARBOR_DEMO_AUTH"))
+  {
+    // Offline stand-in for TDLib's terminal sign-in: take control through the handler exactly as
+    // TgChat does, prompt on stdout, read one line from stdin, release. Only the fixed nonsecret
+    // demo code is accepted; the typed text itself is never recorded.
+    auto take = std::make_shared<ProtocolUiControlNotify>(m_Id);
+    take->isTakeControl = true;
+    Emit(take);
+    while (!take->isTakeControl && !take->cancelled && !m_Stopping)
+    {
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      take->isTakeControl = true;
+      Emit(take);
+    }
+    if (take->cancelled || m_Stopping) return false;
+    std::cout << "Enter authentication code: " << std::flush;
+    std::string line;
+    bool read;
+    if (getenv("HARBOR_DEMO_AUTH_PASSWORD"))
+    {
+      line = StrUtil::GetPass(); // the existing native password terminal path
+      read = !std::cin.fail() && !std::cin.eof();
+    }
+    else read = static_cast<bool>(std::getline(std::cin, line));
+    Record(std::string("auth read=") + (read ? "1" : "0") + " accepted=" + (line == "12345" ? "1" : "0"));
+    auto release = std::make_shared<ProtocolUiControlNotify>(m_Id);
+    release->isTakeControl = false;
+    Emit(release);
+  }
   auto n = std::make_shared<ConnectNotify>(m_Id);
   n->success = true;
   Emit(n);
@@ -254,6 +285,7 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
     case GetContactsRequestType:
     {
       auto n = std::make_shared<NewContactsNotify>(m_Id);
+      n->requestId = request->requestId;
       for (const auto& item : std::vector<std::pair<std::string, std::string>>{ { "marina", "Marina" },
                                                                                 { "studio", "Studio" },
                                                                                 { "saved", "Saved Messages" },
@@ -297,6 +329,7 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
     {
       auto n = std::make_shared<NewChatsNotify>(m_Id);
       n->success = true;
+      n->requestId = request->requestId;
       for (const auto& item : m_Messages)
       {
         ChatInfo c;
@@ -334,6 +367,7 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
           failure->previewMsgId = r->replyPreview ? r->msgId : "";
           failure->success = false;
           failure->sequence = false;
+          failure->requestId = r->requestId;
           Emit(failure);
         }
         break;
@@ -344,6 +378,7 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
       n->sequence = false;
       n->chatMessages = { *it };
       n->previewMsgId = r->replyPreview ? r->msgId : "";
+      n->requestId = r->requestId;
       Later(DelayMs("HARBOR_DEMO_FETCH_DELAY_MS"), n);
       break;
     }
@@ -357,6 +392,7 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
       n->query = r->query;
       n->pinned = r->pinned;
       n->token = r->token;
+      n->requestId = r->requestId;
       if (getenv("HARBOR_DEMO_SEARCH_FAIL"))
         n->error = "demo search failure";
       else
@@ -381,6 +417,7 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
       auto n = std::make_shared<AvailableReactionsNotify>(m_Id);
       n->chatId = r->chatId;
       n->msgId = r->msgId;
+      n->requestId = r->requestId;
       const auto& messages = m_Messages[r->chatId];
       auto it = std::find_if(messages.begin(), messages.end(), [&](const ChatMessage& m) { return m.id == r->msgId; });
       if (it == messages.end() || getenv("HARBOR_DEMO_REACTIONS_FAIL"))
@@ -402,6 +439,7 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
       n->success = true;
       n->sequence = true;
       n->fromMsgId = r->fromMsgId;
+      n->requestId = r->requestId;
       auto& messages = m_Messages[r->chatId];
       size_t end = messages.size();
       if (!r->fromMsgId.empty())
@@ -420,12 +458,19 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
     case SendMessageRequestType:
     {
       auto r = std::static_pointer_cast<SendMessageRequest>(request);
-      if (getenv("HARBOR_DEMO_FAIL_SEND"))
+      const int sendIndex = ++m_SendCount;
+      Record("send chat=" + r->chatId + " text=" + r->chatMessage.text + " view=" +
+             std::to_string(r->requestId >> 32) + " index=" + std::to_string(sendIndex));
+      // HARBOR_DEMO_FAIL_SEND fails every send; HARBOR_DEMO_FAIL_SEND_INDEX=n fails only the
+      // n-th send this session receives, so two windows can send the same text with one failure.
+      const int failIndex = DelayMs("HARBOR_DEMO_FAIL_SEND_INDEX");
+      if (getenv("HARBOR_DEMO_FAIL_SEND") || (failIndex > 0 && failIndex == sendIndex))
       {
         auto failed = std::make_shared<SendMessageNotify>(m_Id);
         failed->success = false;
         failed->chatId = r->chatId;
         failed->chatMessage = r->chatMessage;
+        failed->requestId = r->requestId;
         Emit(failed);
         break;
       }
@@ -456,7 +501,15 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
       sent->success = true;
       sent->chatId = r->chatId;
       sent->chatMessage = m;
-      Emit(sent);
+      sent->requestId = r->requestId;
+      const int sendDelay = DelayMs("HARBOR_DEMO_SEND_DELAY_MS");
+      if (sendDelay > 0)
+      {
+        auto accepted = std::make_shared<SendMessageNotify>(*sent);
+        accepted->pending = true;
+        Emit(accepted);
+      }
+      Later(sendDelay, sent);
       break;
     }
     case EditMessageRequestType:
@@ -469,6 +522,7 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
         failed->chatId = r->chatId;
         failed->chatMessage = r->chatMessage;
         failed->chatMessage.id = r->msgId;
+        failed->requestId = r->requestId;
         Emit(failed);
         break;
       }
@@ -496,6 +550,7 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
       n->success = true;
       n->chatId = r->chatId;
       n->msgId = r->msgId;
+      n->requestId = r->requestId;
       Emit(n);
       break;
     }
@@ -510,6 +565,7 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
           n->msgId = r->msgId;
           n->fileInfo = m.fileInfo;
           n->downloadFileAction = r->downloadFileAction;
+          n->requestId = r->requestId;
           Emit(n);
         }
       break;

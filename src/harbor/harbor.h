@@ -10,6 +10,7 @@
 #include <ncurses.h>
 #include <set>
 #include <string>
+#include <termios.h>
 #include <vector>
 
 class HarborMedia;
@@ -25,8 +26,17 @@ public:
   std::unordered_map<std::string, std::shared_ptr<Protocol>> Protocols();
   void Receive(std::shared_ptr<ServiceMessage>);
   static void KeyDump();
+  // Shared-session window: per-view state slot (0 keeps the existing harbor-state file) and the
+  // hook that hands the terminal to the session backend once an auth prompt has suspended ncurses.
+  void SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended);
 
 private:
+  std::string StatePath() const;
+  struct termios m_InitialTerminalMode = {};
+  bool m_HaveInitialTerminalMode = false;
+  bool m_Remote = false;
+  int m_Slot = 0;
+  std::function<void()> m_OnAuthSuspended;
   struct Conversation
   {
     std::string profile, id, name;

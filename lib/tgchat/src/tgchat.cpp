@@ -9,7 +9,9 @@
 #include "forumutil.h"
 #include "richtextutil.h"
 #include "replyutil.h"
+#include "viewchats.h"
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <iostream>
@@ -132,9 +134,9 @@ private:
   std::set<int64_t> m_ForumSupergroups;
   std::map<int64_t, int64_t> m_SupergroupChats;
   bool m_IncludeForumTopics = false;
-  std::set<int64_t> m_TopicsFetching;
-  std::map<int64_t, std::set<std::tuple<int32_t, int64_t, int32_t>>> m_TopicOffsets;
-  void FetchForumTopics(int64_t chat, std::string title, int32_t date = 0, int64_t message = 0, int32_t topic = 0);
+  std::set<std::pair<int64_t, uint64_t>> m_TopicsFetching;
+  std::map<std::pair<int64_t, uint64_t>, std::set<std::tuple<int32_t, int64_t, int32_t>>> m_TopicOffsets;
+  void FetchForumTopics(int64_t chat, std::string title, int32_t date = 0, int64_t message = 0, int32_t topic = 0, uint64_t requestId = 0);
   std::string MessageChatId(const td::td_api::message& message);
   std::map<std::pair<std::string, std::string>, std::string> m_MessageTopics;
   template<class T> void TopicUpdate(std::shared_ptr<ServiceMessage> event)
@@ -178,6 +180,7 @@ private:
   void AuthInputLoop();
 
   std::thread m_AuthInputThread;
+  std::atomic<bool> m_AuthInputCancellable{ false };
   std::mutex m_AuthInputMutex;
   std::condition_variable m_AuthInputCondVar;
   AuthInputType m_AuthInputType = AuthInputNone;
@@ -225,15 +228,16 @@ private:
                                std::string* p_RichText = nullptr);
   void TdMessageConvert(td::td_api::message& p_TdMessage, ChatMessage& p_ChatMessage);
   void DownloadFile(std::string p_ChatId, std::string p_MsgId, std::string p_FileId, std::string p_DownloadId,
-                    DownloadFileAction p_DownloadFileAction);
+                    DownloadFileAction p_DownloadFileAction, uint64_t p_RequestId = 0);
   void RequestSponsoredMessagesIfNeeded();
+  uint64_t TakePendingSend(int64_t p_ChatId, int64_t p_PendingMsgId);
   void GetSponsoredMessages(const std::string& p_ChatId);
   void ViewSponsoredMessage(const std::string& p_ChatId, const std::string& p_MsgId);
   bool IsSponsoredMessageId(const std::string& p_MsgId);
   bool IsGroup(int64_t p_UserId);
   bool IsSelf(int64_t p_UserId);
   std::string GetContactName(int64_t p_UserId);
-  void GetChatHistory(int64_t p_ChatId, int64_t p_FromMsgId, int32_t p_Offset, int32_t p_Limit, bool p_Sequence, const std::string& p_DisplayId = "");
+  void GetChatHistory(int64_t p_ChatId, int64_t p_FromMsgId, int32_t p_Offset, int32_t p_Limit, bool p_Sequence, const std::string& p_DisplayId = "", uint64_t p_RequestId = 0);
   td::td_api::object_ptr<td::td_api::formattedText> GetFormattedText(const std::string& p_Text);
   td::td_api::object_ptr<td::td_api::inputMessageText> GetMessageText(const std::string& p_Text);
   std::string ConvertMarkdownV2ToV1(const std::string& p_Str);
@@ -271,13 +275,16 @@ private:
   std::map<int64_t, ContactInfo> m_ContactInfos;
   std::map<int64_t, ChatType> m_ChatTypes;
   int64_t m_CurrentChat = 0;
+  std::map<uint32_t, int64_t> m_ViewChats; // view -> its current chat
+  std::map<int64_t, int> m_OpenChatRefs; // open TDLib chat -> number of views showing it
+  // (chat, pending message id) -> requestId of the send, until TDLib reports its outcome
+  std::map<std::pair<int64_t, int64_t>, uint64_t> m_PendingSends;
+  std::mutex m_PendingSendsMutex;
   const char m_SponsoredMessageMsgIdPrefix = '+';
   std::map<std::string, std::set<std::string>> m_SponsoredMessageIds;
   int m_ProfileDirVersion = 0;
   bool m_WasOnline = false;
   std::mutex m_Mutex;
-  size_t m_GetUserDetailsCurrent = 0;
-  size_t m_GetUserDetailsTotal = 0;
   static const int s_CacheDirVersion = 2;
 };
 
@@ -597,7 +604,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
         Status::Set(m_ProfileId, Status::FlagFetching);
 
         SendQuery(td::td_api::make_object<td::td_api::getContacts>(),
-                  [this](Object object)
+                  [this, p_RequestMessage](Object object)
         {
           Status::Clear(m_ProfileId, Status::FlagFetching);
 
@@ -616,6 +623,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
           std::shared_ptr<DeferGetUserDetailsRequest> deferGetUserDetailsRequest =
             std::make_shared<DeferGetUserDetailsRequest>();
           deferGetUserDetailsRequest->userIds = userIds;
+          deferGetUserDetailsRequest->requestId = p_RequestMessage->requestId;
           SendRequest(deferGetUserDetailsRequest);
         });
       }
@@ -655,6 +663,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
           std::shared_ptr<DeferGetChatDetailsRequest> deferGetChatDetailsRequest =
             std::make_shared<DeferGetChatDetailsRequest>();
           deferGetChatDetailsRequest->chatIds = chatIds;
+          deferGetChatDetailsRequest->requestId = getChatsRequest->requestId;
           SendRequest(deferGetChatDetailsRequest);
         });
       }
@@ -698,6 +707,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
         std::shared_ptr<DeferGetChatDetailsRequest> deferGetChatDetailsRequest =
           std::static_pointer_cast<DeferGetChatDetailsRequest>(p_RequestMessage);
 
+        const uint64_t requestId = deferGetChatDetailsRequest->requestId;
         const bool isGetTypeOnly = deferGetChatDetailsRequest->isGetTypeOnly;
         const std::vector<std::string>& chatIds = deferGetChatDetailsRequest->chatIds;
         for (auto& chatId : chatIds)
@@ -708,7 +718,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
           auto get_chat = td::td_api::make_object<td::td_api::getChat>();
           get_chat->chat_id_ = chatIdNum;
           SendQuery(std::move(get_chat),
-                    [this, chatId, isGetTypeOnly](Object object)
+                    [this, chatId, isGetTypeOnly, requestId](Object object)
           {
             Status::Clear(m_ProfileId, Status::FlagFetching);
 
@@ -799,13 +809,14 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
             std::shared_ptr<NewChatsNotify> newChatsNotify =
               std::make_shared<NewChatsNotify>(m_ProfileId);
             newChatsNotify->success = true;
+            newChatsNotify->requestId = requestId;
             newChatsNotify->chatInfos = chatInfos;
             CallMessageHandler(newChatsNotify);
 
             bool forum = tchat->view_as_topics_;
             for (const auto& group : m_SupergroupChats)
               if (group.second == tchat->id_ && m_ForumSupergroups.count(group.first)) forum = true;
-            if (m_IncludeForumTopics && forum) FetchForumTopics(tchat->id_, tchat->title_);
+            if (m_IncludeForumTopics && forum) FetchForumTopics(tchat->id_, tchat->title_, 0, 0, 0, requestId);
             UpdateLastReadOutboxMessage(tchat->id_, tchat->last_read_outbox_message_id_);
             UpdateLastReadInboxMessage(tchat->id_, tchat->last_read_inbox_message_id_);
           });
@@ -821,11 +832,10 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
           std::static_pointer_cast<DeferGetUserDetailsRequest>(p_RequestMessage);
         const std::vector<std::string>& userIds = deferGetUserDetailsRequest->userIds;
 
-        {
-          std::unique_lock<std::mutex> lock(m_Mutex);
-          m_GetUserDetailsCurrent = 0;
-          m_GetUserDetailsTotal = userIds.size();
-        }
+        // Each batch owns its completion count; concurrent windows cannot complete
+        // one another's request or borrow its requester identity.
+        auto remaining = std::make_shared<size_t>(userIds.size());
+        const uint64_t requestId = deferGetUserDetailsRequest->requestId;
 
         Status::Set(m_ProfileId, Status::FlagFetching);
 
@@ -835,7 +845,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
           auto get_user = td::td_api::make_object<td::td_api::getUser>();
           get_user->user_id_ = userIdNum;
           SendQuery(std::move(get_user),
-                    [this](Object object)
+                    [this, remaining, requestId](Object object)
           {
             if (object->get_id() != td::td_api::error::ID)
             {
@@ -858,13 +868,8 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
 
             std::unique_lock<std::mutex> lock(m_Mutex);
             std::vector<ContactInfo> contactInfos;
-            ++m_GetUserDetailsCurrent;
-            if (m_GetUserDetailsCurrent == m_GetUserDetailsTotal)
+            if (--*remaining == 0)
             {
-              // Last request, consolidate info
-              m_GetUserDetailsCurrent = 0;
-              m_GetUserDetailsTotal = 0;
-
               for (const auto& contactInfo : m_ContactInfos)
               {
                 contactInfos.push_back(contactInfo.second);
@@ -880,6 +885,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
               std::shared_ptr<NewContactsNotify> newContactsNotify =
                 std::make_shared<NewContactsNotify>(m_ProfileId);
               newContactsNotify->fullSync = true;
+              newContactsNotify->requestId = requestId;
               newContactsNotify->contactInfos = contactInfos;
               CallMessageHandler(newContactsNotify);
             }
@@ -900,6 +906,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
           auto result = std::make_shared<NewMessagesNotify>(m_ProfileId);
           result->chatId = getMessageRequest->chatId;
           result->previewMsgId = getMessageRequest->msgId;
+          result->requestId = getMessageRequest->requestId;
           if (getMessageRequest->cached && MessageCache::GetOneMessage(m_ProfileId,
                 result->chatId, result->previewMsgId, result->chatMessages))
           {
@@ -933,7 +940,8 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
         if (getMessageRequest->cached)
         {
           if (MessageCache::FetchOneMessage(m_ProfileId, getMessageRequest->chatId,
-                                            getMessageRequest->msgId, false /*p_Sync*/))
+                                            getMessageRequest->msgId, false /*p_Sync*/,
+                                            getMessageRequest->requestId))
           {
             return;
           }
@@ -944,7 +952,8 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
         int32_t offset = -1; // to get fromMsgId itself
         int32_t limit = 1;
         bool sequence = false; // out-of-sequence single message
-        GetChatHistory(chatId, fromMsgId, offset, limit, sequence, getMessageRequest->chatId);
+        GetChatHistory(chatId, fromMsgId, offset, limit, sequence, getMessageRequest->chatId,
+                       getMessageRequest->requestId);
       }
       break;
 
@@ -959,7 +968,8 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
         {
           if (MessageCache::FetchMessagesFrom(m_ProfileId, getMessagesRequest->chatId,
                                               getMessagesRequest->fromMsgId,
-                                              getMessagesRequest->limit, false /* p_Sync */))
+                                              getMessagesRequest->limit, false /* p_Sync */,
+                                              getMessagesRequest->requestId))
           {
             return;
           }
@@ -970,7 +980,8 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
         int32_t offset = 0;
         int32_t limit = getMessagesRequest->limit;
         bool sequence = true; // in-sequence history request
-        GetChatHistory(chatId, fromMsgId, offset, limit, sequence, getMessagesRequest->chatId);
+        GetChatHistory(chatId, fromMsgId, offset, limit, sequence, getMessagesRequest->chatId,
+                       getMessagesRequest->requestId);
       }
       break;
 
@@ -1100,13 +1111,25 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
             failed->success = false;
             failed->chatId = sendMessageRequest->chatId;
             failed->chatMessage = sendMessageRequest->chatMessage;
+            failed->requestId = sendMessageRequest->requestId;
             CallMessageHandler(failed);
             return;
+          }
+
+          const bool pending = object->get_id() == td::td_api::message::ID &&
+            static_cast<td::td_api::message&>(*object).sending_state_ != nullptr;
+          if ((sendMessageRequest->requestId != 0) && pending)
+          {
+            auto& sent = static_cast<td::td_api::message&>(*object);
+            std::lock_guard<std::mutex> lock(m_PendingSendsMutex);
+            m_PendingSends[std::make_pair(sent.chat_id_, sent.id_)] = sendMessageRequest->requestId;
           }
 
           std::shared_ptr<SendMessageNotify> sendMessageNotify =
             std::make_shared<SendMessageNotify>(m_ProfileId);
           sendMessageNotify->success = true;
+          sendMessageNotify->pending = pending;
+          sendMessageNotify->requestId = sendMessageRequest->requestId;
 
           sendMessageNotify->chatId = sendMessageRequest->chatId;
           sendMessageNotify->chatMessage = sendMessageRequest->chatMessage;
@@ -1157,6 +1180,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
               failed->chatId = editMessageRequest->chatId;
               failed->chatMessage = editMessageRequest->chatMessage;
               failed->chatMessage.id = editMessageRequest->msgId;
+              failed->requestId = editMessageRequest->requestId;
               CallMessageHandler(failed);
               auto error = td::move_tl_object_as<td::td_api::error>(object);
               LOG_WARNING("Edit message text error: %s", error->message_.c_str());
@@ -1188,6 +1212,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
               failed->chatId = editMessageRequest->chatId;
               failed->chatMessage = editMessageRequest->chatMessage;
               failed->chatMessage.id = editMessageRequest->msgId;
+              failed->requestId = editMessageRequest->requestId;
               CallMessageHandler(failed);
               auto error = td::move_tl_object_as<td::td_api::error>(object);
               LOG_WARNING("Edit message caption error: %s", error->message_.c_str());
@@ -1284,6 +1309,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
           deleteMessageNotify->chatId = deleteMessageRequest->chatId;
           deleteMessageNotify->msgId = deleteMessageRequest->msgId;
           deleteMessageNotify->isOutgoing = true;
+          deleteMessageNotify->requestId = deleteMessageRequest->requestId;
           CallMessageHandler(deleteMessageNotify);
         });
       }
@@ -1550,12 +1576,13 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
         std::string msgId = downloadFileRequest->msgId;
         std::string fileId = downloadFileRequest->fileId;
         DownloadFileAction downloadFileAction = downloadFileRequest->downloadFileAction;
+        const uint64_t requestId = downloadFileRequest->requestId;
 
         auto get_remote_file = td::td_api::make_object<td::td_api::getRemoteFile>();
         get_remote_file->remote_file_id_ = fileId;
         get_remote_file->file_type_ = nullptr;
         SendQuery(std::move(get_remote_file),
-                  [this, chatId, msgId, fileId, downloadFileAction](Object object)
+                  [this, chatId, msgId, fileId, downloadFileAction, requestId](Object object)
         {
           if (object->get_id() == td::td_api::error::ID) return;
 
@@ -1571,6 +1598,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
             deferDownloadFileRequest->fileId = fileId;
             deferDownloadFileRequest->downloadId = downloadId;
             deferDownloadFileRequest->downloadFileAction = downloadFileAction;
+            deferDownloadFileRequest->requestId = requestId;
             SendRequest(deferDownloadFileRequest);
           }
         });
@@ -1586,7 +1614,8 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
         std::string fileId = deferDownloadFileRequest->fileId;
         std::string downloadId = deferDownloadFileRequest->downloadId;
         DownloadFileAction downloadFileAction = deferDownloadFileRequest->downloadFileAction;
-        DownloadFile(chatId, msgId, fileId, downloadId, downloadFileAction);
+        DownloadFile(chatId, msgId, fileId, downloadId, downloadFileAction,
+                     deferDownloadFileRequest->requestId);
       }
       break;
 
@@ -1595,40 +1624,52 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
         std::shared_ptr<SetCurrentChatRequest> setCurrentChatRequest =
           std::static_pointer_cast<SetCurrentChatRequest>(p_RequestMessage);
         int64_t chatId = ChatNumber(setCurrentChatRequest->chatId);
-        if (chatId != m_CurrentChat)
+        // Each view (connection identity in the request's high half; 0 for a classic single
+        // window) keeps its current chat open. TDLib chats open/close on union transitions,
+        // so one window never unsubscribes a chat still visible in another.
+        const uint32_t view = (uint32_t)(setCurrentChatRequest->requestId >> 32);
+        int64_t toClose = 0;
+        int64_t toOpen = 0;
+        ViewChatTransition(m_ViewChats, m_OpenChatRefs, view, chatId, toClose, toOpen);
+        if (toClose != 0)
         {
-          if (m_CurrentChat != 0)
+          LOG_DEBUG("close chat %lld", toClose);
+          auto close_chat = td::td_api::make_object<td::td_api::closeChat>();
+          close_chat->chat_id_ = toClose;
+          SendQuery(std::move(close_chat), [](Object object)
           {
-            LOG_DEBUG("close chat %lld", chatId);
-            auto close_chat = td::td_api::make_object<td::td_api::closeChat>();
-            close_chat->chat_id_ = m_CurrentChat;
-            SendQuery(std::move(close_chat), [](Object object)
+            if (object->get_id() == td::td_api::error::ID)
             {
-              if (object->get_id() == td::td_api::error::ID)
-              {
-                LOG_WARNING("close chat failed");
-                return;
-              }
-            });
-          }
+              LOG_WARNING("close chat failed");
+              return;
+            }
+          });
+        }
 
-          if (chatId != 0)
+        if (toOpen != 0)
+        {
+          LOG_DEBUG("open chat %lld", toOpen);
+          auto open_chat = td::td_api::make_object<td::td_api::openChat>();
+          open_chat->chat_id_ = toOpen;
+          SendQuery(std::move(open_chat), [](Object object)
           {
-            LOG_DEBUG("open chat %lld", chatId);
-            auto open_chat = td::td_api::make_object<td::td_api::openChat>();
-            open_chat->chat_id_ = chatId;
-            SendQuery(std::move(open_chat), [](Object object)
+            if (object->get_id() == td::td_api::error::ID)
             {
-              if (object->get_id() == td::td_api::error::ID)
-              {
-                LOG_WARNING("open chat failed");
-                return;
-              }
-            });
-          }
+              LOG_WARNING("open chat failed");
+              return;
+            }
+          });
+        }
 
+        // The latest selection still drives sponsored-message requests only.
+        if ((chatId != 0) && (chatId != m_CurrentChat))
+        {
           m_CurrentChat = chatId;
           RequestSponsoredMessagesIfNeeded();
+        }
+        else if ((chatId == 0) && m_OpenChatRefs.empty())
+        {
+          m_CurrentChat = 0;
         }
       }
       break;
@@ -1662,6 +1703,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
             availableReactionsNotify->chatId = getAvailableReactionsRequest->chatId;
             availableReactionsNotify->msgId = getAvailableReactionsRequest->msgId;
             availableReactionsNotify->success = false;
+            availableReactionsNotify->requestId = getAvailableReactionsRequest->requestId;
             CallMessageHandler(availableReactionsNotify);
             return;
           }
@@ -1677,6 +1719,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
             availableReactionsNotify->chatId = getAvailableReactionsRequest->chatId;
             availableReactionsNotify->msgId = getAvailableReactionsRequest->msgId;
             availableReactionsNotify->emojis = emojis;
+            availableReactionsNotify->requestId = getAvailableReactionsRequest->requestId;
             CallMessageHandler(availableReactionsNotify);
           }
         });
@@ -1845,6 +1888,7 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
           searchMessagesNotify->query = searchMessagesRequest->query;
           searchMessagesNotify->pinned = searchMessagesRequest->pinned;
           searchMessagesNotify->token = searchMessagesRequest->token;
+          searchMessagesNotify->requestId = searchMessagesRequest->requestId;
 
           if (object && (object->get_id() == td::td_api::foundChatMessages::ID))
           {
@@ -2135,10 +2179,13 @@ void TgChat::Impl::ProcessUpdate(td::td_api::object_ptr<td::td_api::Object> upda
     failed->success = false;
     failed->chatId = MessageChatId(*update.message_);
     TdMessageConvert(*update.message_, failed->chatMessage);
+    failed->requestId = TakePendingSend(update.message_->chat_id_, update.old_message_id_);
     CallMessageHandler(failed);
   },
   [this](td::td_api::updateMessageSendSucceeded& update_message_send_succeeded)
   {
+    const uint64_t requestId = TakePendingSend(update_message_send_succeeded.message_->chat_id_,
+                    update_message_send_succeeded.old_message_id_);
     // TDLib replaces the local pending id with a permanent server id. History
     // may have exposed that pending id before the send completed.
     auto removed = std::make_shared<DeleteMessageNotify>(m_ProfileId);
@@ -2166,6 +2213,15 @@ void TgChat::Impl::ProcessUpdate(td::td_api::object_ptr<td::td_api::Object> upda
     newMessagesNotify->cached = false;
     newMessagesNotify->sequence = true;
     CallMessageHandler(newMessagesNotify);
+    if (requestId != 0)
+    {
+      auto sent = std::make_shared<SendMessageNotify>(m_ProfileId);
+      sent->success = true;
+      sent->requestId = requestId;
+      sent->chatId = MessageChatId(*message);
+      sent->chatMessage = chatMessage;
+      CallMessageHandler(sent);
+    }
   },
   [this](td::td_api::updateChatAction& user_chat_action)
   {
@@ -2892,11 +2948,13 @@ void TgChat::Impl::StopAuthInput()
   }
   m_AuthInputCondVar.notify_one();
 
-  // Skip interrupting getline and just detach rather than join.
-  // The thread will exit when stdin closes or the process exits.
+  // Shared-session input has already been cancelled before profile shutdown. Join
+  // its reader so it cannot touch this profile after destruction. Classic setup
+  // retains its existing detached stdin behavior.
   if (m_AuthInputThread.joinable())
   {
-    m_AuthInputThread.detach();
+    if (m_AuthInputCancellable) m_AuthInputThread.join();
+    else m_AuthInputThread.detach();
   }
 }
 
@@ -2931,6 +2989,8 @@ void TgChat::Impl::AuthInputLoop()
           if (std::cin.fail() || std::cin.eof())
           {
             m_Running = false;
+            SetProtocolUiControl(false);
+            CallMessageHandler(std::make_shared<ConnectNotify>(m_ProfileId));
             return;
           }
           if (m_AuthQueryId != authQueryId) break;
@@ -2946,6 +3006,8 @@ void TgChat::Impl::AuthInputLoop()
           if (std::cin.fail() || std::cin.eof())
           {
             m_Running = false;
+            SetProtocolUiControl(false);
+            CallMessageHandler(std::make_shared<ConnectNotify>(m_ProfileId));
             return;
           }
           if (m_AuthQueryId != authQueryId) break;
@@ -2963,6 +3025,8 @@ void TgChat::Impl::AuthInputLoop()
           if (std::cin.fail() || std::cin.eof())
           {
             m_Running = false;
+            SetProtocolUiControl(false);
+            CallMessageHandler(std::make_shared<ConnectNotify>(m_ProfileId));
             return;
           }
 
@@ -2971,6 +3035,8 @@ void TgChat::Impl::AuthInputLoop()
           if (std::cin.fail() || std::cin.eof())
           {
             m_Running = false;
+            SetProtocolUiControl(false);
+            CallMessageHandler(std::make_shared<ConnectNotify>(m_ProfileId));
             return;
           }
           if (m_AuthQueryId != authQueryId) break;
@@ -3819,7 +3885,7 @@ void TgChat::Impl::TdMessageConvert(td::td_api::message& p_TdMessage, ChatMessag
 
 void TgChat::Impl::DownloadFile(std::string p_ChatId, std::string p_MsgId, std::string p_FileId,
                                 std::string p_DownloadId,
-                                DownloadFileAction p_DownloadFileAction)
+                                DownloadFileAction p_DownloadFileAction, uint64_t p_RequestId)
 {
   LOG_DEBUG("download file %s %s", p_FileId.c_str(), p_DownloadId.c_str());
   try
@@ -3829,7 +3895,7 @@ void TgChat::Impl::DownloadFile(std::string p_ChatId, std::string p_MsgId, std::
     download_file->priority_ = 32;
     download_file->synchronous_ = true;
     SendQuery(std::move(download_file),
-              [this, p_ChatId, p_MsgId, p_FileId, p_DownloadFileAction](Object object)
+              [this, p_ChatId, p_MsgId, p_FileId, p_DownloadFileAction, p_RequestId](Object object)
     {
       if (object->get_id() == td::td_api::error::ID) return;
 
@@ -3849,6 +3915,7 @@ void TgChat::Impl::DownloadFile(std::string p_ChatId, std::string p_MsgId, std::
         newMessageFileNotify->msgId = std::string(p_MsgId);
         newMessageFileNotify->fileInfo = ProtocolUtil::FileInfoToHex(fileInfo);
         newMessageFileNotify->downloadFileAction = p_DownloadFileAction;
+        newMessageFileNotify->requestId = p_RequestId;
 
         CallMessageHandler(newMessageFileNotify);
       }
@@ -3857,6 +3924,16 @@ void TgChat::Impl::DownloadFile(std::string p_ChatId, std::string p_MsgId, std::
   catch (...)
   {
   }
+}
+
+uint64_t TgChat::Impl::TakePendingSend(int64_t p_ChatId, int64_t p_PendingMsgId)
+{
+  std::lock_guard<std::mutex> lock(m_PendingSendsMutex);
+  auto it = m_PendingSends.find(std::make_pair(p_ChatId, p_PendingMsgId));
+  if (it == m_PendingSends.end()) return 0;
+  const uint64_t requestId = it->second;
+  m_PendingSends.erase(it);
+  return requestId;
 }
 
 void TgChat::Impl::RequestSponsoredMessagesIfNeeded()
@@ -4095,21 +4172,24 @@ std::string TgChat::Impl::MessageChatId(const td::td_api::message& message)
   return parent;
 }
 
-void TgChat::Impl::FetchForumTopics(int64_t chat, std::string title, int32_t date, int64_t message, int32_t topic)
+void TgChat::Impl::FetchForumTopics(int64_t chat, std::string title, int32_t date, int64_t message, int32_t topic, uint64_t requestId)
 {
+  const auto key = std::make_pair(chat, requestId);
   const bool first = !date && !message && !topic;
   if (first) {
-    if (!m_TopicsFetching.insert(chat).second) return;
-    m_TopicOffsets[chat].clear();
+    if (!m_TopicsFetching.insert(key).second) return;
+    m_TopicOffsets[key].clear();
   }
-  if (!m_TopicOffsets[chat].insert(std::make_tuple(date, message, topic)).second) { m_TopicsFetching.erase(chat); return; }
+  if (!m_TopicOffsets[key].insert(std::make_tuple(date, message, topic)).second) { m_TopicsFetching.erase(key); m_TopicOffsets.erase(key); return; }
   auto request = td::td_api::make_object<td::td_api::getForumTopics>(chat, "", date, message, topic, 100);
-  SendQuery(std::move(request), [this, chat, title](Object object) {
-    if (object->get_id() != td::td_api::forumTopics::ID) { m_TopicsFetching.erase(chat); return; }
+  SendQuery(std::move(request), [this, chat, title, key, requestId](Object object) {
+    if (object->get_id() != td::td_api::forumTopics::ID) { m_TopicsFetching.erase(key); m_TopicOffsets.erase(key); return; }
     auto result = td::move_tl_object_as<td::td_api::forumTopics>(object);
     auto names = std::make_shared<NewContactsNotify>(m_ProfileId);
     auto chats = std::make_shared<NewChatsNotify>(m_ProfileId);
     chats->success = true;
+    names->requestId = requestId;
+    chats->requestId = requestId;
     for (auto& topic : result->topics_) {
       if (!topic->info_) continue;
       ContactInfo contact;
@@ -4128,19 +4208,19 @@ void TgChat::Impl::FetchForumTopics(int64_t chat, std::string title, int32_t dat
     CallMessageHandler(names);
     CallMessageHandler(chats);
     if (!result->topics_.empty() && (result->next_offset_date_ || result->next_offset_message_id_ || result->next_offset_forum_topic_id_))
-      FetchForumTopics(chat, title, result->next_offset_date_, result->next_offset_message_id_, result->next_offset_forum_topic_id_);
-    else m_TopicsFetching.erase(chat);
+      FetchForumTopics(chat, title, result->next_offset_date_, result->next_offset_message_id_, result->next_offset_forum_topic_id_, requestId);
+    else { m_TopicsFetching.erase(key); m_TopicOffsets.erase(key); }
   });
 }
 
 void TgChat::Impl::GetChatHistory(int64_t p_ChatId, int64_t p_FromMsgId, int32_t p_Offset, int32_t p_Limit,
-                                  bool p_Sequence, const std::string& p_DisplayId)
+                                  bool p_Sequence, const std::string& p_DisplayId, uint64_t p_RequestId)
 {
   // *INDENT-OFF*
   Status::Set(m_ProfileId, Status::FlagFetching);
   auto query = TelegramForum::HistoryQuery(p_ChatId, p_FromMsgId, p_Offset, p_Limit, p_DisplayId);
   SendQuery(std::move(query),
-  [this, p_ChatId, p_FromMsgId, p_Offset, p_Sequence, p_DisplayId](Object object)
+  [this, p_ChatId, p_FromMsgId, p_Offset, p_Sequence, p_DisplayId, p_RequestId](Object object)
   {
     Status::Clear(m_ProfileId, Status::FlagFetching);
 
@@ -4149,6 +4229,7 @@ void TgChat::Impl::GetChatHistory(int64_t p_ChatId, int64_t p_FromMsgId, int32_t
       failure->chatId = p_DisplayId.empty() ? StrUtil::NumToHex(p_ChatId) : p_DisplayId;
       failure->sequence = p_Sequence;
       failure->fromMsgId = p_FromMsgId ? StrUtil::NumToHex(p_FromMsgId) : "";
+      failure->requestId = p_RequestId;
       CallMessageHandler(failure);
       return;
     }
@@ -4175,6 +4256,7 @@ void TgChat::Impl::GetChatHistory(int64_t p_ChatId, int64_t p_FromMsgId, int32_t
     newMessagesNotify->chatMessages = chatMessages;
     newMessagesNotify->fromMsgId = ((p_FromMsgId != 0) && (p_Offset == 0)) ? StrUtil::NumToHex(p_FromMsgId) : "";
     newMessagesNotify->sequence = p_Sequence;
+    newMessagesNotify->requestId = p_RequestId;
     CallMessageHandler(newMessagesNotify);
   });
   // *INDENT-ON*
@@ -4289,16 +4371,19 @@ void TgChat::Impl::SetProtocolUiControl(bool p_IsTakeControl)
     std::make_shared<ProtocolUiControlNotify>(m_ProfileId);
   protocolUiControlNotify->isTakeControl = p_IsTakeControl;
   CallMessageHandler(protocolUiControlNotify);
+  if (protocolUiControlNotify->cancellable) m_AuthInputCancellable = true;
 
   // if attempting to take control, but failed to do so, keep retrying
-  while (p_IsTakeControl && !protocolUiControlNotify->isTakeControl)
+  while (p_IsTakeControl && !protocolUiControlNotify->isTakeControl && !protocolUiControlNotify->cancelled)
   {
     TimeUtil::Sleep(0.500);
     LOG_TRACE("set protocol ui control retry");
     protocolUiControlNotify->isTakeControl = p_IsTakeControl;
     CallMessageHandler(protocolUiControlNotify);
+    if (protocolUiControlNotify->cancellable) m_AuthInputCancellable = true;
   }
 
+  if (protocolUiControlNotify->cancelled) m_Running = false;
   TimeUtil::Sleep(0.100); // wait more than GetKey timeout
 }
 

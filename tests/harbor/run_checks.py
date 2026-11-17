@@ -33,7 +33,8 @@ lane = os.environ.get("HARBOR_CHECK_LANE")
 if lane and lane not in inventory["lanes"]:
     sys.exit("Unknown HARBOR_CHECK_LANE; use the declared inventory")
 native = {"format": "harbor-format-test", "producer": "harbor-richtext-producer-test",
-          "cache": "harbor-cache-richtext-test", "media": "harbor-media-test"}
+          "cache": "harbor-cache-richtext-test", "media": "harbor-media-test",
+          "session": "harbor-session-test"}
 lanes = [lane] if lane else list(inventory["lanes"])
 env = dict(os.environ, HARBOR_EXECUTABLE=str(build / "bin/harbor"))
 

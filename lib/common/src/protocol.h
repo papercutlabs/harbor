@@ -235,6 +235,9 @@ class RequestMessage
 public:
   virtual ~RequestMessage() { }
   virtual MessageType GetMessageType() const { return RequestMessageType; }
+  // Opaque requester identity, set only by a shared Harbor session backend.
+  // Request-scoped replies echo it; zero means untagged / broadcast.
+  uint64_t requestId = 0;
 };
 
 class GetContactsRequest : public RequestMessage
@@ -498,6 +501,7 @@ public:
     : profileId(p_ProfileId) { }
   virtual ~ServiceMessage() { }
   virtual MessageType GetMessageType() const { return ServiceMessageType; }
+  uint64_t requestId = 0;
   std::string profileId;
 };
 
@@ -543,6 +547,7 @@ public:
     : ServiceMessage(p_ProfileId) { }
   virtual MessageType GetMessageType() const { return SendMessageNotifyType; }
   bool success = false;
+  bool pending = false; // accepted locally; a final success/failure is still owed
   std::string chatId;
   ChatMessage chatMessage;
 };
@@ -712,6 +717,8 @@ public:
     : ServiceMessage(p_ProfileId) { }
   virtual MessageType GetMessageType() const { return ProtocolUiControlNotifyType; }
   bool isTakeControl = false;
+  bool cancelled = false; // terminal owner/session ended; do not retry a native prompt
+  bool cancellable = false; // shared backend owns cancellation of existing native input
 };
 
 class RequestAppExitNotify : public ServiceMessage
