@@ -3,14 +3,16 @@
     "tests/harbor/run_checks.py",
     "tests/harbor/native_smoke.py",
     "tests/harbor/rich_actions_smoke.py",
-    "tests/harbor/right_click_smoke.py"
+    "tests/harbor/right_click_smoke.py",
+    "tests/harbor/word_navigation_smoke.py"
   ],
   "lanes": {
     "static": [
       "tests/harbor/run_checks.py",
       "tests/harbor/native_smoke.py",
       "tests/harbor/rich_actions_smoke.py",
-      "tests/harbor/right_click_smoke.py"
+      "tests/harbor/right_click_smoke.py",
+      "tests/harbor/word_navigation_smoke.py"
     ],
     "format": [
       "tests/harbor/format_test.cpp"
@@ -56,6 +58,9 @@
     ],
     "topics": [
       "tests/harbor/topics_picker_smoke.py"
+    ],
+    "word_navigation": [
+      "tests/harbor/word_navigation_smoke.py"
     ]
   }
 }
