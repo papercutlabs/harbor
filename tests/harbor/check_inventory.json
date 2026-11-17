@@ -6,7 +6,8 @@
     "tests/harbor/right_click_smoke.py",
     "tests/harbor/word_navigation_smoke.py",
     "tests/harbor/list_spacing_smoke.py",
-    "tests/harbor/chat_chrome_smoke.py"
+    "tests/harbor/chat_chrome_smoke.py",
+    "tests/harbor/line_delete_smoke.py"
   ],
   "lanes": {
     "static": [
@@ -16,7 +17,8 @@
       "tests/harbor/right_click_smoke.py",
       "tests/harbor/word_navigation_smoke.py",
       "tests/harbor/list_spacing_smoke.py",
-      "tests/harbor/chat_chrome_smoke.py"
+      "tests/harbor/chat_chrome_smoke.py",
+      "tests/harbor/line_delete_smoke.py"
     ],
     "format": [
       "tests/harbor/format_test.cpp"
@@ -74,6 +76,9 @@
     ],
     "list_spacing": [
       "tests/harbor/list_spacing_smoke.py"
+    ],
+    "line_delete": [
+      "tests/harbor/line_delete_smoke.py"
     ]
   }
 }
