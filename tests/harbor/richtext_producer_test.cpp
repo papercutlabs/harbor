@@ -3,6 +3,7 @@
 // Harbor's native renderer.
 #include "format.h"
 #include "richtextutil.h"
+#include "replyutil.h"
 #include <cassert>
 #include <iostream>
 #include <td/telegram/Client.h>
@@ -24,6 +25,27 @@ Wide(const std::string& utf8)
 int
 main()
 {
+  api::messageReplyToMessage reply;
+  reply.chat_id_ = -1234;
+  reply.message_id_ = 5678;
+  reply.quote_ = api::make_object<api::textQuote>();
+  reply.quote_->text_ = api::make_object<api::formattedText>();
+  reply.quote_->text_->text_ = "hidden quote";
+  Add(*reply.quote_->text_, 0, 6, api::make_object<api::textEntityTypeSpoiler>());
+  reply.origin_ = api::make_object<api::messageOriginHiddenUser>("Original author");
+  ChatMessage convertedReply;
+  TelegramReply::Convert(reply, convertedReply);
+  assert(convertedReply.quotedId == StrUtil::NumToHex(int64_t(5678)) &&
+         convertedReply.quotedChatId == StrUtil::NumToHex(int64_t(-1234)) &&
+         convertedReply.quotedSenderName == "Original author" && convertedReply.quotedText == "hidden quote");
+  RichText::Message quote;
+  assert(RichText::Decode(convertedReply.quotedRichText, quote));
+  assert(HarborFormatting::Native(quote).copy.find(L"hidden") == std::wstring::npos);
+  reply.chat_id_ = 0;
+  reply.message_id_ = 0;
+  TelegramReply::Convert(reply, convertedReply);
+  assert(convertedReply.quotedChatId == "?");
+
   // Teren's screenshot: preCode directly followed by prose
   const std::string prefix = "It's in your Downloads now:\n\n", command = "sh ~/Downloads/create-hive-next-repos.sh",
                     suffix = "\n\nIt should end with Done. Paste me the output.";

@@ -59,7 +59,7 @@ private:
     {
       bool set = false, follow = true, browse = false;
       bool landed = false; // a visit reached its message; until then a failed visit forgets the mark
-      std::string selected, anchor;
+      std::string selected, anchor, returnKey;
       int scroll = 0, offset = 0;
     } back;
     std::string visit; // message to show once it arrives
@@ -112,6 +112,17 @@ private:
   void UpdatePrompt();
   ChatMessage m_ForwardMessage;
   std::wstring m_ForwardText;
+  struct ReplyOriginal
+  {
+    bool pending = true, found = false;
+    ChatMessage message;
+    std::string chat, visitFrom;
+  };
+  std::map<std::string, ReplyOriginal> m_ReplyOriginals;
+  std::string ReplyKey(const Conversation&, const ChatMessage&) const;
+  const ChatMessage* LoadedReply(const Conversation&, const ChatMessage&) const;
+  std::wstring ReplyExcerpt(Conversation&, const ChatMessage&);
+  void VisitReply(const std::string&, const ChatMessage&);
   std::vector<Row> m_Rows;
   std::vector<Hit> m_Hits;
   struct CopyCell

@@ -61,6 +61,9 @@
     ],
     "word_navigation": [
       "tests/harbor/word_navigation_smoke.py"
+    ],
+    "reply_preview": [
+      "tests/harbor/reply_preview_smoke.py"
     ]
   }
 }
