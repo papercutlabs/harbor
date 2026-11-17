@@ -161,6 +161,76 @@ Finish(Text& out)
     out.codes = kept;
   }
 }
+// Display-only spacing for the history view: the positions of the line breaks in Text::text after
+// which one blank row is shown. Adjacent numbered items get a gap where none exists, and a
+// standalone heading (a line wholly in emphasis, as "# " headings and native bold lines are) gets
+// one before following text. Lines in code or quotes never count, an existing blank line is never
+// doubled and a soft wrap is never a boundary, since only logical lines are considered.
+inline std::vector<size_t>
+Spacers(const Text& t)
+{
+  struct Line
+  {
+    size_t begin, end;
+    bool blank = true, framed = false, numbered = false, heading = false;
+  };
+  std::vector<Line> lines;
+  for (size_t begin = 0;;)
+  {
+    size_t end = t.text.find(L'\n', begin);
+    if (end == std::wstring::npos)
+      end = t.text.size();
+    Line line{ begin, end };
+    bool emphasis = true;
+    size_t first = end;
+    for (size_t i = begin; i < end; ++i)
+    {
+      // a quote bar or code header, or a line opening in code or a quote, frames the line
+      if (t.decor[i] && (t.styles[i] & Quote))
+        line.framed = true;
+      if (iswspace(t.text[i]))
+        continue;
+      line.blank = false;
+      if (t.decor[i])
+        continue;
+      if (first == end)
+      {
+        first = i;
+        line.framed |= (t.styles[i] & (Code | Quote)) != 0;
+      }
+      emphasis &= (t.styles[i] & Emphasis) != 0;
+    }
+    if (first < end && !line.framed)
+    {
+      size_t digits = first;
+      while (digits < end && iswdigit(t.text[digits]))
+        ++digits;
+      line.numbered = digits > first && digits + 1 < end && (t.text[digits] == L'.' || t.text[digits] == L')') &&
+                      t.text[digits + 1] == L' ';
+      line.heading = emphasis && !line.numbered;
+    }
+    lines.push_back(line);
+    if (end == t.text.size())
+      break;
+    begin = end + 1;
+  }
+  std::vector<size_t> out;
+  bool item = false;
+  for (size_t n = 0; n + 1 < lines.size(); ++n)
+  {
+    const auto &line = lines[n], &next = lines[n + 1];
+    if (line.blank || line.framed)
+      item = false;
+    item |= line.numbered;
+    if (next.blank)
+      continue;
+    // a run of emphasized lines is a bold paragraph, not a heading
+    const bool heading = line.heading && !next.heading && (n == 0 || !lines[n - 1].heading);
+    if ((item && next.numbered) || heading)
+      out.push_back(line.end);
+  }
+  return out;
+}
 inline Text
 Parse(const std::wstring& source)
 {

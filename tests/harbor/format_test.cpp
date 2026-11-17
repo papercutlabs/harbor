@@ -180,6 +180,59 @@ NativeTests()
   std::cout << "PASS native entities: producer pre shape, UTF-16 offsets, literal zero-entity text, malformed "
                "ranges, code blocks, links, spoilers, expandable quotes, encoding\n";
 }
+// the text of each logical line followed by a display-only spacer row
+static std::vector<std::wstring>
+Spaced(const Text& t)
+{
+  std::vector<std::wstring> out;
+  for (auto at : Spacers(t))
+  {
+    assert(at < t.text.size() && t.text[at] == L'\n');
+    size_t begin = t.text.rfind(L'\n', at - 1);
+    begin = at == 0 || begin == std::wstring::npos ? 0 : begin + 1;
+    out.push_back(t.text.substr(begin, at - begin));
+  }
+  return out;
+}
+static void
+SpacingTests()
+{
+  using Lines = std::vector<std::wstring>;
+  // numbered items are separated; a long item is one logical line however it wraps
+  const std::wstring list = L"Plan:\n1. A long first item that wraps across several terminal rows when narrow\n"
+                            L"2) Second\n3. Third\nThanks";
+  auto t = Parse(list);
+  assert(Spaced(t) == Lines({ L"1. A long first item that wraps across several terminal rows when narrow", L"2) Second" }));
+  assert(t.text == list && t.copy == list); // spacing never touches the text or its copy
+  // continuation lines stay with their item; the gap goes before the next number
+  assert(Spaced(Parse(L"1. First\n   more of first\n2. Second")) == Lines({ L"   more of first" }));
+  // already spaced lists and paragraphs keep their single blank line
+  assert(Spaced(Parse(L"1. a\n\n2. b\n\nPara one\n\nPara two\nsame paragraph")).empty());
+  // numbers that are not list markers
+  assert(Spaced(Parse(L"1.5 million\n2024 was long\n3 items")).empty());
+  // numbered text in code blocks and quotes, Markdown and native
+  assert(Spaced(Parse(L"```\n1. a\n2. b\n```\n3. c")).empty());
+  assert(Spaced(Parse(L"> 1. a\n> 2. b")).empty());
+  const std::string code = "1. a\n2. b", quoted = "1. c\n2. d";
+  t = HarborFormatting::Native(Native("Run:\n" + code + "\n" + quoted,
+                                      { { RichText::Pre, 5, U16(code), "sh" }, { RichText::Quote, 5 + U16(code) + 1, U16(quoted), "" } }));
+  assert(Spaced(t).empty());
+  // an inline code span inside an item does not make it code
+  assert(Spaced(Parse(L"1. Run `ls`\n2. Done")) == Lines({ L"1. Run ls" }));
+  // a standalone heading, Markdown or native bold, gets one following gap, never doubled
+  assert(Spaced(Parse(L"# Heading\nBody")) == Lines({ L"Heading" }));
+  assert(Spaced(Parse(L"# Heading\n\nBody")).empty());
+  assert(Spaced(Parse(L"## Steps\n1. a\n2. b")) == Lines({ L"Steps", L"1. a" }));
+  const std::string native = "Summary\nThe body follows.\nPlain **not markup**";
+  t = HarborFormatting::Native(Native(native, { { RichText::Bold, 0, 7, "" } }));
+  assert(Spaced(t) == Lines({ L"Summary" }));
+  assert(t.copy == Wide(native) && t.Plain(0, t.text.size()) == Wide(native));
+  // a bold phrase inside a line, a bold paragraph and a heading ending the message are not spaced
+  assert(Spaced(Parse(L"**Note** this line\nnext")).empty());
+  assert(Spaced(Parse(L"**one bold line**\n**and another**\nplain")).empty());
+  assert(Spaced(Parse(L"Text\n**Closing**")).empty());
+  std::cout << "PASS display spacing: numbered items, wrapped items, existing gaps, code and quotes, headings\n";
+}
 int
 main()
 {
@@ -240,6 +293,7 @@ main()
   a = Parse(L"```sh\nexit 0```");
   assert(a.text == L"exit 0");
   NativeTests();
+  SpacingTests();
   std::cout << "PASS native formatting: nested styles, code fences, quotes, escapes, literal punctuation, "
                "links, Unicode, TDLib pre blocks\n";
 }

@@ -1160,6 +1160,10 @@ Harbor::BuildRows()
       for (size_t i = 0; i < formatted.text.size(); ++i)
         if (!iswspace(formatted.text[i]))
           styles[{ layout.cursors[i].row, layout.cursors[i].col }] |= formatted.styles[i];
+      // display-only gaps after list items and headings: same message, no source characters
+      std::set<int> spaced;
+      for (auto at : HarborFormatting::Spacers(formatted))
+        spaced.insert(layout.cursors[at].row);
       for (size_t r = 0; r < layout.lines.size(); ++r)
       {
         Row row{ layout.lines[r], id, m.isOutgoing, false };
@@ -1171,6 +1175,8 @@ Harbor::BuildRows()
           col += Width(ch);
         }
         m_Rows.push_back(std::move(row));
+        if (spaced.count(int(r)))
+          m_Rows.push_back({ L"", id, m.isOutgoing, false });
       }
     }
     if (!m.fileInfo.empty())
