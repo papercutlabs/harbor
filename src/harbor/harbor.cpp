@@ -2187,11 +2187,11 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
     const bool cancel = AppUtil::IsTerminateRequested() || event.kind == -1 || (event.kind == 1 && (event.code == 27 || event.code == 3 || (event.code == 'c' && (event.mods & 4))));
     free(event.text);
     return cancel;
-  });
+  }, FileUtil::GetApplicationDir());
   if (prepared != HarborDeskHost::Prepared::Ready)
   {
     restore();
-    Notify(prepared == HarborDeskHost::Prepared::Cancelled ? "Desk opening cancelled · draft kept" : "Desk could not prepare · draft kept");
+    Notify(prepared == HarborDeskHost::Prepared::Cancelled ? "Desk opening cancelled · draft kept" : "Desk could not prepare · " + (m_DeskHost.Diagnostics().empty() ? m_DeskHost.Error() : "see <config>/" + m_DeskHost.DiagnosticName()));
     return false;
   }
   SaveState();
@@ -2204,17 +2204,18 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
   mousemask(0, nullptr); fflush(stdout);
   tcflush(STDIN_FILENO, TCIFLUSH);
   // No endwin/reset_prog_mode here: both views retain Harbor's existing alternate screen.
-  const bool ok = m_DeskHost.Visit();
+  const bool ok = m_DeskHost.Visit([] { return AppUtil::IsTerminateRequested(); });
   restore();
   tcflush(STDIN_FILENO, TCIFLUSH);
   sigaction(SIGINT, &oldInt, nullptr); sigaction(SIGQUIT, &oldQuit, nullptr); sigaction(SIGTSTP, &oldTstp, nullptr);
+  if (AppUtil::IsTerminateRequested()) return false; // main loop performs ordinary state/terminal cleanup after exact child reap
   if (!HarborInputStart()) throw std::runtime_error("Could not resume terminal input reader");
   mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, nullptr);
   printf("\033[?1003l\033[?1002h\033[?2004h\033[>1u"); fflush(stdout);
   struct winsize size = {};
   if (ioctl(STDIN_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_row && size.ws_col) resizeterm(size.ws_row, size.ws_col);
   clearok(stdscr, TRUE); m_Dirty = true; m_MouseDown = false;
-  Notify(ok ? "Back from Desk" : "Desk ended unexpectedly · draft kept · reopen to inspect current state");
+  Notify(ok ? "Back from Desk" : "Desk ended unexpectedly · see <config>/" + m_DeskHost.DiagnosticName());
   return ok;
 }
 bool

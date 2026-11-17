@@ -1,5 +1,5 @@
 """Hosted current-source Harbor decoder/render proof for the warm owned child. No accounts or live cmux."""
-import os, sys, tempfile
+import os, sys, tempfile, signal, time
 from pathlib import Path
 from native_smoke import Terminal
 with tempfile.TemporaryDirectory(prefix='harbor-warm-') as directory:
@@ -56,7 +56,7 @@ while True:
         assert [r for r in records if r.startswith('KEYS')]==["KEYS b'only-desk'"]*3,records
         assert b'\x1b[?1049l' not in t.raw[raw_at:] and b'\x1b[?1049h' not in t.raw[raw_at:],'alternate screen switched'
         # Reply/edit state belongs to the same live conversation, including the draft behind an edit.
-        t.message_tool('Keeping this one','Reply');t.expect('Replying');reply=state()
+        t.click_text('The boats are just starting',button=2);t.expect('Message actions');t.click_text('Reply');t.expect('Replying');reply=state()
         enter('Everything');t.expect('VISIT 4');t.send(b'\x1b');t.expect('Back from Desk');assert state()==reply
         t.send(b'\x1b');t.message_tool('Keeping this one','Edit message');t.expect('Editing your message')
         t.send(b'\x15');t.send('Unfinished warm edit');editing=state()
@@ -71,3 +71,29 @@ while True:
         t.send(b'\x1b');t.send('!');t.expect('!')
         print('PASS warm child reused; alternate screen, draft/cursor/reading, resize, Ctrl+C, late reply and exact child death')
     finally:t.close()
+
+    # An explicit signal to Harbor while the child owns input unwinds through ordinary cleanup.
+    t=Terminal(cols=72,rows=38,extra_env={'HARBOR_DESK_COMMANDS':str(commands),'HARBOR_DESK_WARM':'1','CALLS':str(calls)})
+    reaped=False
+    try:
+        t.picker('Marina');t.send('draft before termination');before=state()
+        enter('Quota');t.expect('VISIT 1')
+        child_pid=int([row for row in calls.read_text().splitlines() if not row.startswith('KEYS')][-1].split()[0])
+        os.kill(t.pid,signal.SIGTERM);end=time.monotonic()+4
+        while time.monotonic()<end:
+            t.pump(.05);pid,status=os.waitpid(t.pid,os.WNOHANG)
+            if pid:
+                reaped=True;break
+        assert reaped,'Harbor failed to unwind before its existing signal watchdog'
+        assert os.WIFSIGNALED(status) and os.WTERMSIG(status)==signal.SIGTERM,status
+        assert (Path(t.config)/'harbor-state').read_text()==before
+        assert b'\x1b[?1049l' in t.raw,'ordinary terminal cleanup did not leave alternate screen'
+        try:os.kill(child_pid,0)
+        except ProcessLookupError:pass
+        else:raise AssertionError('owned Office child survived Harbor termination')
+        print('PASS explicit active Harbor termination reaps exact child and performs ordinary state/terminal cleanup')
+    finally:
+        if reaped:
+            os.close(t.master)
+            if t.dir:t.dir.cleanup()
+        else:t.close()
