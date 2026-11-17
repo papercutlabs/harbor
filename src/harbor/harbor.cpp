@@ -713,10 +713,11 @@ Harbor::Merge(Conversation& c, const std::vector<ChatMessage>& messages, bool ou
   const int64_t previousOldest = oldest.empty() ? -1 : c.messages[oldest].timeSent;
   for (const auto& m : messages)
   {
-    // Only a genuinely new incoming message after already-loaded history counts: cached history, replays,
-    // older single-message fetches, own sends and duplicates never do.
+    // Count unknown incoming IDs in the current or a later provider second. TDLib adds an unordered
+    // message-id tie breaker inside that second; comparing it would miss later live notifications.
+    // Initial history, older seconds, existing IDs, own sends and deleted entries do not add to the count.
     if (!c.follow && previousLatest >= 0 && !m.isOutgoing && !m.isDeleted &&
-        m.timeSent > previousLatest && !c.messages.count(m.id))
+        m.timeSent / 1000 >= previousLatest / 1000 && !c.messages.count(m.id))
       c.unseen++;
     if (!outOfSequence)
       c.detached.erase(m.id);

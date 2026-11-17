@@ -23,7 +23,7 @@ Harbor is the native Telegram TUI in this nchat fork. It shares nchat's Telegram
 | Copy selected text | Drag across message text; release copies automatically |
 | Return to composing | Start typing or press Esc again |
 | Find a conversation | Option+K; Ctrl+K fallback |
-| Commands | `/` in an empty composer; footer button |
+| Commands | Option+/; Ctrl+O fallback; footer button. A plain `/` is always draft text. |
 | Attach | Ctrl+T; paste/drop file paths; clipboard image via Ctrl+V |
 | Attach caption | Type in the attachment preview; Shift+Enter for newline |
 | Confirm attachment | Enter on Send, or click Send |
@@ -74,7 +74,7 @@ Native PTY checks run against the offline demo protocol, with temporary account 
 - `tests/harbor/native_smoke.py`: interaction, drafts, restarts, recovery, incoming replies, media actions, graphics transfers, setup protection.
 - `tests/harbor/refinement_smoke.py`: modified Return, word wrapping/cursor geometry, padding-era layout, outside dismissal, editable captions.
 - `tests/harbor/word_delete_smoke.py`: legacy/enhanced Option+Backspace, Ctrl+W, Unicode, cursor-position edits, captions.
-- `tests/harbor/line_delete_smoke.py`: Cmd+Backspace (legacy Ctrl+U, CSI-u and xterm Super+Backspace) deletes only the current hard draft line: end, middle, line start, Unicode, wrapped lines, captions; Option+Backspace and Backspace unchanged.
+- `tests/harbor/line_delete_smoke.py`: Cmd+Backspace (legacy Ctrl+U or Kitty CSI-u Super+Backspace) deletes only the current hard draft line: end, middle, line start, Unicode, wrapped lines, captions; Option+Backspace and Backspace unchanged. Xterm modifier 9 decodes as Meta, so it is not claimed as Super+Backspace coverage.
 - `tests/harbor/right_click_smoke.py`: primary-action context menu (React…, links, spoiler and quote actions stay in Message tools, which is checked to offer them), reply/forward/copy, quiet left-click, and unchanged drafts.
 - `tests/harbor/selection_smoke.py`: SGR drag/release copying, wrapping, multiple messages, Unicode, and a private test clipboard.
 - `tests/harbor/graphics_smoke.py`: decoded portrait PNG proportions, letterboxing, source cropping during scrolling.

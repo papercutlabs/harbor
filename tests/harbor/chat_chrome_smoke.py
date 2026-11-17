@@ -125,7 +125,7 @@ for cols, rows, use_click in [(56, 38, False), (110, 40, True), (26, 30, False)]
         assert cell.bold and cell.bg not in ('default',), (cell.bg, cell.bold)
         if cols >= 30:
             assert '↓ 1 new message ' in t.screen.display[bar] and t.screen.display[bar].rstrip().endswith('Ctrl+G')
-        wait_for(t, '↓ 3 new')  # each later update replays the previous message; duplicates do not count
+        wait_for(t, '↓ 3 new')  # same-provider-second IDs count; replayed IDs do not count twice
         t.pump(.8); assert '↓ 3 new' in t.text and '↓ 5' not in t.text and '↓ 4' not in t.text
         if cols >= 30: assert '↓ 3 new messages' in t.text
         assert 'Another live message 3.' not in prose(t) and 'kept draft' in t.text and prompt_row(t) == before_prompt
@@ -139,7 +139,7 @@ for cols, rows, use_click in [(56, 38, False), (110, 40, True), (26, 30, False)]
         assert 'new message' not in t.text and '↓ 3' not in t.text
         if cols >= 30: t.expect('↓ Latest · Ctrl+G')  # quiet footer only, no bright bar
         t.send(b'\x07'); t.pump(.2); assert 'Latest · Ctrl+G' not in t.text
-        print(f'PASS indicator A at {cols} columns: 1 → 3 (replays not counted), fixed reader/draft, '
+        print(f'PASS indicator A at {cols} columns: 1 → 3 (same provider second; replays not counted), fixed reader/draft, '
               f'{"click" if use_click else "Ctrl+G"} clears, quiet Latest only when nothing new')
     finally:
         t.close()

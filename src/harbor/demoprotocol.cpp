@@ -186,6 +186,8 @@ HarborDemo::Login()
         // also replays the previous message, as Telegram updates may, so duplicates are exercised.
         const char* countText = getenv("HARBOR_DEMO_INCOMING_COUNT");
         const int count = std::max(1, std::min(9, countText ? atoi(countText) : 1));
+        // A burst may share one provider second. Match TDLib's message-id tie breaker as well.
+        const int64_t incomingTime = TimeUtil::GetCurrentTimeMSec() / 1000 * 1000;
         ChatMessage previous;
         for (int i = 0; i < count && !m_Stopping; ++i)
         {
@@ -202,7 +204,7 @@ HarborDemo::Login()
           message.senderId = "marina";
           message.text = i ? "Another live message " + std::to_string(i + 1) + "." : "A live incoming reply.";
           message.isOutgoing = false;
-          message.timeSent = TimeUtil::GetCurrentTimeMSec();
+          message.timeSent = incomingTime + (std::hash<std::string>{}(message.id) % 256);
           auto update = std::make_shared<NewMessagesNotify>(m_Id);
           update->success = true;
           update->chatId = "marina";
