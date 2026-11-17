@@ -36,6 +36,12 @@ Regular(const std::string& path)
   struct stat st;
   return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
 }
+std::string
+FFmpeg()
+{
+  const auto bundled = FileUtil::DirName(FileUtil::GetSelfPath()) + "/ffmpeg";
+  return Regular(bundled) ? bundled : "ffmpeg";
+}
 int
 Color(int r, int g, int b)
 {
@@ -279,7 +285,7 @@ HarborMedia::RequestImage(const std::string& path, int cols, int rows, bool vide
                  image.height = rows * 2;
                  image.pngWidth = pngWidth;
                  image.pngHeight = pngHeight;
-                 std::vector<std::string> args = { "ffmpeg", "-v", "error", "-nostdin" };
+                 std::vector<std::string> args = { FFmpeg(), "-v", "error", "-nostdin" };
                  if (video)
                  {
                    args.push_back("-ss");
@@ -309,7 +315,7 @@ HarborMedia::RequestImage(const std::string& path, int cols, int rows, bool vide
                    if (m_Graphics)
                    {
                      auto png = HarborCapture(
-                       { "ffmpeg",
+                       { FFmpeg(),
                          "-v",
                          "error",
                          "-nostdin",
@@ -468,7 +474,7 @@ HarborMedia::Play(const std::string& path)
       if (Regular(output))
         return output;
       auto result = HarborCapture(
-        { "ffmpeg", "-v", "error", "-nostdin", "-y", "-i", path, "-vn", "-ar", "44100", "-ac", "1", output },
+        { FFmpeg(), "-v", "error", "-nostdin", "-y", "-i", path, "-vn", "-ar", "44100", "-ac", "1", output },
         1024 * 1024,
         30000);
       return result.status == 0 && Regular(output) ? output : std::string();

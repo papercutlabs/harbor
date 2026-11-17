@@ -17,7 +17,13 @@ Harbor is a native terminal application, not a web mockup. It builds as a separa
 - In-app voice playback, external video opening, and attachment previews with captions.
 - A restart prompt when a newer Harbor release is installed locally.
 
-## Build and run
+## Prebuilt runtime for Office
+
+Office's normal update installs the exact macOS arm64 bundle selected by `office/harbor-release.json` in mac-mini-client. It does not build Harbor or install Homebrew on the laptop. The bundle contains Harbor, its media conversion tool, demo resources, libmagic data and license/source notices. Existing Telegram profiles remain in their selected directories.
+
+The hosted `Harbor macOS bundle` workflow builds and smoke-tests the bundle. A dispatch produces a dry-run artifact. A tag named `harbor-<native-version>-<full-source-commit>` publishes the exact matching private release. Its generated `harbor-release.json` is the consumer pin; copy it into Office only after the release exists. The archive checksum binds the uploaded bytes, including the exact source manifest and CPU target. Rebuilding a dry run does not establish the checksum of a later release.
+
+## Build from source (developers)
 
 Install the [nchat build dependencies](doc/nchat-upstream-readme.md#dependencies), plus Go 1.26 or later, FFmpeg and Python 3. On macOS, Harbor also uses the system audio player and clipboard.
 
