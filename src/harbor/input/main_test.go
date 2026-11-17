@@ -25,6 +25,18 @@ func TestStreamDecoder(t *testing.T) {
 			k := translate(e)
 			return k.kind == 1 && k.code == 'o' && k.mods == 32
 		}},
+		{"legacy option slash", []string{"\x1b/"}, func(e uv.Event) bool {
+			k := translate(e)
+			return k.kind == 1 && k.code == '/' && k.mods == 2
+		}},
+		{"enhanced option slash", []string{"\x1b[47;3u"}, func(e uv.Event) bool {
+			k := translate(e)
+			return k.kind == 1 && k.code == '/' && k.mods == 2
+		}},
+		{"plain slash", []string{"/"}, func(e uv.Event) bool {
+			k := translate(e)
+			return k.kind == 2
+		}},
 		{"kitty repeat", []string{"\x1b[57350;1:2u"}, func(e uv.Event) bool { k, ok := e.(uv.KeyPressEvent); return ok && k.Code == uv.KeyLeft }},
 		{"kitty release", []string{"\x1b[57350;1:3u"}, func(e uv.Event) bool { _, ok := e.(uv.KeyReleaseEvent); return ok && translate(e).kind == 0 }},
 		{"unknown CSI", []string{"\x1b[99999z"}, func(e uv.Event) bool { return translate(e).kind == 0 }},
@@ -75,6 +87,10 @@ func TestWordNavigationDecoder(t *testing.T) {
 		{"\x1b[D", -1, 0}, {"\x1bOC", -2, 0},
 		{"\x1b[1;5D", -1, 4}, {"\x1b[1;7C", -2, 6},
 		{"\x1b[57350;9u", -1, 32}, {"\x1b[57351;4u", -2, 3},
+		// Kitty Super+Backspace and legacy Ctrl+U represent Cmd+Backspace.
+		// Xterm modifier 9 is Meta in this decoder, distinct from Kitty Super. Option/plain differ.
+		{"\x1b[127;9u", 127, 32}, {"\x1b[27;9;127~", 127, 8}, {"\x15", 'u', 4},
+		{"\x1b[127;3u", 127, 2}, {"\x7f", 127, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.wire, func(t *testing.T) {
