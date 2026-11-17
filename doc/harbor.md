@@ -74,7 +74,7 @@ Native PTY checks run against the offline demo protocol, with temporary account 
 - `tests/harbor/native_smoke.py`: interaction, drafts, restarts, recovery, incoming replies, media actions, graphics transfers, setup protection.
 - `tests/harbor/refinement_smoke.py`: modified Return, word wrapping/cursor geometry, padding-era layout, outside dismissal, editable captions.
 - `tests/harbor/word_delete_smoke.py`: legacy/enhanced Option+Backspace, Ctrl+W, Unicode, cursor-position edits, captions.
-- `tests/harbor/line_delete_smoke.py`: Cmd+Backspace (legacy Ctrl+U, CSI-u and xterm Super+Backspace) deletes only the current hard draft line: end, middle, line start, Unicode, wrapped lines, captions; Option+Backspace and Backspace unchanged.
+- `tests/harbor/line_delete_smoke.py`: Cmd+Backspace (legacy Ctrl+U and Kitty CSI-u Super+Backspace) deletes only the current hard draft line: end, middle, line start, Unicode, wrapped lines, captions; Option+Backspace and Backspace unchanged.
 - `tests/harbor/right_click_smoke.py`: primary-action context menu (React…, links, spoiler and quote actions stay in Message tools, which is checked to offer them), reply/forward/copy, quiet left-click, and unchanged drafts.
 - `tests/harbor/selection_smoke.py`: SGR drag/release copying, wrapping, multiple messages, Unicode, and a private test clipboard.
 - `tests/harbor/graphics_smoke.py`: decoded portrait PNG proportions, letterboxing, source cropping during scrolling.
