@@ -1,5 +1,6 @@
 #pragma once
 #include "format.h"
+#include "deskhost.h"
 #include "protocol.h"
 #include <deque>
 #include <functional>
@@ -170,6 +171,8 @@ private:
   void Commands();
   // Optional Desk entries named by HARBOR_DESK_COMMANDS, each run as an argv child on this same terminal.
   std::vector<Option> DeskOptions();
+  HarborDeskHost m_DeskHost;
+  bool WarmDeskHandoff(const std::vector<std::string>& argv);
   bool DeskHandoff(const std::vector<std::string>& argv);
   void DeskFailurePause(const std::string& reason);
   void SuspendTerminal();

@@ -471,6 +471,7 @@ Harbor::Cleanup()
 {
   if (!m_Ready)
     return;
+  m_DeskHost.Stop();
   SaveState();
   HarborInputStop();
   m_Media->Stop();
@@ -2153,8 +2154,56 @@ Harbor::DeskFailurePause(const std::string& reason)
     fcntl(STDIN_FILENO, F_SETFL, flags);
 }
 bool
+Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
+{
+  // Node can alter a shared descriptor while merely preparing its stream handles.
+  const int flags[] = { fcntl(0, F_GETFL), fcntl(1, F_GETFL), fcntl(2, F_GETFL) };
+  struct termios saved = {};
+  const bool termiosSaved = tcgetattr(STDIN_FILENO, &saved) == 0;
+  const auto restore = [&] {
+    for (int fd = 0; fd < 3; ++fd) if (flags[fd] >= 0) fcntl(fd, F_SETFL, flags[fd]);
+    if (termiosSaved) tcsetattr(STDIN_FILENO, TCSANOW, &saved);
+  };
+  const auto prepared = m_DeskHost.Prepare(argv, [] {
+    // Harbor still owns input during preparation. Launch typeahead cannot become a draft or Desk action.
+    const auto event = HarborInputPoll(0);
+    const bool cancel = AppUtil::IsTerminateRequested() || event.kind == -1 || (event.kind == 1 && (event.code == 27 || event.code == 3 || (event.code == 'c' && (event.mods & 4))));
+    free(event.text);
+    return cancel;
+  });
+  if (prepared != HarborDeskHost::Prepared::Ready)
+  {
+    restore();
+    Notify(prepared == HarborDeskHost::Prepared::Cancelled ? "Desk opening cancelled · draft kept" : "Desk could not prepare · draft kept");
+    return false;
+  }
+  SaveState();
+  HarborInputStop(); // joined before the private yield permits Office to acquire its dedicated tty reader
+  m_Media->Stop(); m_Media->ClearGraphics();
+  struct sigaction ignore = {}, oldInt = {}, oldQuit = {}, oldTstp = {};
+  ignore.sa_handler = SIG_IGN; sigemptyset(&ignore.sa_mask);
+  sigaction(SIGINT, &ignore, &oldInt); sigaction(SIGQUIT, &ignore, &oldQuit); sigaction(SIGTSTP, &ignore, &oldTstp);
+  printf("\033[?1002l\033[?1003l\033[<u\033[?2004l");
+  mousemask(0, nullptr); fflush(stdout);
+  tcflush(STDIN_FILENO, TCIFLUSH);
+  // No endwin/reset_prog_mode here: both views retain Harbor's existing alternate screen.
+  const bool ok = m_DeskHost.Visit();
+  restore();
+  tcflush(STDIN_FILENO, TCIFLUSH);
+  sigaction(SIGINT, &oldInt, nullptr); sigaction(SIGQUIT, &oldQuit, nullptr); sigaction(SIGTSTP, &oldTstp, nullptr);
+  if (!HarborInputStart()) throw std::runtime_error("Could not resume terminal input reader");
+  mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, nullptr);
+  printf("\033[?1003l\033[?1002h\033[?2004h\033[>1u"); fflush(stdout);
+  struct winsize size = {};
+  if (ioctl(STDIN_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_row && size.ws_col) resizeterm(size.ws_row, size.ws_col);
+  clearok(stdscr, TRUE); m_Dirty = true; m_MouseDown = false;
+  Notify(ok ? "Back from Desk" : "Desk ended unexpectedly · draft kept · reopen to inspect current state");
+  return ok;
+}
+bool
 Harbor::DeskHandoff(const std::vector<std::string>& argv)
 {
+  if (HarborDeskHost::Eligible(argv)) return WarmDeskHandoff(argv);
   // The Desk view runs on this same terminal while this process, its chats, drafts and reading positions stay as they are.
   // Ctrl+C belongs to the child; Harbor ignores it until the child has ended.
   struct sigaction ignore = {}, oldInt = {}, oldQuit = {}, oldTstp = {};
