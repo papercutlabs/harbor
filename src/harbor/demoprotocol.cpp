@@ -182,17 +182,36 @@ HarborDemo::Login()
           std::this_thread::sleep_for(std::chrono::milliseconds(10));
         if (m_Stopping)
           return;
-        ChatMessage message;
-        message.id = "live-incoming-90000";
-        message.senderId = "marina";
-        message.text = "A live incoming reply.";
-        message.isOutgoing = false;
-        message.timeSent = TimeUtil::GetCurrentTimeMSec();
-        auto update = std::make_shared<NewMessagesNotify>(m_Id);
-        update->success = true;
-        update->chatId = "marina";
-        update->chatMessages = { message };
-        Emit(update);
+        // HARBOR_DEMO_INCOMING_COUNT (1-9) delivers further messages 400 ms apart; each later update
+        // also replays the previous message, as Telegram updates may, so duplicates are exercised.
+        const char* countText = getenv("HARBOR_DEMO_INCOMING_COUNT");
+        const int count = std::max(1, std::min(9, countText ? atoi(countText) : 1));
+        ChatMessage previous;
+        for (int i = 0; i < count && !m_Stopping; ++i)
+        {
+          if (i)
+          {
+            const auto pause = std::chrono::steady_clock::now() + std::chrono::milliseconds(400);
+            while (std::chrono::steady_clock::now() < pause && !m_Stopping)
+              std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            if (m_Stopping)
+              return;
+          }
+          ChatMessage message;
+          message.id = "live-incoming-9000" + std::to_string(i);
+          message.senderId = "marina";
+          message.text = i ? "Another live message " + std::to_string(i + 1) + "." : "A live incoming reply.";
+          message.isOutgoing = false;
+          message.timeSent = TimeUtil::GetCurrentTimeMSec();
+          auto update = std::make_shared<NewMessagesNotify>(m_Id);
+          update->success = true;
+          update->chatId = "marina";
+          update->chatMessages = { message };
+          if (i)
+            update->chatMessages.insert(update->chatMessages.begin(), previous);
+          Emit(update);
+          previous = message;
+        }
       });
   }
   return true;
@@ -265,6 +284,9 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
         ContactInfo c;
         c.id = item.first;
         c.name = item.second;
+        // HARBOR_DEMO_STUDIO_NAME supplies a provider-controlled name, e.g. one carrying terminal escapes.
+        if (c.id == "studio" && getenv("HARBOR_DEMO_STUDIO_NAME"))
+          c.name = getenv("HARBOR_DEMO_STUDIO_NAME");
         c.isSelf = c.id == "self";
         n->contactInfos.push_back(c);
       }

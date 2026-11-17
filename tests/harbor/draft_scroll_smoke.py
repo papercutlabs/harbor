@@ -22,7 +22,7 @@ try:
     t.picker('Marina');t.send(b'\x1b[5~');t.send('draft while a reply arrives')
     t.pump(3)
     assert 'A live incoming reply.' not in t.text
-    t.expect('new · Ctrl+G');t.expect('draft while a reply arrives')
+    t.expect('↓ 1 new message');t.expect('draft while a reply arrives')
     t.send(b'\x07');t.expect('A live incoming reply.');t.expect('draft while a reply arrives')
 finally:t.close()
 print('PASS typing/newline/paste preserve history; incoming reply keeps unread action; Latest is explicit')

@@ -63,7 +63,7 @@ class Terminal:
             os.execv(str(exe), [str(exe), '--demo', '-d', self.config])
         os.close(slave)
         self.pump(.6)
-        try: self.expect('HARBOR / TELEGRAM', timeout=10)
+        try: self.expect('⌥/ commands', timeout=10)
         except Exception:
             self.close()
             raise
@@ -154,13 +154,14 @@ if __name__=='__main__':
       config=Path(temp)/'config'
       t=Terminal(config_dir=config)
       try:
-        t.expect('HARBOR / TELEGRAM');t.picker('Marina');check('Native startup and chat search')
+        t.expect('⌥/ commands');t.picker('Marina');assert 'HARBOR / TELEGRAM' not in t.text and 'connected' not in t.text;check('Native startup and chat search')
         t.send('Hello from Harbor');t.send(b'\r');t.expect('Sent');check('Enter sends through Protocol')
         t.send(b'\x1b');t.expect('MESSAGES');t.send(b'\r');t.expect('Message actions');check('Escape and Enter open message actions')
         t.send(b'\x1b');t.send('Draft kept');t.expect('Draft kept')
         t.picker('Studio');t.send('Studio draft');t.picker('Marina');t.expect('Draft kept');check('Drafts survive switching')
-        t.send(b'\x15');t.send('/');t.expect('Commands & shortcuts');t.send(b'\x1b');check('Slash opens commands from an empty composer')
-        t.send('literal/');t.expect('literal/');assert 'Commands & shortcuts' not in t.text;t.send(b'\x15');check('Slash is literal in nonempty drafts')
+        t.send(b'\x15');t.send('/');t.expect('› /');assert 'Commands & shortcuts' not in t.text;t.send(b'\x15');check('Slash is literal in an empty composer')
+        t.send(b'\x1b/');t.expect('Commands & shortcuts');t.send(b'\x1b');assert '› /' not in t.text;check('Option-/ opens commands from an empty composer')
+        t.send('literal/');t.expect('literal/');assert 'Commands & shortcuts' not in t.text;t.send(b'\x1b[47;3u');t.expect('Commands & shortcuts');t.send(b'\x1b');t.expect('literal/');assert 'literal//' not in t.text;t.send(b'\x15');check('Slash is literal in nonempty drafts and enhanced Option-/ keeps them')
         t.send('line one');t.send(b'\x1b[13;2u');t.send('line two');t.expect('line two');t.expect('line one');check('CSI-u Shift+Enter inserts newline')
         t.send(b'\x15');t.send('Unicode: 你好 🌊 ǚ ɚ');t.expect('你好');t.expect('ɚ');check('Unicode and special-key code points remain distinct')
         t.send(b'\x1b[107;5u');t.expect('Find a conversation');t.send(b'\x1b');check('Enhanced Ctrl+K finds chats')
@@ -179,7 +180,7 @@ if __name__=='__main__':
         t.send('\x1b[200~'+fixture+'\x1b[201~',wait=.4);t.expect('Preview attachments');t.click_text('Send 1 attachment');t.expect('Sent');check('Attachment sends only after confirmation')
         t.send('Persistent final draft');t.resize(110,42);t.expect('CONVERSATIONS');t.snapshot('harbor-native-wide');check('Wide layout shows chat list')
         t.resize(50,38);assert 'CONVERSATIONS' not in t.text;t.expect('Persistent final draft');t.snapshot('harbor-native-narrow');check('50-column layout uses full conversation width')
-        t.resize(28,15);t.expect('HARBOR');t.resize(56,38);check('Small terminal resize does not crash')
+        t.resize(28,15);t.expect('commands');t.resize(56,38);check('Small terminal resize does not crash')
       finally:t.close()
       state=config/'harbor-state';assert state.exists();assert state.stat().st_mode & 0o077 == 0
       t=Terminal(config_dir=config)
@@ -222,7 +223,7 @@ if __name__=='__main__':
     try:
       t.picker('Marina');t.send(b'\x1b[5~');t.pump(1.7)
       assert 'A live incoming reply.' not in t.text
-      t.expect('new · Ctrl+G');t.send(b'\x07');t.expect('A live incoming reply.')
+      t.expect('↓ 1 new message');t.send(b'\x07');t.expect('A live incoming reply.');assert 'new message' not in t.text
       check('Older reading position stays put with a visible new-message action')
     finally:t.close()
     with tempfile.TemporaryDirectory(prefix='harbor-opener-test-') as directory:

@@ -5,7 +5,8 @@
     "tests/harbor/rich_actions_smoke.py",
     "tests/harbor/right_click_smoke.py",
     "tests/harbor/word_navigation_smoke.py",
-    "tests/harbor/list_spacing_smoke.py"
+    "tests/harbor/list_spacing_smoke.py",
+    "tests/harbor/chat_chrome_smoke.py"
   ],
   "lanes": {
     "static": [
@@ -14,7 +15,8 @@
       "tests/harbor/rich_actions_smoke.py",
       "tests/harbor/right_click_smoke.py",
       "tests/harbor/word_navigation_smoke.py",
-      "tests/harbor/list_spacing_smoke.py"
+      "tests/harbor/list_spacing_smoke.py",
+      "tests/harbor/chat_chrome_smoke.py"
     ],
     "format": [
       "tests/harbor/format_test.cpp"
@@ -45,6 +47,9 @@
     ],
     "draft_scroll": [
       "tests/harbor/draft_scroll_smoke.py"
+    ],
+    "chat_chrome": [
+      "tests/harbor/chat_chrome_smoke.py"
     ],
     "send_replacement": [
       "tests/harbor/send_replacement_smoke.py"

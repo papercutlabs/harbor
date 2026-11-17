@@ -64,7 +64,8 @@ enum
   DialogBorder,
   Backdrop,
   DialogMuted,
-  SelectedMuted
+  SelectedMuted,
+  NoticeBar
 };
 enum
 {
@@ -453,6 +454,8 @@ Harbor::Init()
   // Option descriptions use the muted foreground on the dialog and selection surfaces.
   pair(DialogMuted, 18, 25);
   pair(SelectedMuted, 18, 23);
+  // The new-message bar is dark bold text on the light accent; eight-colour terminals use black on cyan.
+  init_pair(NoticeBar, COLORS >= 256 ? 16 : COLOR_BLACK, COLORS >= 256 ? 19 : COLOR_CYAN);
   if (!HarborInputStart())
   {
     endwin();
@@ -710,7 +713,10 @@ Harbor::Merge(Conversation& c, const std::vector<ChatMessage>& messages, bool ou
   const int64_t previousOldest = oldest.empty() ? -1 : c.messages[oldest].timeSent;
   for (const auto& m : messages)
   {
-    if (!c.follow && !m.isOutgoing && m.timeSent > previousLatest && !c.messages.count(m.id))
+    // Only a genuinely new incoming message after already-loaded history counts: cached history, replays,
+    // out-of-sequence fetches, own sends and duplicates never do.
+    if (!c.follow && !outOfSequence && previousLatest >= 0 && !m.isOutgoing && !m.isDeleted &&
+        m.timeSent > previousLatest && !c.messages.count(m.id))
       c.unseen++;
     if (!outOfSequence)
       c.detached.erase(m.id);
@@ -917,7 +923,7 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
           if (!edit)
             c.reply = n->chatMessage.quotedId;
         }
-        Notify("Send failed · draft restored; / → Recover");
+        Notify("Send failed · draft restored; ⌥/ → Recover");
       }
       break;
     }
@@ -1247,29 +1253,35 @@ Harbor::Draw()
   m_Bottom = m_ComposerY - 1;
   if (c && (!c->reply.empty() || !c->editing.empty()))
     --m_Bottom;
-  m_Top = 5;
+  // Approved indicator A: one count-only bar in the spacer row directly above the composer (and any
+  // reply context), so neither the draft nor the reading position moves when it appears.
+  bool newBar = c && !c->follow && c->unseen > 0;
+  const int newBarY = m_Bottom;
+  m_Top = 3;
   bkgd(COLOR_PAIR(Base));
   erase();
   m_Hits.clear();
   m_CopyCells.clear();
-  Text(0, 0, m_W, L" HARBOR / TELEGRAM", Surface);
-  Text(0,
-       std::max(0, m_W - 17),
-       17,
-       !m_AuthOwner.empty()  ? L" ● authenticating"
-       : m_Connected.empty() ? L" ○ connecting"
-                             : L" ● connected",
-       Surface);
-  Text(2, m_MainX + 2, m_MainW - 20, c ? W(c->name) : L"Connecting…", Accent, true);
-  Text(2, m_W - 16, 14, L"⌥K chats", Muted);
-  m_Hits.push_back({ 2, m_W - 17, 17, "chats", "" });
-  Text(3, m_MainX + 2, m_MainW - 4, c ? W(m_Protocols[c->profile]->GetProfileDisplayName()) : L"", Muted);
+  // The current chat is the first row; only a not-yet-connected state takes space on the account row.
+  Text(0, m_MainX + 2, m_MainW - 20, c ? W(c->name) : L"Connecting…", Accent, true);
+  Text(0, m_W - 16, 14, L"⌥K chats", Muted);
+  m_Hits.push_back({ 0, m_W - 17, 17, "chats", "" });
+  const std::wstring connection = !m_AuthOwner.empty()  ? L"● authenticating"
+                                  : m_Connected.empty() ? L"○ connecting"
+                                                        : L"";
+  Text(1,
+       m_MainX + 2,
+       m_MainW - 4 - (connection.empty() ? 0 : Width(connection) + 2),
+       c ? W(m_Protocols[c->profile]->GetProfileDisplayName()) : L"",
+       Muted);
+  if (!connection.empty())
+    Text(1, std::max(m_MainX + 2, m_W - 2 - Width(connection)), Width(connection), connection, Warning);
   if (m_MainX)
   {
-    for (int y = 1; y < m_H; y++)
+    for (int y = 0; y < m_H; y++)
       Text(y, 24, 1, L"│", Muted);
-    Text(2, 2, 20, L"CONVERSATIONS", Muted);
-    int y = 4;
+    Text(0, 2, 20, L"CONVERSATIONS", Muted);
+    int y = 2;
     for (auto& key : m_ChatOrder)
     {
       if (y >= m_H - 2)
@@ -1316,6 +1328,12 @@ Harbor::Draw()
       c->scroll = std::max(0, int(m_Rows.size()) - visible);
     }
     c->scroll = std::max(0, std::min(c->scroll, std::max(0, int(m_Rows.size()) - visible)));
+    // Reading down to the newest row sees what was new.
+    if (newBar && c->scroll >= int(m_Rows.size()) - visible)
+    {
+      c->unseen = 0;
+      newBar = false;
+    }
     struct Picture
     {
       const HarborImage* image;
@@ -1505,25 +1523,35 @@ Harbor::Draw()
       Text(m_ComposerY + 1 + i, m_MainX + 6, textWidth, draftLines[m_ComposerFirstLine + i], Surface);
   }
   else
-    Text(6, m_MainX + 2, m_MainW - 4, L"Waiting for your conversations…", Muted);
+    Text(m_Top + 1, m_MainX + 2, m_MainW - 4, L"Waiting for your conversations…", Muted);
   Text(
     m_H - 2, m_MainX + 2, std::max(1, m_MainW - 17), m_Browse ? L"MESSAGES · ↑↓ · Enter" : L"COMPOSE", Muted);
   {
-    Text(m_H - 2, m_W - 13, 11, L"/ commands", Muted);
-    m_Hits.push_back({ m_H - 2, m_W - 13, 11, "commands", "" });
+    Text(m_H - 2, m_W - 14, 12, L"⌥/ commands", Muted);
+    m_Hits.push_back({ m_H - 2, m_W - 14, 12, "commands", "" });
   }
   Text(m_H - 1, m_MainX + 2, m_MainW - 4, W(m_Status), m_Status.empty() ? Muted : Good);
   if (!m_UpdateTarget.empty())
   {
-    Text(m_H - 1, m_MainX + 2, m_MainW - 4, W("↑ Harbor " + m_UpdateVersion + " ready · / → Update"), Accent);
+    Text(m_H - 1, m_MainX + 2, m_MainW - 4, W("↑ Harbor " + m_UpdateVersion + " ready · ⌥/ → Update"), Accent);
     m_Hits.push_back({ m_H - 1, m_MainX + 2, m_MainW - 4, "update", "" });
   }
-  if (c && (!c->follow) &&
-      (c->unseen > 0 || c->scroll + std::max(1, m_Bottom - m_Top) < int(m_Rows.size()) - 2))
+  if (newBar)
   {
-    const std::string label =
-      c->unseen > 0 ? "↓ " + std::to_string(c->unseen) + " new · Ctrl+G" : "↓ Latest · Ctrl+G";
-    Text(m_H - 2, m_MainX + 2, std::max(1, m_MainW - 17), W(label), Accent);
+    const int x = m_MainX + 2, w = std::max(1, m_MainW - 4);
+    const std::wstring count = W("↓ " + std::to_string(c->unseen) + (c->unseen == 1 ? " new message" : " new messages"));
+    const std::wstring shortCount = W("↓ " + std::to_string(c->unseen) + " new");
+    const std::wstring key = L"Ctrl+G";
+    Fill(newBarY, x, w, NoticeBar);
+    const std::wstring label = Width(count) + Width(key) + 4 <= w ? count : shortCount;
+    Text(newBarY, x + 1, std::max(1, w - 2), label, NoticeBar, true);
+    if (Width(label) + Width(key) + 4 <= w)
+      Text(newBarY, x + w - 1 - Width(key), Width(key), key, NoticeBar, true);
+    m_Hits.push_back({ newBarY, x, w, "latest", "" });
+  }
+  else if (c && !c->follow && c->scroll + std::max(1, m_Bottom - m_Top) < int(m_Rows.size()) - 2)
+  {
+    Text(m_H - 2, m_MainX + 2, std::max(1, m_MainW - 17), L"↓ Latest · Ctrl+G", Accent);
     m_Hits.push_back({ m_H - 2, m_MainX + 2, std::max(1, m_MainW - 17), "latest", "" });
   }
   if (!m_Menu.empty())
@@ -1543,7 +1571,37 @@ Harbor::Draw()
   else if (m_Menu.empty())
     curs_set(0);
   refresh();
+  SetTitle(c ? c->name : "Harbor");
   m_Media->EndFrame();
+}
+// The terminal title (OSC 2) names the current chat on this UI's own terminal and is written only when it changes.
+std::string
+Harbor::TerminalTitle(const std::string& name)
+{
+  std::string out;
+  for (auto ch : W(name))
+  {
+    if (ch < 0x20 || (ch >= 0x7f && ch <= 0x9f) || ch == 0x2028 || ch == 0x2029)
+    {
+      if (!out.empty() && out.back() != ' ')
+        out += ' ';
+      continue;
+    }
+    out += S(std::wstring(1, ch));
+  }
+  while (!out.empty() && out.back() == ' ')
+    out.pop_back();
+  return out.empty() ? "Harbor" : out;
+}
+void
+Harbor::SetTitle(const std::string& name)
+{
+  const auto title = TerminalTitle(name);
+  if (title == m_Title)
+    return;
+  m_Title = title;
+  printf("\033]2;%s\007", title.c_str());
+  fflush(stdout);
 }
 
 void
@@ -2028,7 +2086,7 @@ Harbor::Commands()
         m_Menu = "help";
         m_Options = {
           { "Compose immediately", "Type from messages to write", [this] { CloseMenu(); } },
-          { "Commands from a draft", "Ctrl+O · / is literal once typing", [this] { CloseMenu(); } },
+          { "Commands from any draft", "⌥/ or Ctrl+O · / is always literal", [this] { CloseMenu(); } },
           { "Enter sends / Shift+Enter newline", "Ctrl+J is a newline fallback", [this] { CloseMenu(); } },
           { "Escape switches focus", "Arrows browse · Enter actions", [this] { CloseMenu(); } },
           { "Option+K finds conversations",
@@ -2262,7 +2320,7 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
   printf("\033[?1003l\033[?1002h\033[?2004h\033[>1u"); fflush(stdout);
   struct winsize size = {};
   if (ioctl(STDIN_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_row && size.ws_col) resizeterm(size.ws_row, size.ws_col);
-  clearok(stdscr, TRUE); m_Dirty = true; m_MouseDown = false;
+  clearok(stdscr, TRUE); m_Dirty = true; m_MouseDown = false; m_Title.clear(); // Desk may have retitled the terminal
   Notify(ok ? "Back from Desk" : "Desk ended unexpectedly · see <config>/" + m_DeskHost.DiagnosticName());
   return ok;
 }
@@ -2324,6 +2382,7 @@ Harbor::DeskHandoff(const std::vector<std::string>& argv)
     Notify("Desk exited " + std::to_string(WEXITSTATUS(status)) + " · draft kept");
   else
     Notify("Back from Desk");
+  m_Title.clear(); // the Desk view may have retitled this terminal
   return spawned == 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 void
@@ -2698,7 +2757,7 @@ Harbor::Visit(std::string key, std::string id)
   c.restoreAnchor.clear();
   c.selected = id;
   Select(0);
-  Notify("Showing the message · / or Ctrl+O → Return to previous position");
+  Notify("Showing the message · ⌥/ or Ctrl+O → Return to previous position");
 }
 void
 Harbor::ReturnBack()
@@ -3190,7 +3249,7 @@ Harbor::OpenAttachment(const std::string& p, const std::string& chatId, const st
       m_Media->TogglePause();
     else
       m_Media->Play(f.filePath);
-    Notify("Voice playback · / to pause or stop");
+    Notify("Voice playback · ⌥/ to pause or stop");
   }
   else if (type.find("image") == 0 && preview)
   {
@@ -3423,11 +3482,6 @@ Harbor::KeyPress(wint_t k)
     auto* c = Current();
     if (!c)
       return;
-    if (k == '/' && c->draft.empty())
-    {
-      Commands();
-      return;
-    }
     if (m_Browse && k == ' ' && m_Media->Playing())
     {
       m_Media->TogglePause();
@@ -3446,7 +3500,7 @@ Harbor::KeyPress(wint_t k)
     m_Running = false;
     return;
   }
-  // Ctrl+O opens the same Commands menu from any draft and leaves the draft unchanged; / stays literal once typing.
+  // Ctrl+O and Option-/ open the same Commands menu from any draft and leave the draft unchanged; / is always literal.
   if (k == 15 && m_Menu.empty())
   {
     Commands();
@@ -3610,11 +3664,6 @@ Harbor::KeyPress(wint_t k)
     if ((k >= 32 && k < KEY_MIN) || (k > KEY_MAX && k < 0x110000))
     {
       m_Browse = false;
-      if (k == '/' && c->draft.empty())
-      {
-        Commands();
-        return;
-      }
       EditKey(k);
     }
     return;
@@ -3622,11 +3671,6 @@ Harbor::KeyPress(wint_t k)
   if (k == 13 || k == KEY_ENTER)
   {
     Send();
-    return;
-  }
-  if (k == '/' && c->draft.empty())
-  {
-    Commands();
     return;
   }
   EditKey(k);
@@ -3764,6 +3808,9 @@ Harbor::ReadInput()
     }
     // Exact decoded Super-O (32) opens Commands; existing Ctrl combinations keep their previous behavior.
     else if (event.mods == 32 && event.code == 'o')
+      key = 15;
+    // Option-/ (legacy Escape-/ or enhanced Alt+/) opens Commands from any draft; plain / is always text.
+    else if (event.mods == 2 && event.code == '/')
       key = 15;
     else if ((event.mods & 4) && event.code >= 'a' && event.code <= 'z')
       key = event.code - 'a' + 1;

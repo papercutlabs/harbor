@@ -25,6 +25,18 @@ func TestStreamDecoder(t *testing.T) {
 			k := translate(e)
 			return k.kind == 1 && k.code == 'o' && k.mods == 32
 		}},
+		{"legacy option slash", []string{"\x1b/"}, func(e uv.Event) bool {
+			k := translate(e)
+			return k.kind == 1 && k.code == '/' && k.mods == 2
+		}},
+		{"enhanced option slash", []string{"\x1b[47;3u"}, func(e uv.Event) bool {
+			k := translate(e)
+			return k.kind == 1 && k.code == '/' && k.mods == 2
+		}},
+		{"plain slash", []string{"/"}, func(e uv.Event) bool {
+			k := translate(e)
+			return k.kind == 2
+		}},
 		{"kitty repeat", []string{"\x1b[57350;1:2u"}, func(e uv.Event) bool { k, ok := e.(uv.KeyPressEvent); return ok && k.Code == uv.KeyLeft }},
 		{"kitty release", []string{"\x1b[57350;1:3u"}, func(e uv.Event) bool { _, ok := e.(uv.KeyReleaseEvent); return ok && translate(e).kind == 0 }},
 		{"unknown CSI", []string{"\x1b[99999z"}, func(e uv.Event) bool { return translate(e).kind == 0 }},
