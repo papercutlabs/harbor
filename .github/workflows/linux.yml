@@ -43,3 +43,4 @@ jobs:
         "$RUNNER_TEMP/harbor-smoke-venv/bin/python" tests/harbor/command_keys_smoke.py
         "$RUNNER_TEMP/harbor-smoke-venv/bin/python" tests/harbor/warm_host_protocol.py
         "$RUNNER_TEMP/harbor-smoke-venv/bin/python" tests/harbor/warm_handoff_smoke.py
+        "$RUNNER_TEMP/harbor-smoke-venv/bin/python" tests/harbor/word_navigation_smoke.py
