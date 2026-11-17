@@ -956,10 +956,12 @@ static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs)
   ui->Init();
   for (auto& remote : remotes) remote->Login(); // starts the shared reader once
   ui->Run();
+  // Freeze the reader and recover unconfirmed sends before Cleanup drains events
+  // and writes this slot. This also covers restart and caught termination signals.
+  connection->Stop();
   ui->Cleanup();
   const bool ended = connection->Ended();
   const std::string reason = connection->EndReason();
-  connection->Stop();
   ui.reset();
   remotes.clear();
 

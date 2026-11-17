@@ -85,7 +85,7 @@ public:
   Connection(int p_Fd, const std::string& p_Pending);
   ~Connection();
   void Start(); // begins reading; replays events for all registered handlers
-  void Stop();
+  void Stop(); // freezes I/O and dispatches unconfirmed sends before the UI's final save
   bool Send(const std::string& p_ProfileId, std::shared_ptr<RequestMessage> p_Request);
   void SetHandler(const std::string& p_ProfileId, const std::function<void(std::shared_ptr<ServiceMessage>)>& p_Handler);
   // Called by the window once it has left ncurses for a lend: passes its terminal to the backend.
@@ -97,6 +97,7 @@ private:
   void ReadLoop();
   void Dispatch(std::shared_ptr<ServiceMessage>);
   void End(const std::string& p_Reason);
+  void RecoverUnknown();
   int m_Fd = -1;
   std::string m_Pending;
   std::thread m_Reader;
@@ -107,7 +108,7 @@ private:
   std::atomic<bool> m_Stopping{ false };
   std::string m_EndReason;
   uint32_t m_Seq = 0;
-  // Sends whose outcome has not arrived; on session loss they are reported as failed
+  // Sends whose outcome has not arrived; on session loss or orderly close they are reported as failed
   // (draft restored for recovery) and never replayed.
   std::map<uint64_t, std::shared_ptr<SendMessageNotify>> m_Unknown;
 };

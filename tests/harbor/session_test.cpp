@@ -531,7 +531,7 @@ Closed(int fd)
   close(fd);
 }
 static void
-UnknownSendTests()
+UnknownSendTests(bool orderly)
 {
   int pair[2];
   assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
@@ -557,15 +557,39 @@ UnknownSendTests()
   assert(EncodeNotify(pending, encoded));
   const auto frame = Frame(KindEvent, encoded);
   assert(send(pair[1], frame.data(), frame.size(), 0) == (ssize_t)frame.size());
-  shutdown(pair[1], SHUT_WR);
-  assert(window.WaitFor(RequestAppExitNotifyType, 1));
+  assert(window.WaitFor(SendMessageNotifyType, 1, 1)); // acceptance reached the reader
+  // A confirmed send must not be recovered along with the two unknown originals.
+  auto confirmed = std::make_shared<SendMessageRequest>();
+  confirmed->chatId = "same"; confirmed->chatMessage = Full("confirmed");
+  assert(conn->Send("HarborDemo_local", confirmed));
+  auto final = std::make_shared<SendMessageNotify>("HarborDemo_local");
+  final->requestId = confirmed->requestId; final->success = true;
+  assert(EncodeNotify(final, encoded));
+  const auto done = Frame(KindEvent, encoded);
+  assert(send(pair[1], done.data(), done.size(), 0) == (ssize_t)done.size());
+  assert(window.WaitFor(SendMessageNotifyType, 2, 1));
+  if (orderly)
+  {
+    conn->Stop();
+    assert(!conn->Ended() && window.Count(RequestAppExitNotifyType) == 0);
+    assert(!conn->Send("HarborDemo_local", confirmed)); // frozen, no replay/new request
+    conn->Stop(); // finalization is idempotent
+  }
+  else
+  {
+    shutdown(pair[1], SHUT_WR);
+    assert(window.WaitFor(RequestAppExitNotifyType, 1));
+  }
   assert(window.Count(SendMessageNotifyType, 0) == 2);
   {
     std::lock_guard<std::mutex> lock(window.mutex);
     size_t recovered = 0;
     for (auto& e : window.events)
       if (e->GetMessageType() == SendMessageNotifyType && !std::static_pointer_cast<SendMessageNotify>(e)->success)
+      {
+        assert(e->requestId == recovered + 1); // each original keeps its request identity
         SameMessage(std::static_pointer_cast<SendMessageNotify>(e)->chatMessage, originals[recovered++]);
+      }
     assert(recovered == 2);
   }
   std::string requests;
@@ -576,10 +600,11 @@ UnknownSendTests()
   int sent = 0;
   while (!requests.empty())
   { Kind kind; std::string payload; bool have = false; assert(NextFrame(requests, kind, payload, have) && have && kind == KindRequest); ++sent; }
-  assert(sent == 2); // no replay on EOF
+  assert(sent == 3); // two unknown originals + one confirmed send, no replay
   conn->Stop();
   close(pair[1]);
-  std::cout << "unknown sends: pending acceptance + EOF retains full rich/quote payloads without replay\n";
+  std::cout << "unknown sends: pending acceptance + " << (orderly ? "orderly stop" : "EOF")
+            << " retains full rich/quote/attachment payloads and request identities without replay\n";
 }
 
 static void
@@ -776,7 +801,8 @@ main()
   ViewChatTests();
   SocketPathTests();
   RoutingTests();
-  UnknownSendTests();
+  UnknownSendTests(false);
+  UnknownSendTests(true);
   std::cout << "session tests passed\n";
   return 0;
 }

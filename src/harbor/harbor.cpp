@@ -382,6 +382,12 @@ Harbor::Receive(std::shared_ptr<ServiceMessage> e)
     TestTrace("receive search token=" + std::to_string(std::static_pointer_cast<SearchMessagesNotify>(e)->token));
   std::lock_guard<std::mutex> lock(m_Mutex);
   m_Events.push_back(e);
+  if (e->GetMessageType() == SendMessageNotifyType)
+  {
+    auto n = std::static_pointer_cast<SendMessageNotify>(e);
+    TestTrace("receive send request=" + std::to_string(n->requestId) +
+              " pending=" + std::to_string(n->pending) + " success=" + std::to_string(n->success));
+  }
 }
 void
 Harbor::Request(const std::string& p, std::shared_ptr<RequestMessage> r)
@@ -494,6 +500,8 @@ Harbor::Cleanup()
   if (!m_Ready)
     return;
   m_DeskHost.Stop();
+  if (m_Remote)
+    ProcessEvents(); // the connection is frozen; consume final outcomes/recoveries before saving
   SaveState();
   HarborInputStop();
   m_Media->Stop();

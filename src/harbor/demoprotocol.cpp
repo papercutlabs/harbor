@@ -5,6 +5,7 @@
 #include "richtext.h"
 #include "timeutil.h"
 #include "strutil.h"
+#include "wire.h"
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
@@ -294,7 +295,14 @@ HarborDemo::Later(int milliseconds, std::shared_ptr<ServiceMessage> message)
                std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
                  std::chrono::steady_clock::now() - started).count()));
       if (!m_Stopping)
+      {
+        if (message->GetMessageType() == SendMessageNotifyType)
+        {
+          auto n = std::static_pointer_cast<SendMessageNotify>(message);
+          Record("emit send request=" + std::to_string(n->requestId) + " success=" + std::to_string(n->success));
+        }
         Emit(message);
+      }
     });
 }
 
@@ -483,8 +491,12 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
     {
       auto r = std::static_pointer_cast<SendMessageRequest>(request);
       const int sendIndex = ++m_SendCount;
+      HarborWire::Writer original;
+      HarborWire::Put(original, r->chatMessage);
       Record("send chat=" + r->chatId + " text=" + r->chatMessage.text + " view=" +
-             std::to_string(r->requestId >> 32) + " index=" + std::to_string(sendIndex));
+             std::to_string(r->requestId >> 32) + " index=" + std::to_string(sendIndex) +
+             " request=" + std::to_string(r->requestId) + " payload=" + StrUtil::StrToHex(original.buf));
+      const int sendDelay = DelayMs("HARBOR_DEMO_SEND_DELAY_MS");
       // HARBOR_DEMO_FAIL_SEND fails every send; HARBOR_DEMO_FAIL_SEND_INDEX=n fails only the
       // n-th send this session receives, so two windows can send the same text with one failure.
       const int failIndex = DelayMs("HARBOR_DEMO_FAIL_SEND_INDEX");
@@ -495,7 +507,13 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
         failed->chatId = r->chatId;
         failed->chatMessage = r->chatMessage;
         failed->requestId = r->requestId;
-        Emit(failed);
+        if (sendDelay > 0)
+        {
+          auto accepted = std::make_shared<SendMessageNotify>(*failed);
+          accepted->success = true; accepted->pending = true;
+          Emit(accepted);
+        }
+        Later(sendDelay, failed);
         break;
       }
       ChatMessage m = r->chatMessage;
@@ -526,7 +544,6 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
       sent->chatId = r->chatId;
       sent->chatMessage = m;
       sent->requestId = r->requestId;
-      const int sendDelay = DelayMs("HARBOR_DEMO_SEND_DELAY_MS");
       if (sendDelay > 0)
       {
         auto accepted = std::make_shared<SendMessageNotify>(*sent);

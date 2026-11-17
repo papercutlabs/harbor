@@ -403,15 +403,21 @@ Connection::Stop()
     shutdown(m_Fd, SHUT_RDWR);
   if (m_Reader.joinable())
     m_Reader.join();
-  if (m_Fd >= 0)
-    close(m_Fd);
-  m_Fd = -1;
+  {
+    std::lock_guard<std::mutex> lock(m_WriteMutex);
+    if (m_Fd >= 0)
+      close(m_Fd);
+    m_Fd = -1;
+  }
+  // No reader or writer can now confirm another send. Deliver the originals
+  // synchronously to the UI queue while its final state save is still possible.
+  RecoverUnknown();
 }
 bool
 Connection::Send(const std::string& p_ProfileId, std::shared_ptr<RequestMessage> p_Request)
 {
   std::string encoded;
-  if (m_Ended) return false;
+  if (m_Ended || m_Stopping) return false;
   if (!HarborWire::EncodeRequest(p_Request, encoded))
   {
     if (p_Request->GetMessageType() == SendMessageRequestType)
@@ -424,6 +430,7 @@ Connection::Send(const std::string& p_ProfileId, std::shared_ptr<RequestMessage>
     return false;
   }
   std::lock_guard<std::mutex> lock(m_WriteMutex);
+  if (m_Ended || m_Stopping) return false;
   // The window's own sequence; the backend replaces the high half with this connection's identity.
   if (m_Seq == UINT32_MAX)
   {
@@ -437,6 +444,7 @@ Connection::Send(const std::string& p_ProfileId, std::shared_ptr<RequestMessage>
   {
     auto unknown = std::make_shared<SendMessageNotify>(p_ProfileId);
     auto q = std::static_pointer_cast<SendMessageRequest>(p_Request);
+    unknown->requestId = p_Request->requestId;
     unknown->chatId = q->chatId;
     unknown->chatMessage = q->chatMessage;
     std::lock_guard<std::mutex> state(m_Mutex);
@@ -450,7 +458,8 @@ Connection::Send(const std::string& p_ProfileId, std::shared_ptr<RequestMessage>
   w.S(encoded);
   const auto frame = w.ok ? HarborWire::Frame(HarborWire::KindRequest, w.buf) : std::string();
   if (!frame.empty() && WriteAll(m_Fd, frame)) return true;
-  End("Harbor's session ended. Your drafts and unknown sends were saved; run harbor again.");
+  if (!m_Stopping)
+    End("Harbor's session ended. Your drafts and unknown sends were saved; run harbor again.");
   return false;
 }
 void
@@ -474,6 +483,7 @@ Connection::Lent()
   cmsg->cmsg_len = CMSG_LEN(sizeof(fds));
   memcpy(CMSG_DATA(cmsg), fds, sizeof(fds));
   std::lock_guard<std::mutex> lock(m_WriteMutex);
+  if (m_Stopping) return;
   ssize_t sent;
   do { sent = sendmsg(m_Fd, &msg, MSG_NOSIGNAL); } while (sent < 0 && errno == EINTR);
   if (sent != (ssize_t)frame.size())
@@ -507,20 +517,27 @@ Connection::End(const std::string& p_Reason)
   if (m_Ended.exchange(true))
     return;
   std::vector<std::string> profiles;
-  std::map<uint64_t, std::shared_ptr<SendMessageNotify>> unknown;
   {
     std::lock_guard<std::mutex> lock(m_Mutex);
     m_EndReason = p_Reason;
     for (auto& h : m_Handlers)
       profiles.push_back(h.first);
-    unknown.swap(m_Unknown);
   }
-  // Sends whose outcome is unknown are restored to their drafts for recovery; nothing is replayed.
-  // Then leave the UI: it saves view state on its ordinary exit path.
-  for (auto& u : unknown)
-    Dispatch(u.second);
+  RecoverUnknown();
   for (auto& p : profiles)
     Dispatch(std::make_shared<RequestAppExitNotify>(p));
+}
+void
+Connection::RecoverUnknown()
+{
+  std::map<uint64_t, std::shared_ptr<SendMessageNotify>> unknown;
+  {
+    std::lock_guard<std::mutex> lock(m_Mutex);
+    unknown.swap(m_Unknown);
+  }
+  // A local acceptance is not confirmation. Preserve complete originals, never replay.
+  for (auto& u : unknown)
+    Dispatch(u.second);
 }
 void
 Connection::ReadLoop()
