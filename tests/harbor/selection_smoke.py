@@ -1,13 +1,13 @@
-"""Mouse drag selects and copies on release to a private system pasteboard."""
-import subprocess
-import uuid
+"""Mouse drag selects and copies on release to a private file through the real Clipboard boundary."""
+import tempfile
+import shlex
+from pathlib import Path
 from native_smoke import Terminal
 
-name = 'harbor-selection-test-' + uuid.uuid4().hex
-read = "ObjC.import('AppKit'); function run(a) { var s=$.NSPasteboard.pasteboardWithName(a[0]).stringForType('public.utf8-plain-text'); return s.isNil() ? '' : ObjC.unwrap(s); }"
-clear = "ObjC.import('AppKit'); function run(a) { $.NSPasteboard.pasteboardWithName(a[0]).clearContents; }"
+private = tempfile.TemporaryDirectory(prefix='harbor-selection-')
+clipboard_file = Path(private.name) / 'clipboard.txt'
 def clipboard():
-    return subprocess.check_output(['/usr/bin/osascript','-l','JavaScript','-e',read,name],text=True,timeout=5).removesuffix('\n')
+    return clipboard_file.read_text()
 def point(t,text):
     y = next(y for y,row in enumerate(t.screen.display) if text in row)
     for x in range(t.cols):
@@ -25,8 +25,11 @@ def drag(t,a,b):
     t.expect('Copied selection')
     assert 'Message actions' not in t.text
 
-t=Terminal(cols=50,rows=44,extra_env={'HARBOR_TEST_PASTEBOARD':name})
+t=Terminal(cols=50,rows=44,extra_env={'HARBOR_TEST_CLIPBOARD_FILE':str(clipboard_file), 'XDG_STATE_HOME':str(Path(private.name)/'state')})
 try:
+    backend_config = Path(t.config) / 'app.conf'
+    config_bytes = backend_config.read_bytes()
+    config_mtime = backend_config.stat().st_mtime_ns
     t.picker('Studio')
     x,y=point(t,'new layout')
     drag(t,(x,y),(x+len('new layout')-1,y))
@@ -78,7 +81,43 @@ try:
     # Left-click does not open actions; right-click does.
     t.send(b'\x1b');t.click_text('final');assert 'Message actions' not in t.text
     t.click_text('final',button=2);t.expect('Message actions')
-    print('PASS drag auto-copy, reverse selection, TDLib code block display and exact copy, no action popup, wrapping/newlines, Unicode, draft preservation, right-click actions')
+    # Copy and paste both cross Clipboard without initializing backend-owned AppConfig in this UI.
+    clipboard_file.write_text('private clipboard round trip')
+    t.send(b'\x1b');t.send(b'\x1b');t.send(b'\x15');t.send(b'\x16')
+    t.expect('private clipboard round trip')
+    assert backend_config.read_bytes() == config_bytes
+    assert backend_config.stat().st_mtime_ns == config_mtime
+    # A second real shared UI reads custom commands without initializing/saving AppConfig.
+    custom = Path(private.name) / 'custom-copy.txt'
+    capture = Path(private.name) / 'unused-default-capture.txt'
+    config = backend_config.read_text()
+    replacements = {
+        'clipboard_copy_command': 'cat > ' + shlex.quote(str(custom)),
+        'clipboard_paste_command': 'cat ' + shlex.quote(str(custom)),
+    }
+    config = '\n'.join(key+'='+replacements[key] if (key:=line.split('=',1)[0]) in replacements else line
+                       for line in config.splitlines())+'\n'
+    backend_config.write_text(config)
+    config_bytes, config_mtime = backend_config.read_bytes(), backend_config.stat().st_mtime_ns
+    second = Terminal(cols=50, rows=44, config_dir=t.config,
+                      extra_env={'HARBOR_TEST_CLIPBOARD_FILE':str(capture), 'XDG_STATE_HOME':str(Path(private.name)/'state')})
+    try:
+        second.picker('Studio')
+        second.send('custom copy selected');second.send(b'\r');second.expect('custom copy selected')
+        x,y=point(second,'custom copy selected')
+        drag(second,(x,y),(x+len('custom copy selected')-1,y))
+        assert custom.read_text()=='custom copy selected'
+        assert not capture.exists(), 'Custom command was bypassed by the test capture'
+        custom.write_text('custom paste command round trip')
+        second.send(b'\x15');second.send(b'\x16')
+        second.expect('custom paste command round trip')
+        assert backend_config.read_bytes()==config_bytes
+        assert backend_config.stat().st_mtime_ns==config_mtime
+    finally:
+        second.close()
+    assert backend_config.read_bytes()==config_bytes
+    assert backend_config.stat().st_mtime_ns==config_mtime
+    print('PASS drag auto-copy, reverse selection, TDLib code block display and exact copy, no action popup, wrapping/newlines, Unicode, draft preservation, right-click actions, production clipboard path, custom commands, backend config read-only')
 finally:
     t.close()
-    subprocess.run(['/usr/bin/osascript','-l','JavaScript','-e',clear,name],capture_output=True,timeout=5)
+    private.cleanup()
