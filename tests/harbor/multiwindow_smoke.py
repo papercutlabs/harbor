@@ -247,7 +247,7 @@ with tempfile.TemporaryDirectory(prefix='harbor-multiwindow-', dir='/tmp') as di
         a = Terminal(config_dir=auth_config, extra_env=auth_env); windows.append(a)
         a.expect('Enter authentication code', timeout=8)
         a.send('12345\r', .5)
-        a.expect('⌥/ commands', timeout=8)
+        a.expect('Ctrl+/ Commands', timeout=8)
         wait(lambda: 'auth read=1 accepted=1' in log.read_text(), 'auth line read by backend')
         pid = int(backends(auth_config)[0].split()[0])
         if Path(f'/proc/{pid}/fd/0').exists():

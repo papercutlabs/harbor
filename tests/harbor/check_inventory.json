@@ -44,6 +44,12 @@
     "multiwindow": [
       "tests/harbor/multiwindow_smoke.py"
     ],
+    "command_keys": [
+      "tests/harbor/command_keys_smoke.py"
+    ],
+    "popup_hierarchy": [
+      "tests/harbor/popup_hierarchy_smoke.py"
+    ],
     "input_decoding": [
       "src/harbor/input/main_test.go"
     ],

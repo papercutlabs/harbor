@@ -11,8 +11,8 @@ try:
     t.send(b'\x1b[57350;1:2u');t.send('R');t.expect('abcXYR!d')
     assert '99999' not in t.text and '[D' not in t.text and '57350' not in t.text
     t.send(b'\x05');t.send(b'\x15')
-    t.send('\x1b[200~literal [D and / commands\nsecond line\x1b[201~')
-    t.expect('literal [D and / commands');t.expect('second line')
+    t.send('\x1b[200~literal [D and / Commands\nsecond line\x1b[201~')
+    t.expect('literal [D and / Commands');t.expect('second line')
     assert 'Commands & shortcuts' not in t.text
     print('PASS fragmented keys, release/repeat, unknown reports, and literal multiline paste through UI')
 finally:t.close()

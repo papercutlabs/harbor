@@ -74,7 +74,7 @@ if __name__ == '__main__':
     commands.write_text('\n'.join('\t'.join([label, 'Existing Desk view', sys.executable, '-c', 'pass'])
                                   for label in ['Everything', 'Quota']) + '\n')
     options = [('Desk · Everything', 'e · Existing Desk view'), ('Desk · Quota', 'q · Existing Desk view'),
-               ('More message tools', 'For the selected message'), ('Find a conversation', '⌥K / Ctrl+K'),
+               ('More message tools', 'For the selected message'), ('Chats', 'Ctrl+K'),
                ('Jump to latest messages', 'Ctrl+G')]
     try:
         for cols, rows in [(36, 38), (48, 38), (100, 38), (48, 16)]:

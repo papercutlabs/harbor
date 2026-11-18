@@ -53,7 +53,7 @@ with tempfile.TemporaryDirectory(prefix='harbor-reply-proof-') as directory:
         t.click_text('Go to replied message')
         t.expect('Showing the message')
         t.expect('Correct cross-chat original.')
-        t.click_text('/ commands')
+        t.click_text('/ Commands')
         t.click_text('Return to previous position')
         t.expect('Cross-chat received reply.')
         t.expect('Draft stays here')
@@ -83,7 +83,7 @@ try:
     t.pump(3.2)
     assert 'Showing the message' not in t.text, t.text
     t.expect('First received reply.')
-    t.click_text('/ commands')
+    t.click_text('/ Commands')
     assert 'Return to previous position' not in t.text, t.text
     print('PASS leaving and returning cancels a pending preview jump without a stale return mark')
 finally:

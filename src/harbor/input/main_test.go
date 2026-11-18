@@ -33,6 +33,22 @@ func TestStreamDecoder(t *testing.T) {
 			k := translate(e)
 			return k.kind == 1 && k.code == '/' && k.mods == 2
 		}},
+		{"legacy ctrl slash US", []string{"\x1f"}, func(e uv.Event) bool {
+			k := translate(e)
+			return k.kind == 1 && k.code == '_' && k.mods == 4
+		}},
+		{"CSIu ctrl slash", []string{"\x1b[47;5u"}, func(e uv.Event) bool {
+			k := translate(e)
+			return k.kind == 1 && k.code == '/' && k.mods == 4
+		}},
+		{"CSIu ctrl underscore", []string{"\x1b[95;5u"}, func(e uv.Event) bool {
+			k := translate(e)
+			return k.kind == 1 && k.code == '_' && k.mods == 4
+		}},
+		{"modifyOtherKeys ctrl slash", []string{"\x1b[27;5;47~"}, func(e uv.Event) bool {
+			k := translate(e)
+			return k.kind == 1 && k.code == '/' && k.mods == 4
+		}},
 		{"plain slash", []string{"/"}, func(e uv.Event) bool {
 			k := translate(e)
 			return k.kind == 2

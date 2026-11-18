@@ -29,6 +29,19 @@ with tempfile.TemporaryDirectory(prefix='harbor-command-keys-') as directory:
         t.send('literal e q')
         t.expect('literal e q')
         assert not recorded()
+        assert 'chats' not in t.screen.display[0].lower() and '⌥K' not in t.screen.display[0]
+        t.expect('Ctrl+/ Commands')
+        # Actual C0 US and enhanced key wires enter the same menu from an existing draft.
+        for wire in [b'\x1f', b'\x1b[47;5u', b'\x1b[95;5u', b'\x1b[27;5;47~', b'\x0f', b'\x1b[111;5u']:
+            t.send(wire); t.expect('Commands & shortcuts'); t.expect('Ctrl+K'); t.expect('Chats')
+            t.send(b'\x1b'); t.expect('literal e q')
+        for wire in [b'\x0b', b'\x1b[107;5u']:
+            t.send(wire); t.expect('Find a conversation'); t.send(b'\x1b'); t.expect('literal e q')
+        # Plain slash/underscore are literal. Ctrl+Alt+/ stays unbound and never inserts either character.
+        t.send('/_'); t.expect('literal e q/_'); t.send(b'\x1b[47;7u')
+        assert 'Commands & shortcuts' not in t.text
+        t.send(b'\x7f\x7f'); t.expect('literal e q')
+        print('PASS hidden header Chats; Ctrl+/ C0/CSI-u/modifyOtherKeys, Ctrl+K and Ctrl+O preserve a nonempty draft; plain slash/underscore literal')
         before = state(t)
         # Exact Super-O is the Kitty CSI-u Command key. Unbound modifiers stay unbound.
         # Ctrl-containing combinations retain the existing generic Ctrl-key dispatch.
