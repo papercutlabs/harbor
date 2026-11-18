@@ -12,6 +12,10 @@
 class Clipboard
 {
 public:
+  // Configure only in processes that own AppConfig. UI-only processes use native defaults.
+  static void SetCommands(const std::string& p_Copy, const std::string& p_Paste,
+                          const std::string& p_HasImage, const std::string& p_PasteImage);
+  static void LoadCommands(const std::string& p_Path); // Read only; never creates or saves config.
   static void SetText(const std::string& p_Text);
   static std::string GetText();
 

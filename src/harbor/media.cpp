@@ -558,22 +558,14 @@ HarborMedia::CopyText(const std::string& text)
     return result.status == 0 && result.output.find("ok") != std::string::npos;
   }
 #endif
-  // Offline tests elsewhere capture copies in a private file, never the user's clipboard.
-  const char* testFile = getenv("HARBOR_TEST_CLIPBOARD_FILE");
-  if (testFile && getenv("HARBOR_DEMO_FIXTURES"))
-  {
-    FILE* out = fopen(testFile, "wb");
-    if (!out)
-      return false;
-    const bool written = fwrite(text.data(), 1, text.size(), out) == text.size();
-    return fclose(out) == 0 && written;
-  }
   Clipboard::SetText(text);
   return true;
 }
 std::string
 HarborMedia::PasteboardImage()
 {
+  if (getenv("HARBOR_DEMO_FIXTURES") && getenv("HARBOR_TEST_CLIPBOARD_FILE"))
+    return ""; // Private text clipboard fixtures never inspect the system pasteboard.
 #ifdef __APPLE__
   const auto path =
     FileUtil::GetTempDir() + "/clipboard-" + std::to_string(getpid()) + "-" +

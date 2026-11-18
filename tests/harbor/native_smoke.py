@@ -63,7 +63,7 @@ class Terminal:
             os.execv(str(exe), [str(exe), '--demo', '-d', self.config] + list(args or []))
         os.close(slave)
         self.pump(.6)
-        try: self.expect('⌥/ commands', timeout=10)
+        try: self.expect('Ctrl+/ Commands', timeout=10)
         except Exception:
             self.close()
             raise
@@ -122,7 +122,7 @@ class Terminal:
         self.click_text(message, button=2)
         self.expect('Message actions')
         self.send(b'\x1b')
-        self.click_text('/ commands')
+        self.click_text('/ Commands')
         self.click_text('More message tools')
         self.expect('Message tools')
         self.click_text(tool)
@@ -173,7 +173,7 @@ if __name__=='__main__':
       config=Path(temp)/'config'
       t=Terminal(config_dir=config)
       try:
-        t.expect('⌥/ commands');t.picker('Marina');assert 'HARBOR / TELEGRAM' not in t.text and 'connected' not in t.text;check('Native startup and chat search')
+        t.expect('Ctrl+/ Commands');t.picker('Marina');assert 'HARBOR / TELEGRAM' not in t.text and 'connected' not in t.text;check('Native startup and chat search')
         t.send('Hello from Harbor');t.send(b'\r');t.expect('Sent');check('Enter sends through Protocol')
         t.send(b'\x1b');t.expect('MESSAGES');t.send(b'\r');t.expect('Message actions');check('Escape and Enter open message actions')
         t.send(b'\x1b');t.send('Draft kept');t.expect('Draft kept')
@@ -225,7 +225,7 @@ if __name__=='__main__':
     t=Terminal(extra_env={'HARBOR_DEMO_FAIL_EDIT':'1'})
     try:
       t.picker('Marina');t.send('Keep this normal draft');t.message_tool('Keeping this one','Edit message');t.send(b'\x15');t.send('An edit that fails');t.send(b'\r')
-      t.expect('Send failed');t.expect('Keep this normal draft');t.click_text('/ commands');t.click_text('Recover a failed send')
+      t.expect('Send failed');t.expect('Keep this normal draft');t.click_text('/ Commands');t.click_text('Recover a failed send')
       t.expect('Editing your message');t.expect('An edit that fails');t.send(b'\x1b');t.expect('Keep this normal draft')
       check('Failed edit recovery retains edit mode and the original unsent draft')
     finally:t.close()

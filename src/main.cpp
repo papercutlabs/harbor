@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include "appconfig.h"
+#include "clipboard.h"
 #include "apputil.h"
 #include "debuginfo.h"
 #include "fileutil.h"
@@ -1032,6 +1033,7 @@ static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs, const 
     remotes.push_back(remote);
   }
 
+  Clipboard::LoadCommands(appDir + "/app.conf");
   AppUtil::InitTerminateSignalHandler();
   ui->Init();
   for (auto& remote : remotes) remote->Login(); // starts the shared reader once

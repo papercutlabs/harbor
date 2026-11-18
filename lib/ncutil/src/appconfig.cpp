@@ -10,6 +10,7 @@
 #include <map>
 
 #include "fileutil.h"
+#include "clipboard.h"
 #include "strutil.h"
 
 std::shared_ptr<Config> AppConfig::m_Config;
@@ -45,6 +46,8 @@ void AppConfig::Init()
 
   const std::string configPath(FileUtil::GetApplicationDir() + std::string("/app.conf"));
   m_Config.reset(new Config(configPath, defaultConfig));
+  Clipboard::SetCommands(m_Config->Get("clipboard_copy_command"), m_Config->Get("clipboard_paste_command"),
+                         m_Config->Get("clipboard_has_image_command"), m_Config->Get("clipboard_paste_image_command"));
 }
 
 void AppConfig::Cleanup()

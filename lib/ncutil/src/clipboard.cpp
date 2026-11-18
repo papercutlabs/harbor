@@ -13,15 +13,16 @@
 #include <cstdio>
 #include <stdexcept>
 #include <vector>
+#include <fstream>
 
 #ifdef HAVE_PNG_H
 #include <png.h>
 #endif
 
-#include "appconfig.h"
 #include "clip.h"
 #include "fileutil.h"
 #include "log.h"
+#include "strutil.h"
 #include "sysutil.h"
 
 enum class DisplayServer
@@ -206,17 +207,67 @@ static bool SaveImagePng(const clip::image& p_Image, const std::string& p_Path)
 }
 #endif
 
+namespace
+{
+std::string copyCommand, pasteCommand, hasImageCommand, pasteImageCommand;
+
+std::string Command(const std::string& p_Configured, const std::string& p_WaylandDefault)
+{
+  return p_Configured.empty() && IsDisplayServer(DisplayServer::Wayland) ? p_WaylandDefault : p_Configured;
+}
+
+const char* TestClipboardFile()
+{
+  return getenv("HARBOR_DEMO_FIXTURES") ? getenv("HARBOR_TEST_CLIPBOARD_FILE") : nullptr;
+}
+}
+
+void Clipboard::SetCommands(const std::string& p_Copy, const std::string& p_Paste,
+                            const std::string& p_HasImage, const std::string& p_PasteImage)
+{
+  copyCommand = p_Copy;
+  pasteCommand = p_Paste;
+  hasImageCommand = p_HasImage;
+  pasteImageCommand = p_PasteImage;
+}
+
+void Clipboard::LoadCommands(const std::string& p_Path)
+{
+  // Shared windows must not initialize or save the backend-owned application config.
+  // Read only the clipboard overrides; all other keys, including credentials, are ignored.
+  SetCommands("", "", "", "");
+  std::ifstream file(p_Path);
+  std::string line;
+  while (std::getline(file, line))
+  {
+    if (line.empty() || line[0] == '#') continue;
+    const auto separator = line.find('=');
+    if (separator == std::string::npos) continue;
+    std::string key = line.substr(0, separator);
+    StrUtil::Trim(key);
+    std::string* command = key == "clipboard_copy_command" ? &copyCommand :
+      key == "clipboard_paste_command" ? &pasteCommand :
+      key == "clipboard_has_image_command" ? &hasImageCommand :
+      key == "clipboard_paste_image_command" ? &pasteImageCommand : nullptr;
+    if (!command) continue;
+    *command = line.substr(separator + 1);
+    StrUtil::Trim(*command);
+  }
+}
+
 void Clipboard::SetText(const std::string& p_Text)
 {
-  static const std::string clipboardCopyCommand = []()
+  const std::string clipboardCopyCommand = Command(copyCommand, "wl-copy");
+
+  // Exercise this same boundary from offline shared-UI tests without changing the real clipboard.
+  if (copyCommand.empty())
   {
-    std::string command = AppConfig::GetStr("clipboard_copy_command");
-    if (command.empty() && IsDisplayServer(DisplayServer::Wayland))
+    if (const char* file = TestClipboardFile())
     {
-      command = "wl-copy";
+      FileUtil::WriteFile(file, p_Text);
+      return;
     }
-    return command;
-  }();
+  }
 
   if (!clipboardCopyCommand.empty())
   {
@@ -234,15 +285,13 @@ void Clipboard::SetText(const std::string& p_Text)
 
 std::string Clipboard::GetText()
 {
-  static const std::string clipboardPasteCommand = []()
+  const std::string clipboardPasteCommand = Command(pasteCommand, "wl-paste");
+
+  if (pasteCommand.empty())
   {
-    std::string command = AppConfig::GetStr("clipboard_paste_command");
-    if (command.empty() && IsDisplayServer(DisplayServer::Wayland))
-    {
-      command = "wl-paste";
-    }
-    return command;
-  }();
+    if (const char* file = TestClipboardFile())
+      return FileUtil::ReadFile(file);
+  }
 
   std::string text;
   if (!clipboardPasteCommand.empty())
@@ -260,15 +309,7 @@ std::string Clipboard::GetText()
 bool Clipboard::HasImage()
 {
 #ifdef HAVE_PNG_H
-  static const std::string clipboardHasImageCommand = []()
-  {
-    std::string command = AppConfig::GetStr("clipboard_has_image_command");
-    if (command.empty() && IsDisplayServer(DisplayServer::Wayland))
-    {
-      command = "wl-paste --list-types | grep -m1 'image/png' | wc -l";
-    }
-    return command;
-  }();
+  const std::string clipboardHasImageCommand = Command(hasImageCommand, "wl-paste --list-types | grep -m1 'image/png' | wc -l");
 
   if (!clipboardHasImageCommand.empty())
   {
@@ -288,15 +329,7 @@ bool Clipboard::HasImage()
 bool Clipboard::GetImage(const std::string& p_Path)
 {
 #ifdef HAVE_PNG_H
-  static const std::string clipboardPasteImageCommand = []()
-  {
-    std::string command = AppConfig::GetStr("clipboard_paste_image_command");
-    if (command.empty() && IsDisplayServer(DisplayServer::Wayland))
-    {
-      command = "wl-paste --type image/png";
-    }
-    return command;
-  }();
+  const std::string clipboardPasteImageCommand = Command(pasteImageCommand, "wl-paste --type image/png");
 
   if (!clipboardPasteImageCommand.empty())
   {

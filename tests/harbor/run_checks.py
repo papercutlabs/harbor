@@ -1,7 +1,7 @@
 """Offline Harbor checks over an already built isolated binary.
 
 Lifecycle: each PTY check owns fresh demo config, starts only --demo and closes its
-child in finally. Selection uses a private named pasteboard; rich actions use a
+child in finally. Selection uses a private file at the Clipboard boundary; rich actions use a
 private clipboard file and recording opener. No account/profile is read. This
 runner waits for each child and stops on its first failure. It never builds,
 installs, changes policy, or starts the production application. Native C++ checks

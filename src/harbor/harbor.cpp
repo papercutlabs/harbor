@@ -1070,7 +1070,7 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
           if (!edit)
             c.reply = n->chatMessage.quotedId;
         }
-        Notify("Send failed · draft restored; ⌥/ → Recover");
+        Notify("Send failed · draft restored; Ctrl+/ → Recover");
       }
       break;
     }
@@ -1421,9 +1421,7 @@ Harbor::Draw()
   m_Hits.clear();
   m_CopyCells.clear();
   // The current chat is the first row; only a not-yet-connected state takes space on the account row.
-  Text(0, m_MainX + 2, m_MainW - 20, c ? W(c->name) : L"Connecting…", Accent, true);
-  Text(0, m_W - 16, 14, L"⌥K chats", Muted);
-  m_Hits.push_back({ 0, m_W - 17, 17, "chats", "" });
+  Text(0, m_MainX + 2, m_MainW - 4, c ? W(c->name) : L"Connecting…", Accent, true);
   const std::wstring connection = !m_AuthOwner.empty()  ? L"● authenticating"
                                   : m_Connected.empty() ? L"○ connecting"
                                                         : L"";
@@ -1686,15 +1684,15 @@ Harbor::Draw()
          m_InitialRouteStatus.empty() ? L"Waiting for your conversations…" : W(m_InitialRouteStatus), Muted);
   }
   Text(
-    m_H - 2, m_MainX + 2, std::max(1, m_MainW - 17), m_Browse ? L"MESSAGES · ↑↓ · Enter" : L"COMPOSE", Muted);
+    m_H - 2, m_MainX + 2, std::max(1, m_MainW - 21), m_Browse ? L"MESSAGES · ↑↓ · Enter" : L"COMPOSE", Muted);
   {
-    Text(m_H - 2, m_W - 14, 12, L"⌥/ commands", Muted);
-    m_Hits.push_back({ m_H - 2, m_W - 14, 12, "commands", "" });
+    Text(m_H - 2, m_W - 18, 16, L"Ctrl+/ Commands", Muted);
+    m_Hits.push_back({ m_H - 2, m_W - 18, 16, "commands", "" });
   }
   Text(m_H - 1, m_MainX + 2, m_MainW - 4, W(m_Status), m_Status.empty() ? Muted : Good);
   if (!m_UpdateTarget.empty())
   {
-    Text(m_H - 1, m_MainX + 2, m_MainW - 4, W("↑ Harbor " + m_UpdateVersion + " ready · ⌥/ → Update"), Accent);
+    Text(m_H - 1, m_MainX + 2, m_MainW - 4, W("↑ Harbor " + m_UpdateVersion + " ready · Ctrl+/ → Update"), Accent);
     m_Hits.push_back({ m_H - 1, m_MainX + 2, m_MainW - 4, "update", "" });
   }
   if (newBar)
@@ -1712,8 +1710,8 @@ Harbor::Draw()
   }
   else if (c && !c->follow && c->scroll + std::max(1, m_Bottom - m_Top) < int(m_Rows.size()) - 2)
   {
-    Text(m_H - 2, m_MainX + 2, std::max(1, m_MainW - 17), L"↓ Latest · Ctrl+G", Accent);
-    m_Hits.push_back({ m_H - 2, m_MainX + 2, std::max(1, m_MainW - 17), "latest", "" });
+    Text(m_H - 2, m_MainX + 2, std::max(1, m_MainW - 21), L"↓ Latest · Ctrl+G", Accent);
+    m_Hits.push_back({ m_H - 2, m_MainX + 2, std::max(1, m_MainW - 21), "latest", "" });
   }
   if (!m_ControlError.empty())
     Text(m_H - 1, m_MainX + 2, m_MainW - 4, W(m_ControlError), Warning);
@@ -2204,7 +2202,7 @@ Harbor::Commands()
   m_Options = {
     { "More message tools", "For the selected message", [this] { Actions(false); } },
     { "Search or pinned messages", "Searches Telegram, not just loaded messages", [this] { SearchPrompt(); } },
-    { "Find a conversation", "⌥K / Ctrl+K", [this] { ChatPicker(); } },
+    { "Chats", "Ctrl+K", [this] { ChatPicker(); } },
     { "Jump to latest messages",
       "Ctrl+G",
       [this]
@@ -2261,11 +2259,11 @@ Harbor::Commands()
         m_Menu = "help";
         m_Options = {
           { "Compose immediately", "Type from messages to write", [this] { CloseMenu(); } },
-          { "Commands from any draft", "⌥/ or Ctrl+O · / is always literal", [this] { CloseMenu(); } },
+          { "Commands from any draft", "Ctrl+/ or Ctrl+O · / is always literal", [this] { CloseMenu(); } },
           { "Enter sends / Shift+Enter newline", "Ctrl+J is a newline fallback", [this] { CloseMenu(); } },
           { "Escape switches focus", "Arrows browse · Enter actions", [this] { CloseMenu(); } },
-          { "Option+K finds conversations",
-            "Map Option+K to Esc k; Ctrl+K fallback",
+          { "Ctrl+K opens Chats",
+            "Open or switch a conversation; draft kept",
             [this] { CloseMenu(); } },
           { "Paste / drop previews attachments",
             "Ctrl+V reads clipboard image or text",
@@ -2964,7 +2962,7 @@ Harbor::Visit(std::string key, std::string id)
   c.restoreAnchor.clear();
   c.selected = id;
   Select(0);
-  Notify("Showing the message · ⌥/ or Ctrl+O → Return to previous position");
+  Notify("Showing the message · Ctrl+/ or Ctrl+O → Return to previous position");
 }
 void
 Harbor::ReturnBack()
@@ -3466,7 +3464,7 @@ Harbor::OpenAttachment(const std::string& p, const std::string& chatId, const st
       m_Media->TogglePause();
     else
       m_Media->Play(f.filePath);
-    Notify("Voice playback · ⌥/ to pause or stop");
+    Notify("Voice playback · Ctrl+/ to pause or stop");
   }
   else if (type.find("image") == 0 && preview)
   {
@@ -3718,7 +3716,7 @@ Harbor::KeyPress(wint_t k)
     m_Running = false;
     return;
   }
-  // Ctrl+O and Option-/ open the same Commands menu from any draft and leave the draft unchanged; / is always literal.
+  // Ctrl+/ and Ctrl+O open Commands from any draft without changing it; plain / is always literal.
   if (k == 15 && m_Menu.empty())
   {
     Commands();
@@ -4041,7 +4039,12 @@ Harbor::ReadInput()
     // Exact decoded Super-O (32) opens Commands; existing Ctrl combinations keep their previous behavior.
     else if (event.mods == 32 && event.code == 'o')
       key = 15;
-    // Option-/ (legacy Escape-/ or enhanced Alt+/) opens Commands from any draft; plain / is always text.
+    // Legacy Ctrl+/ is C0 US (Ctrl+_), decoded as underscore+Ctrl.
+    // Enhanced terminals can report slash or underscore with the exact Ctrl modifier.
+    else if ((event.mods == 4 && (event.code == '/' || event.code == '_' || event.code == 31)) ||
+             (event.mods == 0 && event.code == 31))
+      key = 15;
+    // Retain the existing Option-/ alias; plain / is always text.
     else if (event.mods == 2 && event.code == '/')
       key = 15;
     else if ((event.mods & 4) && event.code >= 'a' && event.code <= 'z')
