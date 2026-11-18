@@ -40,7 +40,7 @@ class HarborStream(pyte.ByteStream):
     events = pyte.ByteStream.events | {'scroll_up', 'scroll_down'}
 
 class Terminal:
-    def __init__(self, cols=56, rows=38, config_dir=None, extra_env=None, executable=None):
+    def __init__(self, cols=56, rows=38, config_dir=None, extra_env=None, executable=None, args=None):
         self.dir = tempfile.TemporaryDirectory(prefix='harbor-native-') if config_dir is None else None
         self.config = str(config_dir) if config_dir is not None else self.dir.name + '/config'
         self.cols, self.rows = cols, rows
@@ -60,7 +60,7 @@ class Terminal:
                 HARBOR_DEMO_FIXTURES=str(ROOT/'tests/harbor/fixtures'), HARBOR_REDUCED_MOTION='1', HARBOR_GRAPHICS='blocks', HARBOR_TEST_MUTE='1')
             os.environ.update(extra_env or {})
             exe = Path(executable or os.environ.get('HARBOR_EXECUTABLE', ROOT/'build-harbor/bin/harbor'))
-            os.execv(str(exe), [str(exe), '--demo', '-d', self.config])
+            os.execv(str(exe), [str(exe), '--demo', '-d', self.config] + list(args or []))
         os.close(slave)
         self.pump(.6)
         try: self.expect('⌥/ commands', timeout=10)

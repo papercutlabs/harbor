@@ -1,6 +1,7 @@
 #pragma once
 #include "format.h"
 #include "deskhost.h"
+#include "uicontrol.h"
 #include "protocol.h"
 #include <deque>
 #include <functional>
@@ -29,6 +30,7 @@ public:
   // Shared-session window: per-view state slot (0 keeps the existing harbor-state file) and the
   // hook that hands the terminal to the session backend once an auth prompt has suspended ncurses.
   void SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended);
+  void SetInitialChat(const std::string& p_Profile, const std::string& p_Conversation);
 
 private:
   std::string StatePath() const;
@@ -108,6 +110,15 @@ private:
   std::map<std::string, std::map<std::string, ContactInfo>> m_Contacts;
   std::map<std::string, Conversation> m_Chats, m_SavedStates;
   std::string m_LastState, m_RestoreChat;
+  std::string m_InitialChat, m_InitialProfile, m_InitialRouteStatus;
+  int64_t m_InitialRouteUntil = 0;
+  HarborUiControl::Server m_UiControl;
+  int m_ControlReply = -1;
+  std::string m_ControlProfile, m_ControlConversation, m_ControlKey, m_ControlError;
+  bool m_ControlPending = false, m_InDeskView = false, m_InColdDeskView = false;
+  void PollUiControl();
+  void BeginUiRoute();
+  void FinishUiRoute(const std::string& error = {});
   std::set<std::string> m_Connected;
   std::vector<std::string> m_ChatOrder;
   std::string m_Title;

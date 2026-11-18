@@ -66,14 +66,23 @@ public:
     }
   }
 
-  bool Visit(const std::function<bool()>& terminate = [] { return false; })
+  bool Visit(const std::function<bool()>& terminate = [] { return false; },
+             const std::function<bool()>& cancelView = [] { return false; })
   {
     const auto id = std::to_string(m_Id);
     HarborTrace::Event("desk.host.yield", {{"child_pid", std::to_string(m_Pid)}, {"visit_id", id}});
     if (!Send("yield\t" + id)) { Stop(); return false; }
     std::string reply;
+    bool cancelled = false;
     do {
       if (terminate()) { Failure("Harbor termination requested"); Stop(); return false; }
+      if (!cancelled && cancelView())
+      {
+        // Office owns the active frame: cancellation must await its ordinary
+        // input release and action drain, never kill a live controller.
+        if (!Send("cancel\t" + id)) { Stop(); return false; }
+        cancelled = true;
+      }
       if (!Receive(reply)) { Stop(); return false; }
     } while (reply.empty());
     if (reply == "released\t" + id + "\tok") { HarborTrace::Event("desk.host.released", {{"child_pid", std::to_string(m_Pid)}, {"visit_id", id}}); return true; }
