@@ -7,10 +7,7 @@ import tempfile
 
 exe=os.environ['HARBOR_EXECUTABLE']
 with tempfile.TemporaryDirectory(prefix='harbor-route-') as directory:
-    unit=Path(directory)/'initial-route-test'
-    root=Path(__file__).resolve().parents[2]
-    subprocess.run(['c++','-std=c++17','-I',str(root/'src/harbor'),str(Path(__file__).with_suffix('.cpp').with_name('initial_route_test.cpp')),'-o',str(unit)],check=True)
-    subprocess.run([str(unit)],check=True)
+    subprocess.run([str(Path(os.environ['HARBOR_BUILD_DIR'])/'bin/harbor-initial-route-test')],check=True)
     config=Path(directory)/'config'
     env={'HOME':directory,'XDG_CONFIG_HOME':directory,'HARBOR_DEMO_TOPICS':'1','HARBOR_DEMO_ROUTES':'1'}
     first=Terminal(cols=90,config_dir=config,extra_env=env)

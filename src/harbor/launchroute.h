@@ -1,7 +1,7 @@
 #pragma once
 #include <algorithm>
 #include <cstdint>
-#include <sstream>
+#include "forumid.h"
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -30,16 +30,14 @@ inline void Validate(Target& target)
   try { chat = std::stoll(target.chat); }
   catch (...) { throw std::invalid_argument("--open-telegram-chat is outside the signed 64-bit range."); }
   if (!chat) throw std::invalid_argument("--open-telegram-chat cannot be zero.");
-  std::ostringstream id;
-  id << std::hex << static_cast<uint64_t>(chat);
+  target.conversation = StrUtil::NumToHex(chat);
   if (!target.topic.empty())
   {
     int64_t topic = 0;
     try { if (decimal(target.topic, false)) topic = std::stoll(target.topic); } catch (...) { }
     if (topic <= 0 || topic > INT32_MAX) throw std::invalid_argument("--open-telegram-topic requires a positive 32-bit decimal topic ID.");
-    id << '#' << std::dec << topic;
+    target.conversation = TelegramForum::ConversationId(chat, int32_t(topic));
   }
-  target.conversation = id.str();
 }
 inline std::string SelectProfile(const Target& target, const std::vector<std::string>& profiles, bool demo)
 {

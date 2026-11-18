@@ -11,7 +11,14 @@ int main()
   };
   HarborRoute::Target target{"-1001234567890", "421", "", ""};
   HarborRoute::Validate(target);
-  assert(target.conversation == "ffffff16e1c4ed2e#421");
+  assert(target.conversation == TelegramForum::ConversationId(-1001234567890LL, 421));
+  assert(target.conversation == "2D31303031323334353637383930#421");
+  HarborRoute::Target plain{"-1001234567890", "", "", ""};
+  HarborRoute::Validate(plain);
+  assert(plain.conversation == StrUtil::NumToHex(-1001234567890LL));
+  assert(TelegramForum::ChatNumber(plain.conversation) == -1001234567890LL);
+  assert(TelegramForum::ChatNumber(target.conversation) == -1001234567890LL);
+  assert(TelegramForum::TopicNumber(target.conversation) == 421);
   assert(HarborRoute::SelectProfile(target, {"Signal_one", "Telegram_one"}, false) == "Telegram_one");
   rejects([&] { HarborRoute::SelectProfile(target, {"Telegram_one", "Telegram_two"}, false); });
   rejects([&] { HarborRoute::SelectProfile(target, {"Signal_one"}, false); });

@@ -5,6 +5,7 @@
 #include "richtext.h"
 #include "timeutil.h"
 #include "strutil.h"
+#include "forumid.h"
 #include "wire.h"
 #include <algorithm>
 #include <cstdlib>
@@ -75,17 +76,11 @@ HarborDemo::Seed()
         i);
   if (getenv("HARBOR_DEMO_TOPICS"))
   {
-    add("hive", "leo", "Parent group history.", 10);
-    add("hive#421", "leo", "Topic-specific history for the Desk conversation.", 100);
-    add("hive#550", "asha", "A different topic with separate history.", 90);
-    // Decimal Telegram chat 12345 has native conversation prefix 3039.
-    // Keep numeric routes available to the same offline native launch path.
-    if (getenv("HARBOR_DEMO_ROUTES"))
-    {
-      m_Messages["3039"] = m_Messages["hive"];
-      m_Messages["3039#421"] = m_Messages["hive#421"];
-      m_Messages["3039#550"] = m_Messages["hive#550"];
-    }
+    const std::string parent = getenv("HARBOR_DEMO_ROUTES") ? StrUtil::NumToHex<int64_t>(12345) : "hive";
+    const auto topic = [&](int32_t id) { return getenv("HARBOR_DEMO_ROUTES") ? TelegramForum::ConversationId(12345, id) : parent + "#" + std::to_string(id); };
+    add(parent, "leo", "Parent group history.", 10);
+    add(topic(421), "leo", "Topic-specific history for the Desk conversation.", 100);
+    add(topic(550), "asha", "A different topic with separate history.", 90);
   }
   add("kleya", "kleya", "One conversation. A clear place to write. Everything else within reach.", 1);
   if (getenv("HARBOR_DEMO_RICH"))
@@ -351,15 +346,13 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
         }
       if (getenv("HARBOR_DEMO_TOPICS"))
       {
+        const bool routed = getenv("HARBOR_DEMO_ROUTES");
+        const std::string parent = routed ? StrUtil::NumToHex<int64_t>(12345) : "hive";
         for (auto pair : std::vector<std::pair<std::string, std::string>>{
-               { "hive", "Team forum" },
-               { "hive#421", "Team forum > Desk planning — DEMO-421" },
-               { "hive#550", "Team forum > Infrastructure" },
-               { "3039", "Routed group" },
-               { "3039#421", "Routed group > Agent" },
-               { "3039#550", "Routed group > Doug" } })
+               { parent, routed ? "Routed group" : "Team forum" },
+               { routed ? TelegramForum::ConversationId(12345, 421) : "hive#421", routed ? "Routed group > Agent" : "Team forum > Desk planning — DEMO-421" },
+               { routed ? TelegramForum::ConversationId(12345, 550) : "hive#550", routed ? "Routed group > Doug" : "Team forum > Infrastructure" } })
         {
-          if (pair.first.rfind("3039", 0) == 0 && !getenv("HARBOR_DEMO_ROUTES")) continue;
           ContactInfo topic;
           topic.id = pair.first;
           topic.name = pair.second;
