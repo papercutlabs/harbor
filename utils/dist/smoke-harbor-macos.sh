@@ -25,12 +25,22 @@ UNEXPECTED="$(otool -L "${BIN}" | tail -n +2 | awk '{print $1}' | grep -vE '^(/u
 [[ -z "${UNEXPECTED}" ]] || { echo "Harbor has unbundled dynamic dependencies: ${UNEXPECTED}" >&2; exit 1; }
 # An isolated HOME makes an accidental profile open fail the bundle's clean-profile check.
 mkdir "${WORK}/home"
-HOME="${WORK}/home" XDG_CONFIG_HOME="${WORK}/home/config" "${BIN}" --version > "${WORK}/version"
+HOME="${WORK}/home" XDG_CONFIG_HOME="${WORK}/home/config" XDG_STATE_HOME="${WORK}/home/state" "${BIN}" --version > "${WORK}/version"
 python3 - "${WORK}" <<'PY'
 import json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
 manifest = json.loads((root / 'harbor-runtime/manifest.json').read_text())
 assert (root / 'version').read_text().startswith('Harbor ' + manifest['version'] + ' ')
-assert not list((root / 'home').iterdir()), 'version check opened a profile'
+home = root / 'home'
+allowed = {'state', 'state/harbor', 'state/harbor/operational.jsonl'}
+written = list(home.rglob('*'))
+assert all(not path.is_symlink() for path in written), 'version check wrote a symlink in its private trace tree'
+assert {str(path.relative_to(home)) for path in written} == allowed, 'version check wrote outside its private trace tree'
+trace = home / 'state/harbor/operational.jsonl'
+assert trace.is_file() and trace.stat().st_mode & 0o777 == 0o600, 'startup trace is not a private regular file'
+records = [json.loads(line) for line in trace.read_text().splitlines()]
+entry = next(record for record in records if record['event'] == 'process.entry')
+assert entry['version'] == manifest['version'] and manifest['revision'][:7] in entry['build'], 'trace identity does not match the actual package'
+assert any(record['event'] == 'process.exit' and record['status'] == '0' for record in records), 'native version exit was not retained'
 print((root / 'version').read_text().strip())
 PY
