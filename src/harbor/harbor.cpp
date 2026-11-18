@@ -3860,13 +3860,11 @@ Harbor::ReadInput()
       mouse.bstate = event.action == 2 ? BUTTON3_RELEASED : BUTTON3_PRESSED;
     else if (event.button == 4)
       mouse.bstate = BUTTON4_PRESSED;
-#ifdef BUTTON5_PRESSED
-    else if (event.button == 5)
-      mouse.bstate = BUTTON5_PRESSED;
-#endif
     if (event.action == 3)
       mouse.bstate = REPORT_MOUSE_POSITION;
-    Mouse(mouse);
+    // The decoder supplies wheel-down even when the selected ncurses headers
+    // have no BUTTON5_PRESSED. Keep that typed event outside ncurses' mouse ABI.
+    Mouse(mouse, event.button == 5 && event.action == 1);
   }
   else if (event.kind == 1)
   {
@@ -3931,7 +3929,7 @@ Harbor::ReadInput()
 }
 
 void
-Harbor::Mouse(const MEVENT& e)
+Harbor::Mouse(const MEVENT& e, bool wheelDown)
 {
   m_Dirty = true;
 
@@ -3997,11 +3995,7 @@ Harbor::Mouse(const MEVENT& e)
   }
   if (m_Menu.empty())
   {
-    if (e.bstate & (BUTTON4_PRESSED
-#ifdef BUTTON5_PRESSED
-                    | BUTTON5_PRESSED
-#endif
-                    ))
+    if (wheelDown || (e.bstate & BUTTON4_PRESSED))
       m_MouseDown = m_MouseDragging = m_HasSelection = false;
     if (m_MouseDown)
     {
@@ -4074,13 +4068,11 @@ Harbor::Mouse(const MEVENT& e)
       m_Option = std::max(0, m_Option - 1);
       return;
     }
-#ifdef BUTTON5_PRESSED
-    if (e.bstate & BUTTON5_PRESSED)
+    if (wheelDown)
     {
       m_Option = std::min(int(m_Options.size()) - 1, m_Option + 1);
       return;
     }
-#endif
   }
   if (e.bstate & BUTTON4_PRESSED)
   {
@@ -4093,8 +4085,7 @@ Harbor::Mouse(const MEVENT& e)
     }
     return;
   }
-#ifdef BUTTON5_PRESSED
-  if (e.bstate & BUTTON5_PRESSED)
+  if (wheelDown)
   {
     if (c)
     {
@@ -4103,7 +4094,6 @@ Harbor::Mouse(const MEVENT& e)
     }
     return;
   }
-#endif
   if (!(e.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED | BUTTON1_DOUBLE_CLICKED)))
     return;
   for (auto it = m_Hits.rbegin(); it != m_Hits.rend(); it++)
