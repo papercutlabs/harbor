@@ -101,6 +101,9 @@
     ],
     "initial_route": [
       "tests/harbor/initial_route_smoke.py"
+    ],
+    "ui_control": [
+      "tests/harbor/ui_control_smoke.py"
     ]
   }
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include "format.h"
 #include "deskhost.h"
+#include "uicontrol.h"
 #include "protocol.h"
 #include <deque>
 #include <functional>
@@ -111,6 +112,13 @@ private:
   std::string m_LastState, m_RestoreChat;
   std::string m_InitialChat, m_InitialProfile, m_InitialRouteStatus;
   int64_t m_InitialRouteUntil = 0;
+  HarborUiControl::Server m_UiControl;
+  int m_ControlReply = -1;
+  std::string m_ControlProfile, m_ControlConversation, m_ControlKey, m_ControlError;
+  bool m_ControlPending = false, m_InDeskView = false, m_InColdDeskView = false;
+  void PollUiControl();
+  void BeginUiRoute();
+  void FinishUiRoute(const std::string& error = {});
   std::set<std::string> m_Connected;
   std::vector<std::string> m_ChatOrder;
   std::string m_Title;

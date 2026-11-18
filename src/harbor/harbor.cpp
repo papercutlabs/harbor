@@ -483,11 +483,72 @@ Harbor::Init()
   printf("\033[?1003l\033[?1002h\033[?2004h\033[>1u");
   fflush(stdout);
   m_Ready = true;
+  if (const char* surface = getenv("CMUX_SURFACE_ID"))
+    if (!m_UiControl.Start(FileUtil::GetApplicationDir(), surface))
+      Notify("This window cannot receive addressed Desk commands. Return to Desk for details.");
   if (!m_Remote) // a window's contacts come from the backend after ConnectNotify
     for (auto& p : m_Protocols)
     {
       MessageCache::FetchContacts(p.first);
     }
+}
+void
+Harbor::FinishUiRoute(const std::string& error)
+{
+  if (m_ControlReply < 0) return;
+  HarborUiControl::Reply(m_ControlReply, error);
+  m_ControlReply = -1;
+  m_ControlPending = false;
+  m_ControlKey.clear();
+  m_ControlError = error;
+  if (!error.empty())
+  {
+    m_InitialChat.clear(); m_InitialProfile.clear(); m_InitialRouteUntil = 0;
+    m_InitialRouteStatus.clear();
+  }
+  m_Dirty = true;
+}
+void
+Harbor::BeginUiRoute()
+{
+  if (!m_ControlPending) return;
+  m_ControlPending = false;
+  CloseMenu();
+  SetInitialChat(m_ControlProfile, m_ControlConversation);
+  m_InitialRouteUntil = TimeUtil::GetCurrentTimeMSec() + 30000;
+  if (m_Chats.count(m_ControlKey))
+  {
+    const auto key = m_ControlKey;
+    OpenChat(key);
+  }
+  else
+  {
+    auto request = std::make_shared<GetChatsRequest>(); request->includeForumTopics = true;
+    Request(m_ControlProfile, request);
+  }
+}
+void
+Harbor::PollUiControl()
+{
+  m_UiControl.Poll([this](const HarborRoute::Target& target, int reply) {
+    if (m_ControlReply >= 0)
+    { HarborUiControl::Reply(reply, "Harbor is still opening an earlier requested conversation. Inspect that window before retrying."); return; }
+    if (m_InColdDeskView)
+    { HarborUiControl::Reply(reply, "Return from the active legacy Desk view first. No conversation changed."); return; }
+    if (m_Menu == "attachments")
+    { HarborUiControl::Reply(reply, "Finish or cancel the attachment confirmation in the selected Harbor window first. No conversation changed."); return; }
+    std::vector<std::string> profiles;
+    bool demo = false;
+    for (const auto& profile : m_Protocols)
+    { profiles.push_back(profile.first); demo = demo || profile.first.rfind("HarborDemo_", 0) == 0; }
+    std::string selected;
+    try { selected = HarborRoute::SelectProfile(target, profiles, demo); }
+    catch (const std::exception& error) { HarborUiControl::Reply(reply, error.what()); return; }
+    m_ControlProfile = selected; m_ControlConversation = target.conversation;
+    m_ControlKey = Key(selected, target.conversation); m_ControlReply = reply;
+    m_ControlPending = true; m_ControlError.clear();
+  });
+  if (!m_InDeskView) BeginUiRoute();
 }
 void
 Harbor::SetInitialChat(const std::string& profile, const std::string& conversation)
@@ -515,6 +576,8 @@ Harbor::Cleanup()
   HarborTrace::Event("ui.cleanup");
   if (!m_Ready)
     return;
+  FinishUiRoute("The selected Harbor UI ended before opening the requested conversation.");
+  m_UiControl.Stop();
   m_DeskHost.Stop();
   if (m_Remote)
     ProcessEvents(); // the connection is frozen; consume final outcomes/recoveries before saving
@@ -538,6 +601,7 @@ Harbor::Run()
   bool deferring = false;
   while (m_Running && !AppUtil::IsTerminateRequested())
   {
+    PollUiControl();
     if (!m_MouseDown)
       ProcessEvents();
     if (m_MouseDown != deferring)
@@ -555,6 +619,8 @@ Harbor::Run()
     {
       m_InitialRouteUntil = 0;
       m_InitialRouteStatus = "Requested conversation unavailable. No other chat was opened. Ctrl+R retries; Ctrl+K chooses another.";
+      if (m_ControlReply >= 0)
+        FinishUiRoute("Conversation unavailable; previous chat and drafts kept");
       m_Dirty = true;
     }
     // A terminal can lose button-up when the pointer leaves its window.
@@ -1171,6 +1237,9 @@ Harbor::OpenChat(const std::string& key)
   m_InitialProfile.clear();
   m_InitialRouteStatus.clear();
   m_InitialRouteUntil = 0;
+  if (m_ControlReply >= 0)
+    FinishUiRoute(m_Current == m_ControlKey ? std::string() : "Requested route was cancelled by another chat selection. Drafts were kept.");
+  else m_ControlError.clear();
   auto& c = it->second;
   auto r = std::make_shared<SetCurrentChatRequest>();
   r->chatId = c.id;
@@ -1646,6 +1715,10 @@ Harbor::Draw()
     Text(m_H - 2, m_MainX + 2, std::max(1, m_MainW - 17), L"↓ Latest · Ctrl+G", Accent);
     m_Hits.push_back({ m_H - 2, m_MainX + 2, std::max(1, m_MainW - 17), "latest", "" });
   }
+  if (!m_ControlError.empty())
+    Text(m_H - 1, m_MainX + 2, m_MainW - 4, W(m_ControlError), Warning);
+  else if (m_ControlReply >= 0)
+    Text(m_H - 1, m_MainX + 2, m_MainW - 4, L"Opening requested conversation…", Accent);
   if (!m_Menu.empty())
     DrawMenu();
   if (c && m_Menu.empty() && !m_Browse)
@@ -2392,10 +2465,12 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
     if (termiosSaved) tcsetattr(STDIN_FILENO, TCSANOW, &saved);
   };
   HarborTrace::Event("desk.prepare.attempt");
-  const auto prepared = m_DeskHost.Prepare(argv, [] {
+  m_InDeskView = true;
+  const auto prepared = m_DeskHost.Prepare(argv, [this] {
+    PollUiControl();
     // Harbor still owns input during preparation. Launch typeahead cannot become a draft or Desk action.
     const auto event = HarborInputPoll(0);
-    const bool cancel = AppUtil::IsTerminateRequested() || event.kind == -1 || (event.kind == 1 && (event.code == 27 || event.code == 3 || (event.code == 'c' && (event.mods & 4))));
+    const bool cancel = m_ControlPending || AppUtil::IsTerminateRequested() || event.kind == -1 || (event.kind == 1 && (event.code == 27 || event.code == 3 || (event.code == 'c' && (event.mods & 4))));
     free(event.text);
     return cancel;
   }, FileUtil::GetApplicationDir());
@@ -2403,6 +2478,8 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
   if (prepared != HarborDeskHost::Prepared::Ready)
   {
     restore();
+    m_InDeskView = false;
+    if (m_ControlPending) { BeginUiRoute(); return false; }
     Notify(prepared == HarborDeskHost::Prepared::Cancelled ? "Desk opening cancelled · draft kept" : "Desk could not prepare · " + (m_DeskHost.Diagnostics().empty() ? m_DeskHost.Error() : "see <config>/" + m_DeskHost.DiagnosticName()));
     return false;
   }
@@ -2417,7 +2494,9 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
   tcflush(STDIN_FILENO, TCIFLUSH);
   // No endwin/reset_prog_mode here: both views retain Harbor's existing alternate screen.
   HarborTrace::Event("desk.visit.attempt");
-  const bool ok = m_DeskHost.Visit([] { return AppUtil::IsTerminateRequested(); });
+  const bool ok = m_DeskHost.Visit([] { return AppUtil::IsTerminateRequested(); }, [this] {
+    PollUiControl(); return m_ControlPending;
+  });
   HarborTrace::Event("desk.visit.result", {{"outcome", ok ? "released" : "failed"}});
   restore();
   tcflush(STDIN_FILENO, TCIFLUSH);
@@ -2429,7 +2508,9 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
   struct winsize size = {};
   if (ioctl(STDIN_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_row && size.ws_col) resizeterm(size.ws_row, size.ws_col);
   clearok(stdscr, TRUE); m_Dirty = true; m_MouseDown = false; m_Title.clear(); // Desk may have retitled the terminal
-  Notify(ok ? "Back from Desk" : "Desk ended unexpectedly · see <config>/" + m_DeskHost.DiagnosticName());
+  m_InDeskView = false;
+  if (m_ControlPending) BeginUiRoute();
+  else Notify(ok ? "Back from Desk" : "Desk ended unexpectedly · see <config>/" + m_DeskHost.DiagnosticName());
   return ok;
 }
 bool
@@ -2472,9 +2553,17 @@ Harbor::DeskHandoff(const std::vector<std::string>& argv)
   else HarborTrace::Event("desk.spawned", {{"child_pid", HarborTrace::Number(pid)}});
   int status = 0;
   if (spawned == 0)
-    while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
+  {
+    m_InColdDeskView = true;
+    while (true)
     {
+      const auto waited = waitpid(pid, &status, WNOHANG);
+      if (waited == pid || (waited < 0 && errno != EINTR)) break;
+      PollUiControl(); // refuse addressed control visibly while this legacy child owns input
+      TimeUtil::Sleep(.02);
     }
+    m_InColdDeskView = false;
+  }
   HarborTrace::Event("desk.child.result", {{"spawn_error", std::to_string(spawned)}, {"wait_status", std::to_string(status)},
     {"exit_status", spawned == 0 && WIFEXITED(status) ? std::to_string(WEXITSTATUS(status)) : "unknown"},
     {"signal", spawned == 0 && WIFSIGNALED(status) ? std::to_string(WTERMSIG(status)) : "none"}});

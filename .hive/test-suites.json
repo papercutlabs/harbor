@@ -39,7 +39,10 @@
         "environmentRefs": [
           "HARBOR_BUILD_DIR",
           "HARBOR_CHECK_PYTHON",
-          "HARBOR_GO_EXECUTABLE"
+          "HARBOR_GO_EXECUTABLE",
+          "HARBOR_CONTROL_OFFICE_ENTRY",
+          "HARBOR_CONTROL_NODE",
+          "HARBOR_CONTROL_OFFICE_DEPS"
         ]
       },
       "inventory": {

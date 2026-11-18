@@ -54,6 +54,7 @@
 #include "harbor/session.h"
 #include "harbor/trace.h"
 #include "harbor/launchroute.h"
+#include "harbor/uicontrol.h"
 static bool harborDemo = false;
 static int RunHarborWindow(const std::vector<std::string>& p_Args, const HarborRoute::Target& p_Target);
 #endif
@@ -192,6 +193,7 @@ static int ApplicationMain(int argc, char* argv[])
   }
   std::vector<std::string> windowArgs; // forwarded to a spawned backend and to a restart
   HarborRoute::Target initialTarget;
+  std::string targetSurface, targetPid;
 #endif
   for (auto it = args.begin(); it != args.end(); ++it)
   {
@@ -209,12 +211,12 @@ static int ApplicationMain(int argc, char* argv[])
       FileUtil::SetApplicationDir(*it);
     }
 #ifdef HARBOR_BUILD
-    else if (*it == "--open-telegram-chat" || *it == "--open-telegram-topic" || *it == "--open-profile")
+    else if (*it == "--open-telegram-chat" || *it == "--open-telegram-topic" || *it == "--open-profile" || *it == "--target-surface" || *it == "--target-pid")
     {
       const auto flag = *it;
       if (std::distance(it + 1, args.end()) <= 0)
       { std::cerr << flag << " requires a value.\n"; return 1; }
-      auto& value = flag == "--open-telegram-chat" ? initialTarget.chat : flag == "--open-telegram-topic" ? initialTarget.topic : initialTarget.profile;
+      auto& value = flag == "--open-telegram-chat" ? initialTarget.chat : flag == "--open-telegram-topic" ? initialTarget.topic : flag == "--open-profile" ? initialTarget.profile : flag == "--target-surface" ? targetSurface : targetPid;
       if (!value.empty()) { std::cerr << flag << " may be supplied only once.\n"; return 1; }
       value = *++it;
       if (value.empty()) { std::cerr << flag << " requires a nonempty value.\n"; return 1; }
@@ -285,6 +287,15 @@ static int ApplicationMain(int argc, char* argv[])
   catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
   if (initialTarget.Present() && (sessionFd >= 0 || isSetup || isRemove || isKeyDump || !exportDir.empty()))
   { std::cerr << "Initial conversation selection applies only to an ordinary Harbor window.\n"; return 1; }
+  if (!targetSurface.empty() || !targetPid.empty())
+  {
+    if (targetSurface.empty() || targetPid.empty())
+    { std::cerr << "--target-surface and --target-pid must identify the same existing Harbor UI.\n"; return 1; }
+    try { HarborUiControl::Send(FileUtil::GetApplicationDir(), targetSurface, targetPid, initialTarget); }
+    catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
+    std::cout << "Requested conversation opened in the selected Harbor UI.\n";
+    return 0;
+  }
   // An ordinary run is a window of the directory's shared session. Setup, removal, export and
   // keydump keep the classic path under the existing locks.
   if ((sessionFd < 0) && !isSetup && !isRemove && !isKeyDump && exportDir.empty())
@@ -856,6 +867,7 @@ void ShowHelp()
     "  --open-telegram-chat ID   open this signed decimal chat ID in this window\n"
     "  --open-telegram-topic ID  select this positive decimal forum topic in that chat\n"
     "  --open-profile ID        select the exact native Telegram account profile\n"
+    "  --target-surface ID --target-pid PID   route only that existing UI; never launch another\n"
     "  -s         set up your Telegram account\n"
     "  -d DIR     use a separate configuration directory\n"
     "  -k         inspect terminal key sequences\n"
