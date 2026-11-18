@@ -6,6 +6,7 @@
 #include "timeutil.h"
 #include "strutil.h"
 #include "forumid.h"
+#include "launchroute.h"
 #include "wire.h"
 #include <algorithm>
 #include <cstdlib>
@@ -13,6 +14,16 @@
 
 namespace
 {
+// Offline route integration can use the same signed group IDs returned by CNS.
+// The production path never reads these demo-only selectors.
+int64_t
+DemoRouteChat()
+{
+  const char* value = getenv("HARBOR_DEMO_ROUTE_CHAT_ID");
+  HarborRoute::Target target{ value ? value : "12345", {}, {}, {} };
+  HarborRoute::Validate(target);
+  return TelegramForum::ChatNumber(target.conversation);
+}
 // UTF-16 length, the unit native ranges use
 int32_t
 U16(const std::string& utf8)
@@ -76,8 +87,8 @@ HarborDemo::Seed()
         i);
   if (getenv("HARBOR_DEMO_TOPICS"))
   {
-    const std::string parent = getenv("HARBOR_DEMO_ROUTES") ? StrUtil::NumToHex<int64_t>(12345) : "hive";
-    const auto topic = [&](int32_t id) { return getenv("HARBOR_DEMO_ROUTES") ? TelegramForum::ConversationId(12345, id) : parent + "#" + std::to_string(id); };
+    const std::string parent = getenv("HARBOR_DEMO_ROUTES") ? StrUtil::NumToHex(DemoRouteChat()) : "hive";
+    const auto topic = [&](int32_t id) { return getenv("HARBOR_DEMO_ROUTES") ? TelegramForum::ConversationId(DemoRouteChat(), id) : parent + "#" + std::to_string(id); };
     add(parent, "leo", "Parent group history.", 10);
     add(topic(421), "leo", "Topic-specific history for the Desk conversation.", 100);
     add(topic(550), "asha", "A different topic with separate history.", 90);
@@ -347,11 +358,11 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
       if (getenv("HARBOR_DEMO_TOPICS"))
       {
         const bool routed = getenv("HARBOR_DEMO_ROUTES");
-        const std::string parent = routed ? StrUtil::NumToHex<int64_t>(12345) : "hive";
+        const std::string parent = routed ? StrUtil::NumToHex(DemoRouteChat()) : "hive";
         for (auto pair : std::vector<std::pair<std::string, std::string>>{
                { parent, routed ? "Routed group" : "Team forum" },
-               { routed ? TelegramForum::ConversationId(12345, 421) : "hive#421", routed ? "Routed group > Agent" : "Team forum > Desk planning — DEMO-421" },
-               { routed ? TelegramForum::ConversationId(12345, 550) : "hive#550", routed ? "Routed group > Doug" : "Team forum > Infrastructure" } })
+               { routed ? TelegramForum::ConversationId(DemoRouteChat(), 421) : "hive#421", routed ? "Routed group > Agent" : "Team forum > Desk planning — DEMO-421" },
+               { routed ? TelegramForum::ConversationId(DemoRouteChat(), 550) : "hive#550", routed ? "Routed group > Doug" : "Team forum > Infrastructure" } })
         {
           ContactInfo topic;
           topic.id = pair.first;

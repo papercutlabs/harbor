@@ -44,6 +44,10 @@ with tempfile.TemporaryDirectory(prefix='harbor-route-') as directory:
     finally:
         if second: second.close()
         first.close()
+    negative=Terminal(cols=90,config_dir=Path(directory)/'negative-config',extra_env=dict(env,HARBOR_DEMO_ROUTE_CHAT_ID='-10012345'),args=['--open-telegram-chat','-10012345','--open-telegram-topic','550'])
+    try:
+        negative.expect('Routed group > Doug');negative.expect('A different topic')
+    finally:negative.close()
     for args in [ ['--open-telegram-chat','0'], ['--open-telegram-chat','9223372036854775808'],
                   ['--open-telegram-chat','1x'], ['--open-telegram-topic','421'],
                   ['--open-telegram-chat','12345','--open-telegram-topic','0'],
