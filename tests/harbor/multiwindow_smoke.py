@@ -47,7 +47,10 @@ def orderly_pending_checks(root):
                'HARBOR_DEMO_REQUEST_LOG': str(log), 'HARBOR_DEMO_SEND_DELAY_MS': '10000',
                'HARBOR_DEMO_FAIL_SEND_INDEX': '1'}
         if mode == 'restart':
-            target = case / 'releases/0.1.20/bin/harbor'
+            native_version = subprocess.check_output([os.environ['HARBOR_EXECUTABLE'], '--version'],
+                                                     env=dict(os.environ, **env), text=True).split()[1]
+            major, minor, patch = map(int, native_version.split('.'))
+            target = case / f'releases/{major}.{minor}.{patch + 1}/bin/harbor'
             target.parent.mkdir(parents=True)
             shutil.copy2(os.environ['HARBOR_EXECUTABLE'], target)
             env['HARBOR_TEST_UPDATE_LAUNCHER'] = str(target)

@@ -1,6 +1,7 @@
 #include "session.h"
 #include "update.h"
 #include "wire.h"
+#include "traceprotocol.h"
 #include <algorithm>
 #include <cerrno>
 #include <condition_variable>
@@ -118,7 +119,7 @@ WriteAll(int fd, const std::string& data)
       continue;
     }
     if (n <= 0)
-      return false;
+    { HarborTrace::Os("socket.write.failed", n < 0 ? errno : EPIPE); return false; }
     done += (size_t)n;
   }
   return true;
@@ -132,7 +133,7 @@ ReadFrame(int fd, std::string& buf, HarborWire::Kind& kind, std::string& payload
   {
     bool have = false;
     if (!HarborWire::NextFrame(buf, kind, payload, have))
-      return false;
+    { HarborTrace::Event("socket.frame.rejected"); return false; }
     if (have)
       return true;
     char chunk[65536];
@@ -140,7 +141,7 @@ ReadFrame(int fd, std::string& buf, HarborWire::Kind& kind, std::string& payload
     if (n < 0 && errno == EINTR)
       continue;
     if (n <= 0)
-      return false;
+    { HarborTrace::Os("socket.read.ended", n < 0 ? errno : 0, {{"cause", n == 0 ? "eof" : "read_error"}}); return false; }
     buf.append(chunk, (size_t)n);
   }
 }
@@ -212,16 +213,21 @@ ConnectSocket(const std::string& path)
 {
   int fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (fd < 0)
-    return -1;
+  { HarborTrace::Os("socket.create.failed", errno); return -1; }
   sockaddr_un addr;
   memset(&addr, 0, sizeof(addr));
   addr.sun_family = AF_UNIX;
   strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
-  if (connect(fd, (sockaddr*)&addr, sizeof(addr)) != 0 || !SameUser(fd))
+  const int connected = connect(fd, (sockaddr*)&addr, sizeof(addr));
+  if (connected != 0 || !SameUser(fd))
   {
+    const int error = connected != 0 ? errno : EACCES;
+    HarborTrace::Os(connected != 0 ? "socket.connect.failed" : "socket.peer.rejected", error);
     close(fd);
+    errno = error;
     return -1;
   }
+  HarborTrace::Event("socket.connected");
   fcntl(fd, F_SETFD, FD_CLOEXEC);
   NoSigPipe(fd);
   return fd;
@@ -234,40 +240,47 @@ ReadWelcome(int fd, std::string& buf, Attachment& out)
   std::string payload;
   if (!ReadFrame(fd, buf, kind, payload))
   {
+    HarborTrace::Event("handshake.failed", {{"cause", "frame_or_eof"}});
     out.error = "Harbor's session ended before it started.";
     return false;
   }
   if (kind == HarborWire::KindEnded)
   {
+    HarborTrace::Event("handshake.failed", {{"cause", "backend_startup_failure"}});
     out.error = payload;
     return false;
   }
   HarborWire::Reader r(payload);
   if (kind != HarborWire::KindWelcome)
   {
+    HarborTrace::Event("handshake.failed", {{"cause", "unexpected_frame"}});
     out.error = "Harbor's session sent an unexpected first frame.";
     return false;
   }
   const std::string version = r.S();
   if (r.ok && version != HarborUpdate::Version())
   {
+    HarborTrace::Event("handshake.failed", {{"cause", "version_mismatch"}, {"expected_version", HarborUpdate::Version()}, {"peer_version", version.size() <= 24 && version.find_first_not_of("0123456789.") == std::string::npos ? version : "invalid"}});
     out.error = "Harbor " + version + " is still running in other windows; this is Harbor " +
                 HarborUpdate::Version() + ". Close the other Harbor windows, then run harbor again.";
     return false;
   }
-  r.U32(); // connId, informational
+  out.connectionId = r.U32(); // ownership identity, no protocol change
   for (uint32_t i = 0, n = r.Count(); r.ok && i < n; ++i)
   {
     Profile p;
+    p.index = int(i);
     p.id = r.S();
     p.displayName = r.S();
     out.profiles.push_back(p);
   }
   if (!r.Done())
   {
+    HarborTrace::Event("handshake.failed", {{"cause", "malformed_welcome"}});
     out.error = "Harbor's session sent a malformed welcome.";
     return false;
   }
+  HarborTrace::Event("handshake.ready", {{"peer_version", version}, {"connection_id", HarborTrace::Number(out.connectionId)}, {"profiles", HarborTrace::Number(out.profiles.size())}});
   return true;
 }
 }
@@ -276,10 +289,12 @@ Attachment
 Attach(const std::string& p_AppDir, const std::string& p_Self, const std::vector<std::string>& p_BackendArgs)
 {
   Attachment out;
+  HarborTrace::Event("session.attach.attempt", {{"config_id", HarborTrace::Token(p_AppDir)}});
   const std::string path = SocketPath(p_AppDir);
   const std::string problem = SocketPathProblem(path);
   if (!problem.empty())
   {
+    HarborTrace::Event("session.attach.failed", {{"cause", "socket_path_limit"}, {"bytes", HarborTrace::Number(path.size())}});
     out.error = problem;
     return out;
   }
@@ -287,22 +302,27 @@ Attach(const std::string& p_AppDir, const std::string& p_Self, const std::vector
   // One ordinary advisory lock serialises connect-or-spawn: a second window started at the same
   // moment waits here until the first window's backend is listening, then connects to it.
   const std::string lockPath = p_AppDir + "/session.lock";
+  HarborTrace::Event("session.lock.attempt");
   int lockFd = open(lockPath.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
   if (lockFd < 0 || flock(lockFd, LOCK_EX) != 0)
   {
+    HarborTrace::Os("session.lock.failed", errno, {{"operation", lockFd < 0 ? "open" : "flock"}});
     out.error = "Could not lock " + lockPath + ": " + strerror(errno);
     if (lockFd >= 0)
       close(lockFd);
     return out;
   }
 
+  HarborTrace::Event("session.lock.acquired");
   std::string buf;
   int fd = ConnectSocket(path);
   if (fd < 0)
   {
+    HarborTrace::Event("backend.spawn.attempt");
     int pair[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0)
     {
+      HarborTrace::Os("backend.socketpair.failed", errno);
       out.error = std::string("Could not create session connection: ") + strerror(errno);
       close(lockFd);
       return out;
@@ -329,16 +349,20 @@ Attach(const std::string& p_AppDir, const std::string& p_Self, const std::vector
         argv.push_back(const_cast<char*>(a.c_str()));
       argv.push_back(nullptr);
       execv(p_Self.c_str(), argv.data());
+      HarborTrace::Os("backend.exec.failed", errno);
       _exit(127);
     }
+    const int forkError = errno;
     close(pair[1]);
     if (pid < 0)
     {
-      out.error = std::string("Could not start Harbor's session: ") + strerror(errno);
+      HarborTrace::Os("backend.fork.failed", forkError);
+      out.error = std::string("Could not start Harbor's session: ") + strerror(forkError);
       close(pair[0]);
       close(lockFd);
       return out;
     }
+    HarborTrace::Event("backend.spawned", {{"child_pid", HarborTrace::Number(pid)}});
     fd = pair[0];
     fcntl(fd, F_SETFD, FD_CLOEXEC);
     NoSigPipe(fd);
@@ -366,7 +390,7 @@ AcquireSlot(const std::string& p_AppDir)
     const std::string path = p_AppDir + "/harbor-state.slot" + std::to_string(slot) + ".lock";
     int fd = open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
     if (fd < 0)
-      return -1;
+    { HarborTrace::Os("window.slot.failed", errno); return -1; }
     if (flock(fd, LOCK_EX | LOCK_NB) == 0)
       return slot; // fd intentionally held until exit
     close(fd);
@@ -374,8 +398,9 @@ AcquireSlot(const std::string& p_AppDir)
   return -1;
 }
 
-Connection::Connection(int p_Fd, const std::string& p_Pending)
-  : m_Fd(p_Fd)
+Connection::Connection(int p_Fd, const std::string& p_Pending, uint32_t p_Id)
+  : m_Id(p_Id)
+  , m_Fd(p_Fd)
   , m_Pending(p_Pending)
 {
 }
@@ -414,12 +439,13 @@ Connection::Stop()
   RecoverUnknown();
 }
 bool
-Connection::Send(const std::string& p_ProfileId, std::shared_ptr<RequestMessage> p_Request)
+Connection::Send(const std::string& p_ProfileId, std::shared_ptr<RequestMessage> p_Request, int p_ProfileIndex)
 {
   std::string encoded;
-  if (m_Ended || m_Stopping) return false;
+  if (m_Ended || m_Stopping) { HarborTrace::Request("request.rejected_closed", p_Request, m_Id); return false; }
   if (!HarborWire::EncodeRequest(p_Request, encoded))
   {
+    HarborTrace::Request("request.rejected_encoding", p_Request, m_Id);
     if (p_Request->GetMessageType() == SendMessageRequestType)
     {
       auto q = std::static_pointer_cast<SendMessageRequest>(p_Request);
@@ -438,6 +464,7 @@ Connection::Send(const std::string& p_ProfileId, std::shared_ptr<RequestMessage>
     return false;
   }
   p_Request->requestId = ++m_Seq;
+  HarborTrace::Request("request.send.attempt", p_Request, m_Id, p_ProfileIndex);
   // Edits are not tracked: a successful native edit sends no reply, so its outcome is never
   // unknown in a way the window could report.
   if (p_Request->GetMessageType() == SendMessageRequestType)
@@ -457,7 +484,9 @@ Connection::Send(const std::string& p_ProfileId, std::shared_ptr<RequestMessage>
   w.S(p_ProfileId);
   w.S(encoded);
   const auto frame = w.ok ? HarborWire::Frame(HarborWire::KindRequest, w.buf) : std::string();
-  if (!frame.empty() && WriteAll(m_Fd, frame)) return true;
+  if (!frame.empty() && WriteAll(m_Fd, frame))
+  { HarborTrace::Request("request.sent", p_Request, m_Id, p_ProfileIndex); return true; }
+  HarborTrace::Request("request.send.failed", p_Request, m_Id);
   if (!m_Stopping)
     End("Harbor's session ended. Your drafts and unknown sends were saved; run harbor again.");
   return false;
@@ -465,6 +494,7 @@ Connection::Send(const std::string& p_ProfileId, std::shared_ptr<RequestMessage>
 void
 Connection::Lent()
 {
+  HarborTrace::Event("terminal.lend.attempt", {{"connection_id", HarborTrace::Number(m_Id)}});
   // Pass this window's terminal (fds 0 and 1) to the backend for the native prompt.
   std::string frame = HarborWire::Frame(HarborWire::KindLent, std::string());
   struct iovec iov = { (void*)frame.data(), frame.size() };
@@ -516,6 +546,7 @@ Connection::End(const std::string& p_Reason)
 {
   if (m_Ended.exchange(true))
     return;
+  HarborTrace::Event("session.disconnected", {{"connection_id", HarborTrace::Number(m_Id)}});
   std::vector<std::string> profiles;
   {
     std::lock_guard<std::mutex> lock(m_Mutex);
@@ -537,7 +568,10 @@ Connection::RecoverUnknown()
   }
   // A local acceptance is not confirmation. Preserve complete originals, never replay.
   for (auto& u : unknown)
+  {
+    HarborTrace::Event("request.outcome_unknown", {{"connection_id", HarborTrace::Number(m_Id)}, {"request_id", HarborTrace::Number(u.first)}});
     Dispatch(u.second);
+  }
 }
 void
 Connection::ReadLoop()
@@ -564,6 +598,7 @@ Connection::ReadLoop()
           End("Harbor received a malformed session event and closed this window.");
           return;
         }
+        HarborTrace::Result("request.result.received", n, m_Id);
         Dispatch(n);
         break;
       }
@@ -607,7 +642,7 @@ Remote::Login()
 void
 Remote::SendRequest(std::shared_ptr<RequestMessage> p_Request)
 {
-  m_Connection->Send(m_Profile.id, p_Request);
+  m_Connection->Send(m_Profile.id, p_Request, m_Profile.index);
 }
 void
 Remote::SetMessageHandler(const std::function<void(std::shared_ptr<ServiceMessage>)>& p_Handler)
@@ -693,9 +728,12 @@ Backend::Listen(std::string& error)
   strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
   const mode_t old = umask(0177);
   const bool bound = m_Listen >= 0 && bind(m_Listen, (sockaddr*)&addr, sizeof(addr)) == 0;
+  const int bindError = errno;
   umask(old);
+  if (!bound) errno = bindError;
   if (!bound || listen(m_Listen, 16) != 0)
   {
+    HarborTrace::Os("backend.listen.failed", errno, {{"operation", bound ? "listen" : m_Listen >= 0 ? "bind" : "socket"}});
     error = "Could not listen on " + path + ": " + strerror(errno);
     return false;
   }
@@ -719,6 +757,7 @@ Backend::Enqueue(const std::shared_ptr<Peer>& peer, const std::string& frame)
     return;
   if (peer->out.size() + frame.size() > QueueLimit)
   {
+    HarborTrace::Event("backend.peer.queue_limit", {{"connection_id", HarborTrace::Number(peer->id)}});
     peer->closing = true;
     peer->endReason = "This Harbor window stopped reading, so its session ended. Run harbor again.";
     return;
@@ -730,6 +769,9 @@ Backend::Enqueue(const std::shared_ptr<Peer>& peer, const std::string& frame)
 void
 Backend::Handle(std::shared_ptr<ServiceMessage> n)
 {
+  const auto profile = std::find_if(m_Profiles.begin(), m_Profiles.end(), [&](const Profile& p) { return p.id == n->profileId; });
+  HarborTrace::Result("request.result.produced", n, uint32_t(n->requestId >> 32),
+    profile == m_Profiles.end() ? -1 : int(std::distance(m_Profiles.begin(), profile)));
   if (n->GetMessageType() == ProtocolUiControlNotifyType)
   {
     UiControl(std::static_pointer_cast<ProtocolUiControlNotify>(n));
@@ -783,6 +825,7 @@ Backend::Handle(std::shared_ptr<ServiceMessage> n)
 void
 Backend::UiControl(std::shared_ptr<ProtocolUiControlNotify> n)
 {
+  HarborTrace::Event("backend.terminal.control", {{"take_control", n->isTakeControl ? "yes" : "no"}});
   std::unique_lock<std::mutex> lock(m_Mutex);
   n->cancellable = true;
   if (m_ShuttingDown && n->isTakeControl)
@@ -891,11 +934,13 @@ Backend::AddPeer(int fd)
   for (auto& f : m_ConnectFrames)
     peer->out += f.second;
   m_Peers.push_back(peer);
+  HarborTrace::Event("backend.peer.attached", {{"connection_id", HarborTrace::Number(peer->id)}, {"windows", HarborTrace::Number(m_Peers.size())}});
 }
 
 void
 Backend::ClosePeer(const std::shared_ptr<Peer>& peer)
 {
+  HarborTrace::Event("backend.peer.closed", {{"connection_id", HarborTrace::Number(peer->id)}, {"cause", peer->endReason.empty() ? "transport_closed" : "session_ended"}});
   if (!peer->endReason.empty())
   {
     std::string frame = HarborWire::Frame(HarborWire::KindEnded, peer->endReason);
@@ -948,7 +993,7 @@ Backend::ReadPeer(const std::shared_ptr<Peer>& peer,
     ssize_t n = recvmsg(peer->fd, &msg, 0);
     if (n < 0 && errno == EINTR) { --reads; continue; }
     if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
-    if (n <= 0) { peer->closing = true; return; }
+    if (n <= 0) { HarborTrace::Os("backend.peer.read.ended", n < 0 ? errno : 0, {{"connection_id", HarborTrace::Number(peer->id)}, {"cause", n == 0 ? "eof" : "read_error"}}); peer->closing = true; return; }
     bool badControl = (msg.msg_flags & (MSG_CTRUNC | MSG_TRUNC)) != 0;
     for (struct cmsghdr* c = CMSG_FIRSTHDR(&msg); c; c = CMSG_NXTHDR(&msg, c))
     {
@@ -999,6 +1044,7 @@ Backend::ReadPeer(const std::shared_ptr<Peer>& peer,
       if (!request || !knownProfile || (uint32_t)request->requestId == 0)
       { peer->closing = true; return; }
       request->requestId = ((uint64_t)peer->id << 32) | (request->requestId & 0xffffffffULL);
+      HarborTrace::Request("request.backend.received", request, peer->id, int(std::distance(m_Profiles.begin(), std::find_if(m_Profiles.begin(), m_Profiles.end(), [&](const Profile& p) { return p.id == profile; }))));
       forward.emplace_back(profile, request);
     }
   }
@@ -1011,6 +1057,7 @@ Backend::Run(int inheritedFd, int* shutdownLock, const std::function<bool()>& sh
   std::cin.rdbuf(&PromptInput());
   if (pipe(m_Wake) != 0)
   {
+    HarborTrace::Os("backend.wake_pipe.failed", errno);
     FailBackend(inheritedFd, "Harbor's session could not start.");
     return 1;
   }
@@ -1022,6 +1069,7 @@ Backend::Run(int inheritedFd, int* shutdownLock, const std::function<bool()>& sh
     FailBackend(inheritedFd, error);
     return 1;
   }
+  HarborTrace::Event("backend.ready", {{"profiles", HarborTrace::Number(m_Profiles.size())}});
   AddPeer(inheritedFd);
 
   auto handler = [weak = std::weak_ptr<Backend>(shared_from_this())](std::shared_ptr<ServiceMessage> n)
@@ -1031,7 +1079,9 @@ Backend::Run(int inheritedFd, int* shutdownLock, const std::function<bool()>& sh
     for (auto& p : m_Protocols)
     {
       p->SetMessageHandler(handler);
-      p->Login();
+      HarborTrace::Event("profile.login.attempt");
+      const bool loggedIn = p->Login();
+      HarborTrace::Event("profile.login.result", {{"accepted", loggedIn ? "yes" : "no"}});
     }
   });
 
@@ -1114,7 +1164,7 @@ Backend::Run(int inheritedFd, int* shutdownLock, const std::function<bool()>& sh
     fds.push_back({ m_Listen, POLLIN, 0 });
     fds.push_back({ m_Wake[0], POLLIN, 0 });
     if (poll(fds.data(), fds.size(), timeout) < 0 && errno != EINTR)
-      break;
+    { HarborTrace::Os("backend.poll.failed", errno); break; }
 
     if (fds[fds.size() - 1].revents)
     {
@@ -1163,6 +1213,7 @@ Backend::Run(int inheritedFd, int* shutdownLock, const std::function<bool()>& sh
           p->SendRequest(f.second);
   }
 
+  HarborTrace::Event("backend.shutdown");
   // Stop listening before the caller releases the locks.
   if (m_Listen >= 0)
   {
@@ -1201,6 +1252,8 @@ RunBackend(int p_InheritedFd, const std::string& p_AppDir, const std::vector<std
 void
 FailBackend(int p_InheritedFd, const std::string& p_Message)
 {
+  // The caller logs the precise native cause. This path never copies arbitrary frame payloads.
+  HarborTrace::Event("backend.startup.failed");
   if (p_InheritedFd < 0)
     return;
   WriteAll(p_InheritedFd, HarborWire::Frame(HarborWire::KindEnded, p_Message));

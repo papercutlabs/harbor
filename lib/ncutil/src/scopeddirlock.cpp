@@ -7,6 +7,7 @@
 
 #include "scopeddirlock.h"
 
+#include <cerrno>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -33,9 +34,12 @@ bool ScopedDirLock::TryLock()
   m_DirFd = open(m_DirPath.c_str(), O_RDONLY | O_NOCTTY);
   if (m_DirFd != -1)
   {
+    m_Operation = "flock";
     m_IsLocked = (flock(m_DirFd, LOCK_EX | LOCK_NB) == 0);
+    if (!m_IsLocked) m_Error = errno;
   }
 
+  if (m_DirFd == -1) m_Error = errno;
   return m_IsLocked;
 }
 

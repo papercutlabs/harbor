@@ -185,7 +185,7 @@ private:
   void Text(int, int, int, const std::wstring&, int color, bool bold = false);
   void Fill(int, int, int, int color);
   void KeyPress(wint_t);
-  void Mouse(const MEVENT& e);
+  void Mouse(const MEVENT& e, bool wheelDown = false);
   void ReadInput();
   void EditKey(wint_t);
   void Insert(const std::wstring&);

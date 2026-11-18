@@ -1,3 +1,4 @@
+#include "traceprotocol.h"
 #include "harbor.h"
 #include "wire.h"
 #include "input.h"
@@ -392,6 +393,7 @@ Harbor::Receive(std::shared_ptr<ServiceMessage> e)
 void
 Harbor::Request(const std::string& p, std::shared_ptr<RequestMessage> r)
 {
+  HarborTrace::Request("ui.request", r);
   auto it = m_Protocols.find(p);
   if (it != m_Protocols.end())
     it->second->SendRequest(r);
@@ -407,6 +409,7 @@ Harbor::Notify(const std::string& s)
 void
 Harbor::Init()
 {
+  HarborTrace::Event("ui.init.attempt");
   // SetSession selects the view slot before Init; classic Harbor keeps slot 0.
   LoadState();
   setlocale(LC_ALL, "");
@@ -497,6 +500,7 @@ Harbor::StatePath() const
 void
 Harbor::Cleanup()
 {
+  HarborTrace::Event("ui.cleanup");
   if (!m_Ready)
     return;
   m_DeskHost.Stop();
@@ -517,6 +521,7 @@ Harbor::Cleanup()
 void
 Harbor::Run()
 {
+  HarborTrace::Event("ui.run");
   int64_t lastSave = 0;
   bool deferring = false;
   while (m_Running && !AppUtil::IsTerminateRequested())
@@ -1101,6 +1106,7 @@ Harbor::Fetch(Conversation& c, bool older, bool automatic)
 void
 Harbor::OpenChat(const std::string& key)
 {
+  HarborTrace::Event("ui.chat.open");
   auto it = m_Chats.find(key);
   if (it == m_Chats.end())
     return;
@@ -1832,6 +1838,7 @@ Harbor::EditKey(wint_t k)
 void
 Harbor::BeginEdit(Conversation& c, const std::string& id)
 {
+  HarborTrace::Event("ui.message.edit");
   if (c.editing.empty())
   {
     c.draftBeforeEdit = c.draft;
@@ -1859,6 +1866,7 @@ Harbor::EndEdit(Conversation& c)
 void
 Harbor::Send()
 {
+  HarborTrace::Event("ui.send.attempt");
   auto* c = Current();
   if (!c || c->draft.empty())
     return;
@@ -1955,6 +1963,7 @@ Harbor::Choose(int index)
 void
 Harbor::ChatPicker(bool forward)
 {
+  HarborTrace::Event("ui.chat_picker.open");
   m_Menu = forward ? "forward" : "chats";
   if (m_Motion)
     m_AnimatedUntil = TimeUtil::GetCurrentTimeMSec() + 80;
@@ -2052,6 +2061,7 @@ Harbor::CheckUpdate()
 void
 Harbor::UpdatePrompt()
 {
+  HarborTrace::Event("ui.update.open");
   CheckUpdate();
   if (m_UpdateTarget.empty())
   {
@@ -2083,6 +2093,7 @@ Harbor::UpdatePrompt()
 void
 Harbor::Commands()
 {
+  HarborTrace::Event("ui.commands.open");
   m_Menu = "commands";
   m_Filter.clear();
   m_Option = 0;
@@ -2256,6 +2267,7 @@ Harbor::DeskOptions()
 void
 Harbor::SuspendTerminal()
 {
+  HarborTrace::Event("terminal.suspend");
   SaveState();
   // As for a login UI: the child owns stdin until it ends, so the reader is stopped and joined, not left to race it.
   HarborInputStop();
@@ -2271,6 +2283,7 @@ Harbor::SuspendTerminal()
 void
 Harbor::ResumeTerminal()
 {
+  HarborTrace::Event("terminal.resume.attempt");
   reset_prog_mode();
   if (!HarborInputStart())
     throw std::runtime_error("Could not resume terminal input reader");
@@ -2348,6 +2361,7 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
     for (int fd = 0; fd < 3; ++fd) if (flags[fd] >= 0) fcntl(fd, F_SETFL, flags[fd]);
     if (termiosSaved) tcsetattr(STDIN_FILENO, TCSANOW, &saved);
   };
+  HarborTrace::Event("desk.prepare.attempt");
   const auto prepared = m_DeskHost.Prepare(argv, [] {
     // Harbor still owns input during preparation. Launch typeahead cannot become a draft or Desk action.
     const auto event = HarborInputPoll(0);
@@ -2355,6 +2369,7 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
     free(event.text);
     return cancel;
   }, FileUtil::GetApplicationDir());
+  HarborTrace::Event("desk.prepare.result", {{"outcome", prepared == HarborDeskHost::Prepared::Ready ? "ready" : prepared == HarborDeskHost::Prepared::Cancelled ? "cancelled" : prepared == HarborDeskHost::Prepared::Rejected ? "rejected" : "failed"}});
   if (prepared != HarborDeskHost::Prepared::Ready)
   {
     restore();
@@ -2371,7 +2386,9 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
   mousemask(0, nullptr); fflush(stdout);
   tcflush(STDIN_FILENO, TCIFLUSH);
   // No endwin/reset_prog_mode here: both views retain Harbor's existing alternate screen.
+  HarborTrace::Event("desk.visit.attempt");
   const bool ok = m_DeskHost.Visit([] { return AppUtil::IsTerminateRequested(); });
+  HarborTrace::Event("desk.visit.result", {{"outcome", ok ? "released" : "failed"}});
   restore();
   tcflush(STDIN_FILENO, TCIFLUSH);
   sigaction(SIGINT, &oldInt, nullptr); sigaction(SIGQUIT, &oldQuit, nullptr); sigaction(SIGTSTP, &oldTstp, nullptr);
@@ -2388,6 +2405,9 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
 bool
 Harbor::DeskHandoff(const std::vector<std::string>& argv)
 {
+  const std::string view = argv.empty() ? "other" : argv.back();
+  HarborTrace::Event("desk.handoff.attempt", {{"mode", HarborDeskHost::Eligible(argv) ? "warm" : "child"},
+    {"view", view == "everything" || view == "quota" || view == "focus" || view == "now" || view == "help" ? view : "other"}});
   if (HarborDeskHost::Eligible(argv)) return WarmDeskHandoff(argv);
   // The Desk view runs on this same terminal while this process, its chats, drafts and reading positions stay as they are.
   // Ctrl+C belongs to the child; Harbor ignores it until the child has ended.
@@ -2418,11 +2438,16 @@ Harbor::DeskHandoff(const std::vector<std::string>& argv)
   pid_t pid = 0;
   int spawned = posix_spawnp(&pid, args[0], nullptr, &attr, args.data(), environ);
   posix_spawnattr_destroy(&attr);
+  if (spawned) HarborTrace::Os("desk.spawn.failed", spawned);
+  else HarborTrace::Event("desk.spawned", {{"child_pid", HarborTrace::Number(pid)}});
   int status = 0;
   if (spawned == 0)
     while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
     {
     }
+  HarborTrace::Event("desk.child.result", {{"spawn_error", std::to_string(spawned)}, {"wait_status", std::to_string(status)},
+    {"exit_status", spawned == 0 && WIFEXITED(status) ? std::to_string(WEXITSTATUS(status)) : "unknown"},
+    {"signal", spawned == 0 && WIFSIGNALED(status) ? std::to_string(WTERMSIG(status)) : "none"}});
   // The child shares this terminal's open file description; put back Harbor's own flags (a Node child sets O_NONBLOCK).
   if (inputFlags >= 0)
     fcntl(STDIN_FILENO, F_SETFL, inputFlags);
@@ -2449,6 +2474,7 @@ Harbor::DeskHandoff(const std::vector<std::string>& argv)
 void
 Harbor::Actions(bool minimal)
 {
+  HarborTrace::Event("ui.message_actions.open");
   if (m_Motion)
     m_AnimatedUntil = TimeUtil::GetCurrentTimeMSec() + 80;
   auto* c = Current();
@@ -2705,6 +2731,7 @@ Harbor::ReplyExcerpt(Conversation& c, const ChatMessage& m)
 void
 Harbor::VisitReply(const std::string& key, const ChatMessage& m)
 {
+  HarborTrace::Event("ui.reply.visit");
   auto it = m_Chats.find(key);
   if (it == m_Chats.end()) return;
   auto& c = it->second;
@@ -2823,6 +2850,7 @@ Harbor::Visit(std::string key, std::string id)
 void
 Harbor::ReturnBack()
 {
+  HarborTrace::Event("ui.position.return");
   auto* c = Current();
   if (!c || !c->back.set)
     return;
@@ -2869,6 +2897,7 @@ Harbor::DropDetached(Conversation& c)
 void
 Harbor::SearchPrompt()
 {
+  HarborTrace::Event("ui.search.open");
   m_Menu = "search";
   m_Filter.clear();
   m_Option = 0;
@@ -2890,6 +2919,7 @@ Harbor::RebuildSearch()
 void
 Harbor::StartSearch(const std::string& query, bool pinned)
 {
+  HarborTrace::Event("ui.search.attempt");
   auto* c = Current();
   if (!c)
     return;
@@ -2977,6 +3007,7 @@ Harbor::SearchResults(std::shared_ptr<SearchMessagesNotify> n)
 void
 Harbor::ReactionChooser(const std::string& key, const std::string& id)
 {
+  HarborTrace::Event("ui.reaction.open");
   auto it = m_Chats.find(key);
   if (it == m_Chats.end())
     return;
@@ -3049,6 +3080,7 @@ Harbor::ReactionResults(std::shared_ptr<AvailableReactionsNotify> n)
 void
 Harbor::CodeChooser(const std::string& key, const std::string& id)
 {
+  HarborTrace::Event("ui.code.open");
   auto& c = m_Chats[key];
   auto it = c.messages.find(id);
   if (it == c.messages.end())
@@ -3082,6 +3114,7 @@ Harbor::CodeChooser(const std::string& key, const std::string& id)
 void
 Harbor::LinkChooser(const std::string& key, const std::string& id)
 {
+  HarborTrace::Event("ui.link.open");
   auto& c = m_Chats[key];
   auto it = c.messages.find(id);
   if (it == c.messages.end())
@@ -3150,6 +3183,7 @@ Harbor::VisitFailed(Conversation& c)
 void
 Harbor::FilePicker(const std::string& directory)
 {
+  HarborTrace::Event("ui.file_picker.open");
   m_Directory = directory;
   m_Menu = "files";
   m_Filter.clear();
@@ -3212,6 +3246,7 @@ Harbor::RebuildFiles()
 void
 Harbor::AttachPreview(std::vector<std::string> files)
 {
+  HarborTrace::Event("ui.attachments.preview");
   if (auto* c = Current())
     if (!c->editing.empty())
     {
@@ -3247,6 +3282,7 @@ Harbor::AttachPreview(std::vector<std::string> files)
 void
 Harbor::SendAttachments()
 {
+  HarborTrace::Event("ui.attachments.send");
   auto* c = Current();
   if (!c)
     return;
@@ -3287,6 +3323,7 @@ Harbor::SendAttachments()
 void
 Harbor::OpenAttachment(const std::string& p, const std::string& chatId, const std::string& id, bool preview)
 {
+  HarborTrace::Event("ui.attachment.open");
   auto& c = Ensure(p, chatId);
   auto it = c.messages.find(id);
   if (it == c.messages.end())
@@ -3333,6 +3370,7 @@ Harbor::OpenAttachment(const std::string& p, const std::string& chatId, const st
 void
 Harbor::ClipboardPaste()
 {
+  HarborTrace::Event("ui.clipboard.paste");
   std::string image = m_Media->PasteboardImage();
   if (!image.empty())
     AttachPreview({ image });
@@ -3751,6 +3789,7 @@ Harbor::CellSelected(const CopyCell& cell) const
 void
 Harbor::CopySelection()
 {
+  HarborTrace::Event("ui.selection.copy");
   std::wstring copied;
   std::string id;
   size_t start = 0, end = 0;
@@ -3821,13 +3860,11 @@ Harbor::ReadInput()
       mouse.bstate = event.action == 2 ? BUTTON3_RELEASED : BUTTON3_PRESSED;
     else if (event.button == 4)
       mouse.bstate = BUTTON4_PRESSED;
-#ifdef BUTTON5_PRESSED
-    else if (event.button == 5)
-      mouse.bstate = BUTTON5_PRESSED;
-#endif
     if (event.action == 3)
       mouse.bstate = REPORT_MOUSE_POSITION;
-    Mouse(mouse);
+    // The decoder supplies wheel-down even when the selected ncurses headers
+    // have no BUTTON5_PRESSED. Keep that typed event outside ncurses' mouse ABI.
+    Mouse(mouse, event.button == 5 && event.action == 1);
   }
   else if (event.kind == 1)
   {
@@ -3892,7 +3929,7 @@ Harbor::ReadInput()
 }
 
 void
-Harbor::Mouse(const MEVENT& e)
+Harbor::Mouse(const MEVENT& e, bool wheelDown)
 {
   m_Dirty = true;
 
@@ -3958,11 +3995,7 @@ Harbor::Mouse(const MEVENT& e)
   }
   if (m_Menu.empty())
   {
-    if (e.bstate & (BUTTON4_PRESSED
-#ifdef BUTTON5_PRESSED
-                    | BUTTON5_PRESSED
-#endif
-                    ))
+    if (wheelDown || (e.bstate & BUTTON4_PRESSED))
       m_MouseDown = m_MouseDragging = m_HasSelection = false;
     if (m_MouseDown)
     {
@@ -4035,13 +4068,11 @@ Harbor::Mouse(const MEVENT& e)
       m_Option = std::max(0, m_Option - 1);
       return;
     }
-#ifdef BUTTON5_PRESSED
-    if (e.bstate & BUTTON5_PRESSED)
+    if (wheelDown)
     {
       m_Option = std::min(int(m_Options.size()) - 1, m_Option + 1);
       return;
     }
-#endif
   }
   if (e.bstate & BUTTON4_PRESSED)
   {
@@ -4054,8 +4085,7 @@ Harbor::Mouse(const MEVENT& e)
     }
     return;
   }
-#ifdef BUTTON5_PRESSED
-  if (e.bstate & BUTTON5_PRESSED)
+  if (wheelDown)
   {
     if (c)
     {
@@ -4064,7 +4094,6 @@ Harbor::Mouse(const MEVENT& e)
     }
     return;
   }
-#endif
   if (!(e.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED | BUTTON1_DOUBLE_CLICKED)))
     return;
   for (auto it = m_Hits.rbegin(); it != m_Hits.rend(); it++)

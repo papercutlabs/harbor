@@ -26,6 +26,7 @@ public:
   static bool GetDeveloperMode();
   static void InitCoredump();
   static void InitSignalHandler();
+  static void SetSignalObserver(void (*p_Observer)(int));
   static void SignalHandler(int p_Signal, siginfo_t* p_SigInfo, void* p_Context);
   static void InitTerminateSignalHandler();
   static void TerminateSignalHandler(int p_Signal);
@@ -34,6 +35,7 @@ public:
   static int GetCallstack(void** p_Callstack, int p_MaxSize, void* p_Context);
 
 private:
+  static void (*m_SignalObserver)(int);
   static bool m_DeveloperMode;
   static volatile sig_atomic_t m_TerminateSignal;
 };

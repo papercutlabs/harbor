@@ -52,6 +52,7 @@
 #include "harbor/demoprotocol.h"
 #include "harbor/update.h"
 #include "harbor/session.h"
+#include "harbor/trace.h"
 static bool harborDemo = false;
 static int RunHarborWindow(const std::vector<std::string>& p_Args);
 #endif
@@ -106,6 +107,9 @@ public:
       if (dlerr != nullptr)
       {
         LOG_ERROR("dlerror %s", dlerr);
+#ifdef HARBOR_BUILD
+        HarborTrace::Event("profile.library.failed", {{"diagnostic", dlerr}});
+#endif
       }
 
       std::cout << "Failed to load " << libPath << ", skipping profile.\n";
@@ -154,7 +158,7 @@ static std::vector<std::shared_ptr<ProtocolBaseFactory>> GetProtocolFactorys()
 }
 
 
-int main(int argc, char* argv[])
+static int ApplicationMain(int argc, char* argv[])
 {
   // Defaults
   umask(S_IRWXG | S_IRWXO);
@@ -262,6 +266,9 @@ int main(int argc, char* argv[])
   }
 
 #ifdef HARBOR_BUILD
+  HarborTrace::Event("startup.selected", {{"role", sessionFd >= 0 ? "backend" : "window"},
+    {"runtime", harborDemo ? "demo" : "telegram"}, {"config_id", HarborTrace::Token(FileUtil::GetApplicationDir())},
+    {"mode", isSetup ? "setup" : isRemove ? "remove" : isKeyDump ? "keydump" : !exportDir.empty() ? "export" : "normal"}});
   // An ordinary run is a window of the directory's shared session. Setup, removal, export and
   // keydump keep the classic path under the existing locks.
   if ((sessionFd < 0) && !isSetup && !isRemove && !isKeyDump && exportDir.empty())
@@ -287,19 +294,31 @@ int main(int argc, char* argv[])
   }
 
 
+#ifdef HARBOR_BUILD
+  HarborTrace::Event("directory.lock.attempt");
+#endif
   std::unique_ptr<ScopedDirLock> dirLock = std::make_unique<ScopedDirLock>(FileUtil::GetApplicationDir());
   if (!dirLock->IsLocked())
   {
 #ifdef HARBOR_BUILD
-    HarborSession::FailBackend(sessionFd, "Harbor could not lock " + FileUtil::GetApplicationDir() +
-                               ": another Harbor or nchat session not shared with this window holds it.");
+    HarborTrace::Os("directory.lock.failed", dirLock->Error(), {{"operation", dirLock->Operation()}});
+    HarborSession::FailBackend(sessionFd, "Harbor could not lock its configuration directory (" + std::string(dirLock->Operation()) +
+      "): " + std::strerror(dirLock->Error()) + ".");
 #endif
+#ifdef HARBOR_BUILD
+    std::cerr << "Harbor could not lock its configuration directory (" << dirLock->Operation() << "): "
+              << std::strerror(dirLock->Error()) << ".\n";
+#else
     std::cerr <<
       "error: unable to acquire lock for " << FileUtil::GetApplicationDir() << "\n" <<
       "       only one nchat session per account/confdir is supported.\n";
+#endif
     return 1;
   }
 
+#ifdef HARBOR_BUILD
+  HarborTrace::Event("directory.lock.acquired");
+#endif
   if (!isDirInited)
   {
     int storedVersion = FileUtil::GetDirVersion(FileUtil::GetApplicationDir());
@@ -319,6 +338,7 @@ int main(int argc, char* argv[])
     if (storedVersion != dirVersion)
     {
 #ifdef HARBOR_BUILD
+      HarborTrace::Event("directory.version.rejected", {{"stored_version", std::to_string(storedVersion)}, {"expected_version", std::to_string(dirVersion)}});
       HarborSession::FailBackend(sessionFd, "Harbor will not replace an existing directory with an unknown format.\n"
                                  "Choose a new configuration directory with -d, or restore its version file.");
       std::cerr << "Harbor will not replace an existing directory with an unknown format.\n"
@@ -354,6 +374,9 @@ int main(int argc, char* argv[])
   // Init logging
   const std::string& logPath = FileUtil::GetApplicationDir() + std::string("/log.txt");
   Log::Init(logPath);
+#ifdef HARBOR_BUILD
+  HarborTrace::Event("native.logging.ready");
+#endif
   std::string appNameVersion = AppUtil::GetAppName(true /*p_WithVersion*/, true /*p_WithBranch*/);
   LOG_INFO("%s", appNameVersion.c_str());
   std::string osArch = SysUtil::GetOsArch(false /*p_Verbose*/);
@@ -457,6 +480,9 @@ int main(int argc, char* argv[])
     profileDirLocks.push_back(std::make_unique<ScopedDirLock>(profileDir));
     if (!profileDirLocks.back()->IsLocked())
     {
+#ifdef HARBOR_BUILD
+      HarborTrace::Os("profile.lock.failed", profileDirLocks.back()->Error(), {{"operation", profileDirLocks.back()->Operation()}});
+#endif
       LOG_WARNING("unable to acquire lock for %s, skipping", profileDir.c_str());
       std::cerr << "warning: unable to acquire lock for " << profileDir << ", skipping.\n";
       profileDirLocks.pop_back();
@@ -481,7 +507,15 @@ int main(int argc, char* argv[])
           std::shared_ptr<Protocol> protocol = protocolFactory->Create();
           if (protocol)
           {
-            protocol->LoadProfile(profilesDir, profileId);
+#ifdef HARBOR_BUILD
+            HarborTrace::Event("profile.load.attempt", {{"protocol", protocolName}});
+#endif
+            const bool loaded = protocol->LoadProfile(profilesDir, profileId);
+#ifdef HARBOR_BUILD
+            HarborTrace::Event("profile.load.result", {{"protocol", protocolName}, {"loaded", loaded ? "yes" : "no"}});
+#else
+            (void)loaded;
+#endif
             ui->AddProtocol(protocol);
             found = true;
           }
@@ -516,6 +550,7 @@ int main(int argc, char* argv[])
     // Session backend: no UI; serve windows until none is connected.
     if (!hasProtocols)
     {
+      HarborTrace::Event("profiles.none");
       HarborSession::FailBackend(sessionFd, "No profiles setup, exiting.");
     }
     else
@@ -621,6 +656,9 @@ int main(int argc, char* argv[])
     // Re-raise so the parent sees termination by signal (shell message, exit status 128+N)
     const int sig = AppUtil::GetTerminateSignal();
     signal(sig, SIG_DFL);
+#ifdef HARBOR_BUILD
+    HarborTrace::Event("process.termination", {{"signal", std::to_string(sig)}});
+#endif
     kill(getpid(), sig);
   }
 
@@ -921,6 +959,7 @@ static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs)
   HarborSession::Attachment attachment = HarborSession::Attach(appDir, FileUtil::GetSelfPath(), p_BackendArgs);
   if (attachment.fd < 0)
   {
+    HarborTrace::Event("window.attach.failed");
     std::cerr << attachment.error << "\n";
     return 1;
   }
@@ -938,7 +977,8 @@ static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs)
     std::cerr << "Could not reserve an independent Harbor view state in " << appDir << ".\n";
     return 1;
   }
-  auto connection = std::make_shared<HarborSession::Connection>(attachment.fd, attachment.pending);
+  HarborTrace::Event("window.ready", {{"slot", std::to_string(slot)}, {"profiles", std::to_string(attachment.profiles.size())}});
+  auto connection = std::make_shared<HarborSession::Connection>(attachment.fd, attachment.pending, attachment.connectionId);
   std::shared_ptr<Ui> ui = std::make_shared<Ui>();
   ui->SetSession(slot, [connection] { connection->Lent(); });
   std::function<void(std::shared_ptr<ServiceMessage>)> messageHandler =
@@ -972,6 +1012,9 @@ static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs)
   {
     const int sig = AppUtil::GetTerminateSignal();
     signal(sig, SIG_DFL);
+#ifdef HARBOR_BUILD
+    HarborTrace::Event("process.termination", {{"signal", std::to_string(sig)}});
+#endif
     kill(getpid(), sig);
   }
 
@@ -984,10 +1027,26 @@ static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs)
     std::vector<char*> argv;
     for (auto& a : args) argv.push_back(const_cast<char*>(a.c_str()));
     argv.push_back(nullptr);
+    HarborTrace::Event("process.restart.attempt", {{"executable", target}});
     execv(target.c_str(), argv.data());
+    HarborTrace::Os("process.restart.failed", errno);
     std::cerr << "Could not restart Harbor. Your draft was saved; run harbor again.\n";
     return 1;
   }
   return ended ? 1 : 0;
 }
 #endif
+
+// Keep entry/exit observation outside every early return, including help and failed startup.
+int main(int argc, char* argv[])
+{
+#ifdef HARBOR_BUILD
+  HarborTrace::Start(FileUtil::GetSelfPath(), HarborUpdate::Version(), SysUtil::GetBuildInfo());
+  AppUtil::SetSignalObserver(HarborTrace::Signal);
+#endif
+  const int result = ApplicationMain(argc, argv);
+#ifdef HARBOR_BUILD
+  HarborTrace::Event("process.exit", {{"status", std::to_string(result)}});
+#endif
+  return result;
+}
