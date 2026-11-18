@@ -115,6 +115,9 @@ void AppUtil::InitCoredump()
 #endif
 }
 
+void (*AppUtil::m_SignalObserver)(int) = nullptr;
+void AppUtil::SetSignalObserver(void (*p_Observer)(int)) { m_SignalObserver = p_Observer; }
+
 void AppUtil::InitSignalHandler()
 {
   static const std::set<int> signals =
@@ -392,6 +395,7 @@ int AppUtil::GetCallstack(void** p_Callstack, int p_MaxSize, void* p_Context)
 void AppUtil::SignalHandler(int p_Signal, siginfo_t* p_SigInfo, void* p_Context)
 {
   UNUSED(p_SigInfo);
+  if (m_SignalObserver) m_SignalObserver(p_Signal);
   char logMsg[64];
   if (p_Signal == SIGINT)
   {

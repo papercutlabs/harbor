@@ -31,6 +31,7 @@ struct Profile
 {
   std::string id;
   std::string displayName;
+  int index = -1; // local ordinal from the welcome; account identifiers never enter diagnostics
 };
 
 // Window side ---------------------------------------------------------------------------------
@@ -38,6 +39,7 @@ struct Profile
 struct Attachment
 {
   int fd = -1;
+  uint32_t connectionId = 0;
   std::vector<Profile> profiles;
   std::string error; // backend start failure, shown to the user
   std::string pending; // bytes read after the welcome (for example replayed events)
@@ -82,11 +84,11 @@ private:
 class Connection
 {
 public:
-  Connection(int p_Fd, const std::string& p_Pending);
+  Connection(int p_Fd, const std::string& p_Pending, uint32_t p_Id = 0);
   ~Connection();
   void Start(); // begins reading; replays events for all registered handlers
   void Stop(); // freezes I/O and dispatches unconfirmed sends before the UI's final save
-  bool Send(const std::string& p_ProfileId, std::shared_ptr<RequestMessage> p_Request);
+  bool Send(const std::string& p_ProfileId, std::shared_ptr<RequestMessage> p_Request, int p_ProfileIndex = -1);
   void SetHandler(const std::string& p_ProfileId, const std::function<void(std::shared_ptr<ServiceMessage>)>& p_Handler);
   // Called by the window once it has left ncurses for a lend: passes its terminal to the backend.
   void Lent();
@@ -98,6 +100,7 @@ private:
   void Dispatch(std::shared_ptr<ServiceMessage>);
   void End(const std::string& p_Reason);
   void RecoverUnknown();
+  uint32_t m_Id = 0;
   int m_Fd = -1;
   std::string m_Pending;
   std::thread m_Reader;

@@ -8,7 +8,8 @@
     "tests/harbor/list_spacing_smoke.py",
     "tests/harbor/chat_chrome_smoke.py",
     "tests/harbor/line_delete_smoke.py",
-    "tests/harbor/multiwindow_smoke.py"
+    "tests/harbor/multiwindow_smoke.py",
+    "tests/harbor/operational_trace_smoke.py"
   ],
   "lanes": {
     "static": [
@@ -20,7 +21,8 @@
       "tests/harbor/list_spacing_smoke.py",
       "tests/harbor/chat_chrome_smoke.py",
       "tests/harbor/line_delete_smoke.py",
-      "tests/harbor/multiwindow_smoke.py"
+      "tests/harbor/multiwindow_smoke.py",
+      "tests/harbor/operational_trace_smoke.py"
     ],
     "format": [
       "tests/harbor/format_test.cpp"
@@ -87,6 +89,13 @@
     ],
     "line_delete": [
       "tests/harbor/line_delete_smoke.py"
+    ],
+    "operational_trace": [
+      "tests/harbor/operational_trace_smoke.py",
+      "tests/harbor/trace_probe.cpp"
+    ],
+    "warm_handoff": [
+      "tests/harbor/warm_handoff_smoke.py"
     ]
   }
 }

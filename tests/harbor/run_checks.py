@@ -36,7 +36,8 @@ native = {"format": "harbor-format-test", "producer": "harbor-richtext-producer-
           "cache": "harbor-cache-richtext-test", "media": "harbor-media-test",
           "session": "harbor-session-test"}
 lanes = [lane] if lane else list(inventory["lanes"])
-env = dict(os.environ, HARBOR_EXECUTABLE=str(build / "bin/harbor"))
+env = dict(os.environ, HARBOR_EXECUTABLE=str(build / "bin/harbor"),
+           HARBOR_TRACE_PROBE=str(build / "bin/harbor-trace-probe"))
 
 
 def describe(path):
@@ -51,6 +52,7 @@ def describe(path):
 needs = {build / "bin/harbor"} if any(name not in native and name not in ("static", "input_decoding")
                                       for name in lanes) else set()
 needs |= {build / "bin" / native[name] for name in lanes if name in native}
+if "operational_trace" in lanes: needs.add(build / "bin/harbor-trace-probe")
 for path in sorted(needs):
     print(describe(path), flush=True)
 

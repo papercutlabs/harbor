@@ -16,6 +16,8 @@ public:
   ~ScopedDirLock();
 
   bool IsLocked();
+  int Error() const { return m_Error; }
+  const char* Operation() const { return m_Operation; }
 
 private:
   bool TryLock();
@@ -25,6 +27,8 @@ private:
   int m_DirFd = -1;
   std::string m_DirPath;
   bool m_IsLocked = false;
+  int m_Error = 0;
+  const char* m_Operation = "open";
 };
 
 class PathLock
