@@ -53,8 +53,9 @@
 #include "harbor/update.h"
 #include "harbor/session.h"
 #include "harbor/trace.h"
+#include "harbor/launchroute.h"
 static bool harborDemo = false;
-static int RunHarborWindow(const std::vector<std::string>& p_Args);
+static int RunHarborWindow(const std::vector<std::string>& p_Args, const HarborRoute::Target& p_Target);
 #endif
 
 static std::string GetFeatures();
@@ -190,6 +191,7 @@ static int ApplicationMain(int argc, char* argv[])
     args.erase(args.begin(), args.begin() + 2);
   }
   std::vector<std::string> windowArgs; // forwarded to a spawned backend and to a restart
+  HarborRoute::Target initialTarget;
 #endif
   for (auto it = args.begin(); it != args.end(); ++it)
   {
@@ -207,6 +209,16 @@ static int ApplicationMain(int argc, char* argv[])
       FileUtil::SetApplicationDir(*it);
     }
 #ifdef HARBOR_BUILD
+    else if (*it == "--open-telegram-chat" || *it == "--open-telegram-topic" || *it == "--open-profile")
+    {
+      const auto flag = *it;
+      if (std::distance(it + 1, args.end()) <= 0)
+      { std::cerr << flag << " requires a value.\n"; return 1; }
+      auto& value = flag == "--open-telegram-chat" ? initialTarget.chat : flag == "--open-telegram-topic" ? initialTarget.topic : initialTarget.profile;
+      if (!value.empty()) { std::cerr << flag << " may be supplied only once.\n"; return 1; }
+      value = *++it;
+      if (value.empty()) { std::cerr << flag << " requires a nonempty value.\n"; return 1; }
+    }
     else if ((*it == "-e") || (*it == "--verbose") || (*it == "-ee") || (*it == "--extra-verbose"))
     {
       Log::SetVerboseLevel(((*it == "-e") || (*it == "--verbose")) ? Log::DEBUG_LEVEL : Log::TRACE_LEVEL);
@@ -269,6 +281,10 @@ static int ApplicationMain(int argc, char* argv[])
   HarborTrace::Event("startup.selected", {{"role", sessionFd >= 0 ? "backend" : "window"},
     {"runtime", harborDemo ? "demo" : "telegram"}, {"config_id", HarborTrace::Token(FileUtil::GetApplicationDir())},
     {"mode", isSetup ? "setup" : isRemove ? "remove" : isKeyDump ? "keydump" : !exportDir.empty() ? "export" : "normal"}});
+  try { HarborRoute::Validate(initialTarget); }
+  catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
+  if (initialTarget.Present() && (sessionFd >= 0 || isSetup || isRemove || isKeyDump || !exportDir.empty()))
+  { std::cerr << "Initial conversation selection applies only to an ordinary Harbor window.\n"; return 1; }
   // An ordinary run is a window of the directory's shared session. Setup, removal, export and
   // keydump keep the classic path under the existing locks.
   if ((sessionFd < 0) && !isSetup && !isRemove && !isKeyDump && exportDir.empty())
@@ -281,7 +297,7 @@ static int ApplicationMain(int argc, char* argv[])
     backendArgs.push_back("-d");
     backendArgs.push_back(FileUtil::GetApplicationDir());
     backendArgs.insert(backendArgs.end(), windowArgs.begin(), windowArgs.end());
-    return RunHarborWindow(backendArgs);
+    return RunHarborWindow(backendArgs, initialTarget);
   }
 #endif
 
@@ -837,6 +853,9 @@ void ShowHelp()
   std::cout << "Harbor — a Telegram TUI built on nchat\n\n"
     "Usage: harbor [--demo | -s | -d DIR | --version]\n\n"
     "  --demo     isolated offline demo account\n"
+    "  --open-telegram-chat ID   open this signed decimal chat ID in this window\n"
+    "  --open-telegram-topic ID  select this positive decimal forum topic in that chat\n"
+    "  --open-profile ID        select the exact native Telegram account profile\n"
     "  -s         set up your Telegram account\n"
     "  -d DIR     use a separate configuration directory\n"
     "  -k         inspect terminal key sequences\n"
@@ -953,7 +972,7 @@ void ShowVersion()
 // One Harbor window: the ordinary UI, attached to the directory's shared session backend. It
 // skips the native initialisers and cleanup (log, config, cache, temp, profiles) that only the
 // backend may run.
-static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs)
+static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs, const HarborRoute::Target& p_Target)
 {
   const std::string appDir = FileUtil::GetApplicationDir();
   HarborSession::Attachment attachment = HarborSession::Attach(appDir, FileUtil::GetSelfPath(), p_BackendArgs);
@@ -970,6 +989,14 @@ static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs)
     return 1;
   }
 
+  std::string initialProfile;
+  if (p_Target.Present())
+  {
+    std::vector<std::string> profiles;
+    for (const auto& profile : attachment.profiles) profiles.push_back(profile.id);
+    try { initialProfile = HarborRoute::SelectProfile(p_Target, profiles, harborDemo); }
+    catch (const std::exception& error) { close(attachment.fd); std::cerr << error.what() << '\n'; return 1; }
+  }
   const int slot = HarborSession::AcquireSlot(appDir);
   if (slot < 0)
   {
@@ -981,6 +1008,7 @@ static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs)
   auto connection = std::make_shared<HarborSession::Connection>(attachment.fd, attachment.pending, attachment.connectionId);
   std::shared_ptr<Ui> ui = std::make_shared<Ui>();
   ui->SetSession(slot, [connection] { connection->Lent(); });
+  if (p_Target.Present()) ui->SetInitialChat(initialProfile, p_Target.conversation);
   std::function<void(std::shared_ptr<ServiceMessage>)> messageHandler =
     std::bind(&Ui::MessageHandler, std::ref(*ui), std::placeholders::_1);
   std::vector<std::shared_ptr<Protocol>> remotes;

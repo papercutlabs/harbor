@@ -412,6 +412,11 @@ Harbor::Init()
   HarborTrace::Event("ui.init.attempt");
   // SetSession selects the view slot before Init; classic Harbor keeps slot 0.
   LoadState();
+  if (!m_InitialChat.empty())
+  {
+    m_RestoreChat.clear();
+    m_InitialRouteUntil = TimeUtil::GetCurrentTimeMSec() + 30000;
+  }
   setlocale(LC_ALL, "");
   m_HaveInitialTerminalMode = tcgetattr(STDIN_FILENO, &m_InitialTerminalMode) == 0;
   initscr();
@@ -485,6 +490,13 @@ Harbor::Init()
     }
 }
 void
+Harbor::SetInitialChat(const std::string& profile, const std::string& conversation)
+{
+  m_InitialChat = Key(profile, conversation);
+  m_InitialProfile = profile;
+  m_InitialRouteStatus = "Opening requested conversation…";
+}
+void
 Harbor::SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended)
 {
   m_Remote = true;
@@ -539,6 +551,12 @@ Harbor::Run()
       continue;
     }
     const auto now = TimeUtil::GetCurrentTimeMSec();
+    if (m_InitialRouteUntil && now >= m_InitialRouteUntil)
+    {
+      m_InitialRouteUntil = 0;
+      m_InitialRouteStatus = "Requested conversation unavailable. No other chat was opened. Ctrl+R retries; Ctrl+K chooses another.";
+      m_Dirty = true;
+    }
     // A terminal can lose button-up when the pointer leaves its window.
     if (m_MouseDown && now - m_MouseActivityAt > 30000)
     {
@@ -864,7 +882,12 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
           Fetch(c);
       }
       SortChats();
-      if (!m_RestoreChat.empty() && m_Chats.count(m_RestoreChat))
+      if (!m_InitialChat.empty())
+      {
+        if (m_InitialRouteUntil && m_Chats.count(m_InitialChat))
+          OpenChat(m_InitialChat);
+      }
+      else if (!m_RestoreChat.empty() && m_Chats.count(m_RestoreChat))
         OpenChat(m_RestoreChat);
       else if (m_Current.empty() && !m_ChatOrder.empty())
       {
@@ -1144,6 +1167,10 @@ Harbor::OpenChat(const std::string& key)
     m_Search = m_Reactions = Pending();
   m_Current = key;
   m_RestoreChat.clear();
+  m_InitialChat.clear();
+  m_InitialProfile.clear();
+  m_InitialRouteStatus.clear();
+  m_InitialRouteUntil = 0;
   auto& c = it->second;
   auto r = std::make_shared<SetCurrentChatRequest>();
   r->chatId = c.id;
@@ -1585,7 +1612,10 @@ Harbor::Draw()
       Text(m_ComposerY + 1 + i, m_MainX + 6, textWidth, draftLines[m_ComposerFirstLine + i], Surface);
   }
   else
-    Text(m_Top + 1, m_MainX + 2, m_MainW - 4, L"Waiting for your conversations…", Muted);
+  {
+    Text(m_Top + 1, m_MainX + 2, m_MainW - 4,
+         m_InitialRouteStatus.empty() ? L"Waiting for your conversations…" : W(m_InitialRouteStatus), Muted);
+  }
   Text(
     m_H - 2, m_MainX + 2, std::max(1, m_MainW - 17), m_Browse ? L"MESSAGES · ↑↓ · Enter" : L"COMPOSE", Muted);
   {
@@ -3615,6 +3645,15 @@ Harbor::KeyPress(wint_t k)
   }
   if (k == 18)
   {
+    if (!m_InitialChat.empty())
+    {
+      m_InitialRouteUntil = TimeUtil::GetCurrentTimeMSec() + 30000;
+      m_InitialRouteStatus = "Opening requested conversation…";
+      auto request = std::make_shared<GetChatsRequest>();
+      request->includeForumTopics = true;
+      Request(m_InitialProfile, request);
+      return;
+    }
     auto* c = Current();
     if (c)
     {
@@ -4197,6 +4236,11 @@ void
 Ui::SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended)
 {
   m_Harbor->SetSession(p_Slot, p_OnAuthSuspended);
+}
+void
+Ui::SetInitialChat(const std::string& profile, const std::string& conversation)
+{
+  m_Harbor->SetInitialChat(profile, conversation);
 }
 void
 Ui::RunKeyDump()

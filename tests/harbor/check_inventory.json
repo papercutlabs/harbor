@@ -9,7 +9,8 @@
     "tests/harbor/chat_chrome_smoke.py",
     "tests/harbor/line_delete_smoke.py",
     "tests/harbor/multiwindow_smoke.py",
-    "tests/harbor/operational_trace_smoke.py"
+    "tests/harbor/operational_trace_smoke.py",
+    "tests/harbor/initial_route_smoke.py"
   ],
   "lanes": {
     "static": [
@@ -22,7 +23,8 @@
       "tests/harbor/chat_chrome_smoke.py",
       "tests/harbor/line_delete_smoke.py",
       "tests/harbor/multiwindow_smoke.py",
-      "tests/harbor/operational_trace_smoke.py"
+      "tests/harbor/operational_trace_smoke.py",
+      "tests/harbor/initial_route_smoke.py"
     ],
     "format": [
       "tests/harbor/format_test.cpp"
@@ -96,6 +98,9 @@
     ],
     "warm_handoff": [
       "tests/harbor/warm_handoff_smoke.py"
+    ],
+    "initial_route": [
+      "tests/harbor/initial_route_smoke.py"
     ]
   }
 }

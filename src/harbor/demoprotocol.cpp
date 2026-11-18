@@ -78,6 +78,14 @@ HarborDemo::Seed()
     add("hive", "leo", "Parent group history.", 10);
     add("hive#421", "leo", "Topic-specific history for the Desk conversation.", 100);
     add("hive#550", "asha", "A different topic with separate history.", 90);
+    // Decimal Telegram chat 12345 has native conversation prefix 3039.
+    // Keep numeric routes available to the same offline native launch path.
+    if (getenv("HARBOR_DEMO_ROUTES"))
+    {
+      m_Messages["3039"] = m_Messages["hive"];
+      m_Messages["3039#421"] = m_Messages["hive#421"];
+      m_Messages["3039#550"] = m_Messages["hive#550"];
+    }
   }
   add("kleya", "kleya", "One conversation. A clear place to write. Everything else within reach.", 1);
   if (getenv("HARBOR_DEMO_RICH"))
@@ -346,8 +354,12 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
         for (auto pair : std::vector<std::pair<std::string, std::string>>{
                { "hive", "Team forum" },
                { "hive#421", "Team forum > Desk planning — DEMO-421" },
-               { "hive#550", "Team forum > Infrastructure" } })
+               { "hive#550", "Team forum > Infrastructure" },
+               { "3039", "Routed group" },
+               { "3039#421", "Routed group > Agent" },
+               { "3039#550", "Routed group > Doug" } })
         {
+          if (pair.first.rfind("3039", 0) == 0 && !getenv("HARBOR_DEMO_ROUTES")) continue;
           ContactInfo topic;
           topic.id = pair.first;
           topic.name = pair.second;
