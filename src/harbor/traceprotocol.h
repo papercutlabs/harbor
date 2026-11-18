@@ -57,6 +57,11 @@ inline void Result(const char* stage, const std::shared_ptr<ServiceMessage>& n, 
     HARBOR_TRACE_RESULT(DeleteChat)
     HARBOR_TRACE_RESULT(CreateChat)
     HARBOR_TRACE_RESULT(MarkMessageRead)
+    HARBOR_TRACE_RESULT(SearchMessages)
+    HARBOR_TRACE_RESULT(FindMessage)
+    HARBOR_TRACE_RESULT(AvailableReactions)
+    HARBOR_TRACE_RESULT(UpdatePin)
+    HARBOR_TRACE_RESULT(UpdateArchived)
 #undef HARBOR_TRACE_RESULT
     case SendTypingNotifyType: case SetStatusNotifyType: return;
     default: break; // delivery is known; success may not be represented by this native event

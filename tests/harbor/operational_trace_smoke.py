@@ -120,7 +120,18 @@ with tempfile.TemporaryDirectory(prefix='hbt-') as tmp:
         assert result.returncode == -expected, (mode, result)
         assert events(event), mode
 
+    # The five added native reply mappings preserve false versus true without copying payloads.
+    result = subprocess.run([str(probe), 'typed_outcomes', str(root)], env=env, capture_output=True, timeout=8)
+    assert result.returncode == 0, result
+    typed = events('probe.typed_result')
+    assert len(typed) == 10 and len({r['type'] for r in typed}) == 5, typed
+    assert {int(r['request_id']): r['outcome'] for r in typed} == {
+        n: 'failed' if n % 2 == 0 else 'success' for n in range(200, 210)}
+    assert all(r['connection_id'] == '7' and r['profile_index'] == '0' for r in typed)
+
     retained = trace.read_text()
+    assert 'SECRET_SEARCH_QUERY' not in retained and 'SECRET_NATIVE_ERROR' not in retained
+    assert 'SECRET_PROFILE_NAME' not in retained and 'SECRET_CHAT_IDENTIFIER' not in retained
     assert secret not in retained and 'SECRET_EXCEPTION_BODY' not in retained
     assert 'chatMessage' not in retained and 'quotedText' not in retained and 'SECRET_FIXTURE' not in retained
     evidence = os.environ.get('HARBOR_EVIDENCE_DIR')
