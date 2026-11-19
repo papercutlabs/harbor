@@ -124,6 +124,7 @@ struct TextLayout
   std::vector<std::wstring> lines;
   std::vector<std::vector<size_t>> sources;
   std::vector<Point> cursors;
+  std::vector<size_t> rowStarts, rowEnds;
 };
 TextLayout
 Layout(const std::wstring& source, int width)
@@ -175,6 +176,8 @@ Layout(const std::wstring& source, int width)
       sources.push_back(i);
       col += Width(ch);
     }
+    out.rowStarts.push_back(start);
+    out.rowEnds.push_back(end);
     out.lines.push_back(line);
     out.sources.push_back(std::move(sources));
     for (size_t i = end; i <= next; ++i)
@@ -186,6 +189,17 @@ Layout(const std::wstring& source, int width)
     start = next;
   } while (start <= text.size());
   return out;
+}
+// A soft wrap has two visual insertion stops at the same source offset.
+// Mouse placement can retain the preceding row's end until the next edit.
+TextLayout::Point
+CursorPoint(const TextLayout& layout, size_t cursor, bool rowEnd)
+{
+  if (rowEnd)
+    for (size_t row = 0; row < layout.rowEnds.size(); ++row)
+      if (layout.rowEnds[row] == cursor)
+        return { int(row), Width(layout.lines[row]) };
+  return layout.cursors[cursor];
 }
 std::wstring
 Pad(std::wstring value, int width)
@@ -1750,7 +1764,7 @@ Harbor::Draw()
            Accent);
     for (int row = 0; row < m_ComposerRows + 2; ++row)
       Fill(m_ComposerY + row, m_MainX + 2, m_MainW - 4, Surface);
-    auto point = draftLayout.cursors[std::min(c->cursor, c->draft.size())];
+    auto point = CursorPoint(draftLayout, std::min(c->cursor, c->draft.size()), c->cursorAtRowEnd);
     m_ComposerFirstLine = std::max(0, std::min(m_ComposerFirstLine, int(draftLines.size()) - m_ComposerRows));
     if (point.row < m_ComposerFirstLine)
       m_ComposerFirstLine = point.row;
@@ -1805,7 +1819,7 @@ Harbor::Draw()
     Text(row, 0, m_W, m_DeskStrip.Rows()[row], Muted);
   if (c && m_Menu.empty() && !m_Browse)
   {
-    auto point = draftLayout.cursors[std::min(c->cursor, c->draft.size())];
+    auto point = CursorPoint(draftLayout, std::min(c->cursor, c->draft.size()), c->cursorAtRowEnd);
     int cy = point.row - m_ComposerFirstLine;
     if (cy >= 0 && cy < m_ComposerRows)
     {
@@ -1901,6 +1915,7 @@ Harbor::Insert(const std::wstring& text)
   if (!c)
     return;
   c->cursor = std::min(c->cursor, c->draft.size());
+  c->cursorAtRowEnd = false;
   c->draft.insert(c->cursor, Safe(text));
   c->cursor += text.size();
   m_Browse = false;
@@ -1913,6 +1928,8 @@ Harbor::EditKey(wint_t k)
   if (!c)
     return;
   c->cursor = std::min(c->cursor, c->draft.size());
+  const bool cursorAtRowEnd = c->cursorAtRowEnd;
+  c->cursorAtRowEnd = false;
   if (k == KEY_LEFT)
   {
     if (c->cursor)
@@ -1980,18 +1997,18 @@ Harbor::EditKey(wint_t k)
   }
   else if (k == 21)
   {
-    // Cmd/Ctrl-U deletes back to the start of the current hard line only;
-    // at a line start it leaves the preceding newline alone.
-    size_t start = c->cursor;
-    while (start && c->draft[start - 1] != L'\n')
-      --start;
+    // Use the same layout as the active composer, including caption previews.
+    const int width = m_Menu == "attachments" ? m_DialogW - 6 : m_MainW - 11;
+    const auto layout = Layout(c->draft, std::max(1, width));
+    const auto point = CursorPoint(layout, c->cursor, cursorAtRowEnd);
+    const size_t start = layout.rowStarts[point.row];
     c->draft.erase(start, c->cursor - start);
     c->cursor = start;
   }
   else if (k == KEY_UP || k == KEY_DOWN)
   {
     auto layout = Layout(c->draft, std::max(1, m_MainW - 11));
-    auto point = layout.cursors[c->cursor];
+    auto point = CursorPoint(layout, c->cursor, cursorAtRowEnd);
     int target = point.row + (k == KEY_UP ? -1 : 1);
     size_t best = c->cursor;
     int distance = 1000000;
@@ -3670,7 +3687,8 @@ Harbor::DrawMenu()
     Text(start, x + 2, width - 4, L"Caption · type to add", Dialog);
     auto* c = Current();
     auto layout = Layout(c ? c->draft : L"", std::max(1, width - 6));
-    auto point = layout.cursors[c ? std::min(c->cursor, c->draft.size()) : 0];
+    auto point = CursorPoint(layout, c ? std::min(c->cursor, c->draft.size()) : 0,
+                             c && c->cursorAtRowEnd);
     int first = std::max(0, point.row - 1);
     for (int i = 0; i < 2; ++i)
     {
@@ -3729,7 +3747,8 @@ Harbor::DrawMenu()
   {
     auto* c = Current();
     auto layout = Layout(c ? c->draft : L"", std::max(1, width - 6));
-    auto point = layout.cursors[c ? std::min(c->cursor, c->draft.size()) : 0];
+    auto point = CursorPoint(layout, c ? std::min(c->cursor, c->draft.size()) : 0,
+                             c && c->cursorAtRowEnd);
     curs_set(1);
     move(captionY + 1 + std::min(1, point.row), x + 3 + point.col);
   }
@@ -4155,19 +4174,26 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown)
   auto* c = Current();
   auto placeCursor = [&](const TextLayout& layout, int row, int col)
   {
-    size_t best = c->draft.size();
-    int distance = INT_MAX;
-    for (size_t i = 0; i < layout.cursors.size(); ++i)
-      if (layout.cursors[i].row == row && (i == c->draft.size() || Width(c->draft[i]) > 0))
-      {
-        int delta = std::abs(layout.cursors[i].col - col);
-        if (delta < distance)
+    const size_t start = layout.rowStarts[row], end = layout.rowEnds[row];
+    size_t best = end;
+    int distance = std::abs(Width(layout.lines[row]) - col);
+    // Clicking the last glyph, or the blank cells after it, places after it.
+    size_t last = end;
+    while (last > start && Width(c->draft[last - 1]) == 0)
+      --last;
+    if (last > start && col < layout.cursors[last - 1].col)
+      for (size_t i = start; i < end; ++i)
+        if (Width(c->draft[i]) > 0)
         {
-          distance = delta;
-          best = i;
+          int delta = std::abs(layout.cursors[i].col - col);
+          if (delta < distance)
+          {
+            distance = delta;
+            best = i;
+          }
         }
-      }
     c->cursor = best;
+    c->cursorAtRowEnd = best == end;
     c->selected.clear();
     m_Browse = m_MouseDown = m_MouseDragging = m_HasSelection = false;
   };

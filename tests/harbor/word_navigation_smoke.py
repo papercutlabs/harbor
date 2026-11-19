@@ -1,6 +1,7 @@
 """Option word movement through the real decoder and composer in offline Harbor."""
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unicodedata
 from native_smoke import Terminal
@@ -136,6 +137,8 @@ with tempfile.TemporaryDirectory(prefix='harbor-word-navigation-') as directory:
         t.close()
 
 if __name__ == '__main__':
-    # Existing hosted native smoke entries exercise the session preflight after the composer.
+    # Existing hosted native smoke entries cover session checks and rendered-row editing.
     from session_check_smoke import main as check_session
     check_session()
+    subprocess.run([sys.executable, str(Path(__file__).with_name('composer_rows_smoke.py'))], check=True)
+    subprocess.run([sys.executable, str(Path(__file__).with_name('cursor_click_smoke.py'))], check=True)
