@@ -567,6 +567,22 @@ Harbor::SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended)
 std::string
 Harbor::StatePath() const
 {
+  const auto stable = StableStatePath();
+  return stable.empty() ? LegacyStatePath() : stable;
+}
+std::string
+Harbor::StableStatePath() const
+{
+  if (HarborDeskUpdate::Path().empty()) return {};
+  const char* surface = getenv("CMUX_SURFACE_ID");
+  if (!surface || !*surface || strlen(surface) > 96) return {};
+  for (const char* ch = surface; *ch; ++ch)
+    if (static_cast<unsigned char>(*ch) < 32 || static_cast<unsigned char>(*ch) == 127) return {};
+  return FileUtil::GetApplicationDir() + "/harbor-state.surface-" + StrUtil::StrToHex(surface);
+}
+std::string
+Harbor::LegacyStatePath() const
+{
   const auto path = FileUtil::GetApplicationDir() + "/harbor-state";
   return m_Slot == 0 ? path : path + "." + std::to_string(m_Slot);
 }
@@ -615,6 +631,7 @@ Harbor::Run()
       continue;
     }
     const auto now = TimeUtil::GetCurrentTimeMSec();
+    if (m_DeskStrip.Poll(now)) m_Dirty = true;
     if (m_InitialRouteUntil && now >= m_InitialRouteUntil)
     {
       m_InitialRouteUntil = 0;
@@ -664,12 +681,67 @@ Harbor::Run()
       m_Dirty = false;
     }
     ReadInput();
+    if (m_Running && !AppUtil::IsTerminateRequested()) TryDeskUpdate();
+  }
+}
+void
+Harbor::TryDeskUpdate()
+{
+  if (HarborDeskUpdate::Path().empty()) return;
+  HarborDeskUpdate::State state;
+  state.menu = !m_Menu.empty();
+  state.child = m_InDeskView || m_InColdDeskView;
+  state.routing = m_ControlPending || m_ControlReply >= 0 || m_InitialRouteUntil != 0 || !m_RestoreChat.empty();
+  state.attachments = !m_Attachments.empty() && (m_Menu == "attachments" || m_Menu == "preview");
+  state.mouse = m_MouseDown || m_MouseDragging;
+  state.browse = m_Browse;
+  state.selection = m_HasSelection;
+  state.auth = m_AuthSuspended || !m_AuthOwner.empty();
+  const auto* current = Current();
+  state.latest = current && current->loaded && current->follow && !current->back.set && current->restoreAnchor.empty();
+  state.stable = !StableStatePath().empty() && m_StableStateUsable;
+  state.draftsEmpty = true;
+  const auto empty = [](const Conversation& chat) {
+    return chat.draft.empty() && chat.reply.empty() && chat.editing.empty() && chat.draftBeforeEdit.empty() &&
+      chat.replyBeforeEdit.empty() && chat.recovery.empty();
+  };
+  for (const auto& chat : m_Chats) state.draftsEmpty &= empty(chat.second);
+  for (const auto& chat : m_SavedStates)
+    if (!m_Chats.count(chat.first)) state.draftsEmpty &= empty(chat.second);
+  if (!HarborDeskUpdate::Ready(HarborDeskUpdate::Now(), m_LastInput, state)) return;
+  const auto path = HarborDeskUpdate::Path();
+  const pid_t owner = getppid();
+  const auto revision = HarborDeskUpdate::Request(path, owner, TimeUtil::GetCurrentTimeMSec());
+  if (revision.empty() || !SaveState(true)) return;
+  if (HarborDeskUpdate::Acknowledge(path, owner, revision, TimeUtil::GetCurrentTimeMSec()))
+  {
+    HarborTrace::Event("desk.update.ready", {{"revision", revision}});
+    m_Running = false;
   }
 }
 void
 Harbor::LoadState()
 {
   std::ifstream input(StatePath());
+  // AcquireSlot holds this UI's numeric slot lock until exit. Never inspect another slot.
+  // Read its previous state once; all writes for an update-opted surface use the stable path.
+  if (!StableStatePath().empty())
+  {
+    struct stat info{};
+    if (lstat(StatePath().c_str(), &info) == 0)
+      m_StableStateUsable = S_ISREG(info.st_mode) && bool(input);
+    else if (errno != ENOENT)
+      m_StableStateUsable = false;
+    else if (m_Remote)
+    {
+      if (lstat(LegacyStatePath().c_str(), &info) == 0)
+      {
+        if (S_ISREG(info.st_mode)) input.open(LegacyStatePath());
+        m_StableStateUsable = S_ISREG(info.st_mode) && bool(input);
+      }
+      else if (errno != ENOENT) m_StableStateUsable = false;
+    }
+  }
   std::string line;
   size_t total = 0;
   while (std::getline(input, line) && total < 8 * 1024 * 1024)
@@ -740,8 +812,8 @@ Harbor::LoadState()
     }
   }
 }
-void
-Harbor::SaveState()
+bool
+Harbor::SaveState(bool force)
 {
   std::map<std::string, Conversation> states = m_SavedStates;
   for (const auto& c : m_Chats)
@@ -808,17 +880,20 @@ Harbor::SaveState()
       out << "recover " << StrUtil::StrToHex(item.first) << ' ' << StrUtil::StrToHex(writer.buf) << '\n';
     }
   }
-  if (out.str() == m_LastState)
-    return;
+  if (!force && out.str() == m_LastState)
+    return true;
   const auto path = StatePath();
   std::ofstream file(path + ".tmp", std::ios::trunc);
+  if (!file || chmod((path + ".tmp").c_str(), 0600) != 0) return false;
   file << out.str();
   file.close();
   if (file && rename((path + ".tmp").c_str(), path.c_str()) == 0)
   {
     chmod(path.c_str(), 0600);
     m_LastState = out.str();
+    return true;
   }
+  return false;
 }
 void
 Harbor::ProcessEvents()
@@ -1156,6 +1231,7 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
         m_AuthSuspended = false;
         if (!HarborInputStart())
           throw std::runtime_error("Could not resume terminal input reader");
+        m_LastInput = HarborDeskUpdate::Now();
         refresh();
       }
       break;
@@ -1392,10 +1468,16 @@ Harbor::Draw()
 {
   m_Media->BeginFrame();
   getmaxyx(stdscr, m_H, m_W);
-  if (m_W < 24 || m_H < 12)
+  const int stripHeight = m_DeskStrip.Enabled() ? 4 : 0;
+  if (m_W < 24 || m_H < 12 + stripHeight)
   {
     erase();
-    mvaddstr(0, 0, "Harbor · enlarge terminal");
+    m_Hits.clear();
+    m_CopyCells.clear();
+    for (int row = 0; row < stripHeight; ++row)
+      Text(row, 0, m_W, m_DeskStrip.Rows()[row], Muted);
+    Text(stripHeight, 0, m_W, L"Harbor · enlarge terminal", Muted);
+    curs_set(0);
     refresh();
     m_Media->EndFrame();
     return;
@@ -1415,29 +1497,29 @@ Harbor::Draw()
   // reply context), so neither the draft nor the reading position moves when it appears.
   bool newBar = c && !c->follow && c->unseen > 0;
   const int newBarY = m_Bottom;
-  m_Top = 3;
+  m_Top = 3 + stripHeight;
   bkgd(COLOR_PAIR(Base));
   erase();
   m_Hits.clear();
   m_CopyCells.clear();
   // The current chat is the first row; only a not-yet-connected state takes space on the account row.
-  Text(0, m_MainX + 2, m_MainW - 4, c ? W(c->name) : L"Connecting…", Accent, true);
+  Text(stripHeight, m_MainX + 2, m_MainW - 4, c ? W(c->name) : L"Connecting…", Accent, true);
   const std::wstring connection = !m_AuthOwner.empty()  ? L"● authenticating"
                                   : m_Connected.empty() ? L"○ connecting"
                                                         : L"";
-  Text(1,
+  Text(stripHeight + 1,
        m_MainX + 2,
        m_MainW - 4 - (connection.empty() ? 0 : Width(connection) + 2),
        c ? W(m_Protocols[c->profile]->GetProfileDisplayName()) : L"",
        Muted);
   if (!connection.empty())
-    Text(1, std::max(m_MainX + 2, m_W - 2 - Width(connection)), Width(connection), connection, Warning);
+    Text(stripHeight + 1, std::max(m_MainX + 2, m_W - 2 - Width(connection)), Width(connection), connection, Warning);
   if (m_MainX)
   {
-    for (int y = 0; y < m_H; y++)
+    for (int y = stripHeight; y < m_H; y++)
       Text(y, 24, 1, L"│", Muted);
-    Text(0, 2, 20, L"CONVERSATIONS", Muted);
-    int y = 2;
+    Text(stripHeight, 2, 20, L"CONVERSATIONS", Muted);
+    int y = stripHeight + 2;
     for (auto& key : m_ChatOrder)
     {
       if (y >= m_H - 2)
@@ -1719,6 +1801,8 @@ Harbor::Draw()
     Text(m_H - 1, m_MainX + 2, m_MainW - 4, L"Opening requested conversation…", Accent);
   if (!m_Menu.empty())
     DrawMenu();
+  for (int row = 0; row < stripHeight; ++row)
+    Text(row, 0, m_W, m_DeskStrip.Rows()[row], Muted);
   if (c && m_Menu.empty() && !m_Browse)
   {
     auto point = draftLayout.cursors[std::min(c->cursor, c->draft.size())];
@@ -2388,6 +2472,7 @@ Harbor::ResumeTerminal()
   reset_prog_mode();
   if (!HarborInputStart())
     throw std::runtime_error("Could not resume terminal input reader");
+  m_LastInput = HarborDeskUpdate::Now();
   mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, nullptr);
   printf("\033[?1003l\033[?1002h\033[?2004h\033[>1u");
   fflush(stdout);
@@ -2468,6 +2553,7 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
     PollUiControl();
     // Harbor still owns input during preparation. Launch typeahead cannot become a draft or Desk action.
     const auto event = HarborInputPoll(0);
+    if (event.kind > 0) m_LastInput = HarborDeskUpdate::Now();
     const bool cancel = m_ControlPending || AppUtil::IsTerminateRequested() || event.kind == -1 || (event.kind == 1 && (event.code == 27 || event.code == 3 || (event.code == 'c' && (event.mods & 4))));
     free(event.text);
     return cancel;
@@ -2501,6 +2587,7 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
   sigaction(SIGINT, &oldInt, nullptr); sigaction(SIGQUIT, &oldQuit, nullptr); sigaction(SIGTSTP, &oldTstp, nullptr);
   if (AppUtil::IsTerminateRequested()) return false; // main loop performs ordinary state/terminal cleanup after exact child reap
   if (!HarborInputStart()) throw std::runtime_error("Could not resume terminal input reader");
+  m_LastInput = HarborDeskUpdate::Now();
   mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, nullptr);
   printf("\033[?1003l\033[?1002h\033[?2004h\033[>1u"); fflush(stdout);
   struct winsize size = {};
@@ -3499,7 +3586,7 @@ Harbor::DrawMenu()
 {
   // Flatten the conversation into a quiet backdrop before painting the dialog.
   // Keep the text in place so closing the dialog does not change reading position.
-  for (int row = 0; row < m_H; ++row)
+  for (int row = m_DeskStrip.Enabled() ? 4 : 0; row < m_H; ++row)
     mvchgat(row, 0, m_W, A_NORMAL, Backdrop, nullptr);
   bool picker = m_Menu == "chats" || m_Menu == "forward";
   bool compact = m_Menu == "actions" || m_Menu == "message-tools" || m_Menu == "update" ||
@@ -3965,6 +4052,7 @@ Harbor::ReadInput()
     m_Dirty = true;
   }
   auto event = HarborInputPoll(20);
+  if (event.kind > 0) m_LastInput = HarborDeskUpdate::Now();
   if (event.kind == -1)
     m_Running = false;
   else if (event.kind == 2)

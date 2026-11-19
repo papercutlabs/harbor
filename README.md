@@ -38,6 +38,10 @@ The build script installs into a new directory under `~/.local/harbor/releases/`
 
 For a real Telegram account, run `harbor -s` once and complete Telegram authentication. After setup, use `harbor`. Configuration defaults to `~/.config/harbor`; the offline demo uses a separate directory. Updates do not require account setup again.
 
+Before arranging a terminal for Harbor, Office runs `harbor --check-session` with the same startup arguments. The check uses the effective configuration directory, including the existing order of `--demo` and `-d DIR` (or `--confdir DIR`). It validates initial conversation arguments without opening a conversation. Exit 0 means no running session or a compatible welcome; exit 1 prints the original session error on stderr. It creates no directories, logs, locks, profiles or backend. A live backend sees one transient same-user connection with no requests. Connection and welcome reads share a two-second limit. A stale same-user socket is left intact for ordinary startup to recover. Unknown path types, inaccessible peers, malformed welcomes and incompatible versions fail. Setup, removal, export, keydump, backend, UI-control, help and version modes cannot be combined with the check.
+
+Session versions normally must match exactly. The verified upgrade exceptions are client 0.1.23 with backend 0.1.22, and client 0.1.24 with backend 0.1.22 or 0.1.23. The session and wire sources were identical across those versions before the compatibility repair. No other unequal version pair is accepted. Existing windows and their drafts can stay open during those upgrades.
+
 [Interaction guide and terminal support](doc/harbor.md) · [Latest changes](doc/harbor-0.1.19.md)
 
 ## Development checks
@@ -50,6 +54,7 @@ python3 -m venv .venv
 .venv/bin/python tests/harbor/native_smoke.py
 .venv/bin/python tests/harbor/selection_smoke.py
 .venv/bin/python tests/harbor/desk_handoff_smoke.py
+.venv/bin/python tests/harbor/session_check_smoke.py
 ```
 
 Additional PTY checks cover formatting, history loading, updates, media, and word deletion. They use isolated offline demo accounts and do not send Telegram messages. macOS clipboard checks use a private named pasteboard. Set `HARBOR_EXECUTABLE` to test a specific installed binary.
@@ -57,6 +62,12 @@ Additional PTY checks cover formatting, history loading, updates, media, and wor
 The native implementation has been exercised on macOS/cmux. Other terminal and Linux paths are present but have less runtime coverage. Video playback opens an external player; it is not an in-terminal video player. The update prompt applies already-installed releases rather than downloading or building them automatically.
 
 ## Office Desk entries
+
+`HARBOR_DESK_STRIP_FILE` opts one Harbor UI into a four-row Desk header across the full terminal width. The conversation, account and chat history sit beneath it. Other UIs on the same session keep their normal layout. The producer atomically replaces a UTF-8 file of at most 16 KiB: `pcl.desk.strip.v1<TAB><Unix epoch milliseconds>` on the first line, then exactly four plain-text rows. A final newline is optional. Harbor checks the file while idle and clips each row to the available display cells. Missing, malformed, future-dated or more than 90-second-old data shows four unavailable rows. Terminal controls are rejected. Desk command handoff and return continue to preserve the draft and reading position.
+
+The inline Office owner may also pass `HARBOR_DESK_UPDATE_FILE`. A private regular file containing `pcl.desk.update.v1<TAB><owner PID><TAB><40 lowercase hex revision><NEWLINE>` requests an update. Harbor accepts only its direct parent PID and rejects malformed, oversized, non-private or future-modified files. Harbor acknowledges only after two minutes without terminal input, with the current chat at latest, every chat draft/reply/edit empty, and no menu, Desk child, route, authentication, mouse interaction or selection active. It first saves state, then atomically replaces the request with the same fields under `pcl.desk.updated.v1` and exits this UI normally. A user quit leaves the request unchanged. Office owns the restart; Harbor never launches an updater or stops sibling UIs.
+
+Update-enabled UIs with a valid `CMUX_SURFACE_ID` save to `harbor-state.surface-<hex surface ID>`. On the first load, if that file is absent, a shared-session UI may read its own locked numeric slot file without changing it. It never reads another slot. Existing unavailable or non-regular surface state blocks automatic updates, as does a missing surface identity or failed state save. Reopening the same surface restores its state even if another UI has acquired its former numeric slot. UIs without update opt-in retain their existing numeric state paths.
 
 Started by Office Desk, Harbor receives `HARBOR_DESK_COMMANDS`, a file of tab-separated lines `label<TAB>hint<TAB>argv0<TAB>argv…`. Each line becomes a `Desk · <label>` entry in the Commands menu. Choosing one saves state, releases the terminal (mouse, paste and enhanced-key modes, graphics), runs that argv directly on the same terminal with no shell, then restores the modes and repaints. The Harbor process, chats, drafts, cursors, reply/edit context and reading positions are untouched. A child that could not start or exited non-zero leaves its own output on screen until a new key (`press any key to return to Harbor`; input queued before the message, such as the release of the click that chose the entry, and mouse reports do not count); an interrupted child (Ctrl+C) returns at once. Each outcome is also reported in the status line. Option-/ (or Ctrl+O) opens Commands from any draft and leaves it unchanged; a plain `/` is always draft text. Without the variable Harbor has no Desk entries.
 

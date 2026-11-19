@@ -23,7 +23,7 @@ def package(stage, output, revision, version, target='macos-arm64'):
         if path.is_symlink() or not (path.is_file() or path.is_dir()):
             raise ValueError('HarborRuntime contains a link or special entry')
     manifest = dict(schema=1, revision=revision, version=version, target=target,
-                    capabilities=dict(telegramRouting=1, targetSurface=1),
+                    capabilities=dict(telegramRouting=1, targetSurface=1, deskStrip=1),
                     executableSha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
                     mediaSha256=hashlib.sha256((stage / 'bin/ffmpeg').read_bytes()).hexdigest())
     (stage / 'manifest.json').write_text(json.dumps(manifest) + '\n')
@@ -37,7 +37,7 @@ def package(stage, output, revision, version, target='macos-arm64'):
     with tarfile.open(archive, 'w:gz', format=tarfile.USTAR_FORMAT) as tar:
         tar.add(stage, arcname='harbor-runtime')
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    pin = dict(revision=revision, version=version, telegramRouting=1, targetSurface=1, artifacts={target: dict(tag=tag, asset=name, sha256=digest)})
+    pin = dict(revision=revision, version=version, telegramRouting=1, targetSurface=1, deskStrip=1, artifacts={target: dict(tag=tag, asset=name, sha256=digest)})
     (output / 'harbor-release.json').write_text(json.dumps(pin, indent=2) + '\n')
     (output / (name + '.sha256')).write_text(digest + '  ' + name + '\n')
     return pin

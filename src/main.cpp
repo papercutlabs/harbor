@@ -180,21 +180,29 @@ static int ApplicationMain(int argc, char* argv[])
   bool isKeyDump = false;
   bool isRemove = false;
   bool isSetup = false;
+  bool isExtraDeveloperMode = false;
   std::vector<std::string> args(argv + 1, argv + argc);
 #ifdef HARBOR_BUILD
+  // Mode flags cannot become another option's value. Recognize and remove this one before
+  // parsing any directory/export/route value, matching main's read-only trace decision.
+  const bool checkSession = std::find(args.begin(), args.end(), "--check-session") != args.end();
+  args.erase(std::remove(args.begin(), args.end(), "--check-session"), args.end());
   // Internal backend entry: harbor --session-backend <fd> [args]. Never documented as a command.
   int sessionFd = -1;
   int sessionShutdownLock = -1;
+  bool sessionBackend = false;
   if (!args.empty() && args.front() == HarborSession::BackendArg)
   {
     if (args.size() < 2)
       return 1;
     sessionFd = atoi(args[1].c_str());
+    sessionBackend = true;
     args.erase(args.begin(), args.begin() + 2);
   }
   std::vector<std::string> windowArgs; // forwarded to a spawned backend and to a restart
   HarborRoute::Target initialTarget;
   std::string targetSurface, targetPid;
+  bool showHelp = false, showVersion = false, isExport = false;
 #endif
   for (auto it = args.begin(); it != args.end(); ++it)
   {
@@ -205,6 +213,9 @@ static int ApplicationMain(int argc, char* argv[])
       FileUtil::SetApplicationDir(configHome + "/harbor-demo");
       continue;
     }
+    if (checkSession && (*it == "-d" || *it == "--confdir" || *it == "-x" || *it == "--export") &&
+        std::distance(it + 1, args.end()) <= 0)
+    { std::cerr << *it << " requires a value.\n"; return 1; }
 #endif
     if (((*it == "-d") || (*it == "--confdir")) && (std::distance(it + 1, args.end()) > 0))
     {
@@ -238,8 +249,12 @@ static int ApplicationMain(int argc, char* argv[])
     }
     else if ((*it == "-h") || (*it == "--help"))
     {
+#ifdef HARBOR_BUILD
+      showHelp = true;
+#else
       ShowHelp();
       return 0;
+#endif
     }
     else if ((*it == "-k") || (*it == "--keydump"))
     {
@@ -251,9 +266,7 @@ static int ApplicationMain(int argc, char* argv[])
     }
     else if ((*it == "-mm") || (*it == "--extra-devmode"))
     {
-      std::cout << "dev mode starting in 5 sec\n";
-      sleep(5);
-      AppUtil::SetDeveloperMode(true);
+      isExtraDeveloperMode = true;
     }
     else if ((*it == "-r") || (*it == "--remove"))
     {
@@ -265,11 +278,18 @@ static int ApplicationMain(int argc, char* argv[])
     }
     else if ((*it == "-v") || (*it == "--version"))
     {
+#ifdef HARBOR_BUILD
+      showVersion = true;
+#else
       ShowVersion();
       return 0;
+#endif
     }
     else if (((*it == "-x") || (*it == "--export")) && (std::distance(it + 1, args.end()) > 0))
     {
+#ifdef HARBOR_BUILD
+      isExport = true;
+#endif
       ++it;
       exportDir = *it;
     }
@@ -280,12 +300,36 @@ static int ApplicationMain(int argc, char* argv[])
     }
   }
 
+  if (isExtraDeveloperMode
 #ifdef HARBOR_BUILD
+      && !checkSession
+#endif
+      )
+  {
+    std::cout << "dev mode starting in 5 sec\n";
+    sleep(5);
+    AppUtil::SetDeveloperMode(true);
+  }
+
+#ifdef HARBOR_BUILD
+  if (checkSession && (sessionBackend || isSetup || isRemove || isKeyDump || isExport ||
+                       !targetSurface.empty() || !targetPid.empty() || showHelp || showVersion))
+  { std::cerr << "--check-session applies only to ordinary Harbor startup arguments; setup, removal, export, keydump, backend, UI control, help and version modes cannot be combined with it.\n"; return 1; }
+  if (showHelp) { ShowHelp(); return 0; }
+  if (showVersion) { ShowVersion(); return 0; }
+  try { HarborRoute::Validate(initialTarget); }
+  catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
+  if (checkSession)
+  {
+    if (FileUtil::GetApplicationDir().empty())
+    { std::cerr << "--check-session requires a nonempty configuration directory.\n"; return 1; }
+    const auto error = HarborSession::CheckSession(FileUtil::GetApplicationDir());
+    if (!error.empty()) { std::cerr << error << '\n'; return 1; }
+    return 0;
+  }
   HarborTrace::Event("startup.selected", {{"role", sessionFd >= 0 ? "backend" : "window"},
     {"runtime", harborDemo ? "demo" : "telegram"}, {"config_id", HarborTrace::Token(FileUtil::GetApplicationDir())},
     {"mode", isSetup ? "setup" : isRemove ? "remove" : isKeyDump ? "keydump" : !exportDir.empty() ? "export" : "normal"}});
-  try { HarborRoute::Validate(initialTarget); }
-  catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
   if (initialTarget.Present() && (sessionFd >= 0 || isSetup || isRemove || isKeyDump || !exportDir.empty()))
   { std::cerr << "Initial conversation selection applies only to an ordinary Harbor window.\n"; return 1; }
   if (!targetSurface.empty() || !targetPid.empty())
@@ -863,8 +907,11 @@ void ShowHelp()
 {
 #ifdef HARBOR_BUILD
   std::cout << "Harbor — a Telegram TUI built on nchat\n\n"
-    "Usage: harbor [--demo | -s | -d DIR | --version]\n\n"
+    "Usage: harbor [--demo | -s | -d DIR | --version | --check-session]\n\n"
     "  --demo     isolated offline demo account\n"
+    "  --check-session   read-only startup check for the selected -d/--demo directory\n"
+    "                    exit 0 if absent or compatible; 1 with the session error otherwise\n"
+    "                    two-second connect/welcome limit; no backend start or config writes\n"
     "  --open-telegram-chat ID   open this signed decimal chat ID in this window\n"
     "  --open-telegram-topic ID  select this positive decimal forum topic in that chat\n"
     "  --open-profile ID        select the exact native Telegram account profile\n"
@@ -1083,8 +1130,13 @@ static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs, const 
 int main(int argc, char* argv[])
 {
 #ifdef HARBOR_BUILD
-  HarborTrace::Start(FileUtil::GetSelfPath(), HarborUpdate::Version(), SysUtil::GetBuildInfo());
-  AppUtil::SetSignalObserver(HarborTrace::Signal);
+  // A check must not create even the operational-log directories before parsing its args.
+  const bool checking = std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string(arg) == "--check-session"; });
+  if (!checking)
+  {
+    HarborTrace::Start(FileUtil::GetSelfPath(), HarborUpdate::Version(), SysUtil::GetBuildInfo());
+    AppUtil::SetSignalObserver(HarborTrace::Signal);
+  }
 #endif
   const int result = ApplicationMain(argc, argv);
 #ifdef HARBOR_BUILD

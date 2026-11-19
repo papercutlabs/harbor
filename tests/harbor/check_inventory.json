@@ -10,7 +10,8 @@
     "tests/harbor/line_delete_smoke.py",
     "tests/harbor/multiwindow_smoke.py",
     "tests/harbor/operational_trace_smoke.py",
-    "tests/harbor/initial_route_smoke.py"
+    "tests/harbor/initial_route_smoke.py",
+    "tests/harbor/session_check_smoke.py"
   ],
   "lanes": {
     "static": [
@@ -24,7 +25,8 @@
       "tests/harbor/line_delete_smoke.py",
       "tests/harbor/multiwindow_smoke.py",
       "tests/harbor/operational_trace_smoke.py",
-      "tests/harbor/initial_route_smoke.py"
+      "tests/harbor/initial_route_smoke.py",
+      "tests/harbor/session_check_smoke.py"
     ],
     "format": [
       "tests/harbor/format_test.cpp"
@@ -84,7 +86,8 @@
       "tests/harbor/topics_picker_smoke.py"
     ],
     "word_navigation": [
-      "tests/harbor/word_navigation_smoke.py"
+      "tests/harbor/word_navigation_smoke.py",
+      "tests/harbor/session_check_smoke.py"
     ],
     "reply_preview": [
       "tests/harbor/reply_preview_smoke.py"

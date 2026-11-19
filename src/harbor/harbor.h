@@ -1,6 +1,8 @@
 #pragma once
 #include "format.h"
 #include "deskhost.h"
+#include "deskstrip.h"
+#include "deskupdate.h"
 #include "uicontrol.h"
 #include "protocol.h"
 #include <deque>
@@ -34,6 +36,11 @@ public:
 
 private:
   std::string StatePath() const;
+  std::string LegacyStatePath() const;
+  std::string StableStatePath() const;
+  void TryDeskUpdate();
+  int64_t m_LastInput = HarborDeskUpdate::Now();
+  bool m_StableStateUsable = true;
   struct termios m_InitialTerminalMode = {};
   bool m_HaveInitialTerminalMode = false;
   bool m_Remote = false;
@@ -164,6 +171,7 @@ private:
   bool CellSelected(const CopyCell&) const;
   void CopySelection();
   std::unique_ptr<HarborMedia> m_Media;
+  HarborDeskStrip m_DeskStrip;
   bool m_Running = true, m_Ready = false, m_Dirty = true, m_Browse = false,
        m_Motion = true, m_KeyIsSpecial = false;
   int64_t m_StatusUntil = 0, m_LastDraw = 0, m_AnimatedUntil = 0;
@@ -177,7 +185,7 @@ private:
   std::string Name(const std::string&, const std::string&) const;
   void Request(const std::string&, std::shared_ptr<RequestMessage>);
   void LoadState();
-  void SaveState();
+  bool SaveState(bool force = false);
   void ProcessEvents();
   void Event(std::shared_ptr<ServiceMessage>);
   void SortChats();
