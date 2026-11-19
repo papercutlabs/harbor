@@ -34,8 +34,9 @@ jobs:
       uses: ./.github/actions/setup-ccache
     - name: Install build tools, build, run ctest, write man page, install (make.sh all)
       run: ./make.sh all -y
-    - name: Smoke (side by side) - popup hierarchy, command keys, warm host protocol, warm handoff, word navigation
-      # One after another the five took 98 s on Linux and about 115 s on macOS; side by side about 45 s.
+    - name: Smoke (side by side) - popup hierarchy, command keys, warm host protocol, warm handoff, word navigation, session check, composer rows, cursor click
+      # Eight scripts side by side. word_navigation_smoke used to run session check, composer rows and cursor
+      # click one after another inside itself (about 85 s on Linux, 113 s on macOS); they now run alongside it.
       timeout-minutes: 5
       env:
         HARBOR_EXECUTABLE: ${{ github.workspace }}/build/bin/harbor
@@ -43,7 +44,7 @@ jobs:
         python3 -m venv "$RUNNER_TEMP/harbor-smoke-venv"
         py="$RUNNER_TEMP/harbor-smoke-venv/bin/python"
         "$py" -m pip install -r tests/harbor/requirements.txt
-        scripts="popup_hierarchy_smoke command_keys_smoke warm_host_protocol warm_handoff_smoke word_navigation_smoke"
+        scripts="popup_hierarchy_smoke command_keys_smoke warm_host_protocol warm_handoff_smoke word_navigation_smoke session_check_smoke composer_rows_smoke cursor_click_smoke"
         # A cancelled or timed-out step still shows what each script printed.
         trap 'for s in $scripts; do echo "::group::$s (unfinished)"; cat "$RUNNER_TEMP/$s.log" 2>/dev/null || true; echo "::endgroup::"; done' INT TERM
         for s in $scripts; do
