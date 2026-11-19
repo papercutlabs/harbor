@@ -14,10 +14,10 @@
 # One day is deliberately generous: it leaves a window to download a dry-run
 # build for hand-testing before tagging, and keeps a wide margin over even the
 # longest build, so the sweep can never delete artifacts out from under an
-# in-flight run. Note the cadence stacks on the threshold -- an artifact created
-# just after a sweep survives until the one after next, so real hold time is
-# 24-48 h. That is ~3% of the monthly quota per run, which is the accepted cost
-# of keeping this simple.
+# in-flight run.
+#
+# It runs only when started by hand (workflow_dispatch); there is no schedule.
+# An artifact is deleted at the first manual sweep after it is a day old.
 
 name: Cleanup
 
