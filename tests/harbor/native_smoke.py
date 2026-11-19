@@ -103,10 +103,9 @@ class Terminal:
         while text not in self.text and time.monotonic()<end: self.pump(.1)
         assert text in self.text, f'Missing {text!r}:\n{self.text}'
     def clear_draft(self, lines=1):
-        # Ctrl+U deletes only the current hard line; Backspace then joins the previous one.
+        # Clear independently of display-row wrapping and the line-delete behavior under test.
         self.send(b'\x05')
-        for _ in range(lines-1): self.send(b'\x15');self.send(b'\x7f')
-        self.send(b'\x15')
+        self.send(b'\x17' * max(64, lines * 16))
     def picker(self, name):
         self.send(b'\x0b');self.expect('Find a conversation');self.send(name);self.send(b'\r')
         deadline=time.monotonic()+3
