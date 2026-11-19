@@ -27,6 +27,14 @@ std::string SocketPath(const std::string& p_AppDir);
 // Empty when p_Path fits sockaddr_un; otherwise a diagnosis naming the limit.
 std::string SocketPathProblem(const std::string& p_Path);
 
+// Exact versions plus individually verified client/backend upgrade pairs. This is directional.
+bool CompatibleVersions(const std::string& p_Client, const std::string& p_Backend);
+
+// Read-only, bounded check of an existing same-user session. Empty means absent (including a
+// stale same-user socket) or compatible. Never creates a directory, lock, backend or profile.
+// A live peer sees only a transient connection; no requests or terminal descriptors are sent.
+std::string CheckSession(const std::string& p_AppDir);
+
 struct Profile
 {
   std::string id;

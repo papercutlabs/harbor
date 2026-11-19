@@ -794,12 +794,34 @@ SocketPathTests()
   std::cout << "socket path: long directory diagnosed\n";
 }
 
+static void
+VersionTests()
+{
+  // Preserve exact-version semantics, even for a future build's own identical peer.
+  for (const std::string version : { "0.1.21", "0.1.22", "0.1.23", "0.1.24", "0.1.25" })
+    assert(HarborSession::CompatibleVersions(version, version));
+  assert(HarborSession::CompatibleVersions("0.1.23", "0.1.22"));
+  assert(HarborSession::CompatibleVersions("0.1.24", "0.1.22"));
+  assert(HarborSession::CompatibleVersions("0.1.24", "0.1.23"));
+  for (const std::string client : { "0.1.21", "0.1.22", "0.1.23", "0.1.24", "0.1.25", "1.0.0", "unknown", "" })
+    for (const std::string backend : { "0.1.21", "0.1.22", "0.1.23", "0.1.24", "0.1.25", "1.0.0", "unknown", "" })
+    {
+      const bool expected = client == backend || (client == "0.1.23" && backend == "0.1.22") ||
+                            (client == "0.1.24" && (backend == "0.1.22" || backend == "0.1.23"));
+      assert(HarborSession::CompatibleVersions(client, backend) == expected);
+    }
+  assert(!HarborSession::CompatibleVersions("0.1.23", "0.1.22.1"));
+  assert(!HarborSession::CompatibleVersions("0.1.23", "v0.1.22"));
+  std::cout << "session versions: exact equality and only the verified directional 23/24 upgrade pairs\n";
+}
+
 int
 main()
 {
   CodecTests();
   ViewChatTests();
   SocketPathTests();
+  VersionTests();
   RoutingTests();
   UnknownSendTests(false);
   UnknownSendTests(true);

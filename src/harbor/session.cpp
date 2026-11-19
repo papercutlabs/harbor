@@ -4,6 +4,7 @@
 #include "traceprotocol.h"
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <condition_variable>
 #include <csignal>
 #include <cstdio>
@@ -33,6 +34,25 @@ namespace
 // headers) per peer; kernel socket buffers are separate. Beyond that only this
 // window is closed, with a clear retained-session-ended outcome.
 const size_t QueueLimit = 2 * (size_t)HarborWire::MaxFrame;
+
+using Deadline = std::chrono::steady_clock::time_point;
+
+// One absolute deadline bounds both connection setup and the entire welcome, including a
+// peer that keeps sending partial bytes. Ordinary windows retain their existing blocking I/O.
+bool
+WaitSocket(int fd, short events, const Deadline& deadline)
+{
+  while (true)
+  {
+    const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+    if (left <= 0) { errno = ETIMEDOUT; return false; }
+    pollfd p = { fd, events, 0 };
+    const int rv = poll(&p, 1, int(left));
+    if (rv < 0 && errno == EINTR) continue;
+    if (rv == 0) errno = ETIMEDOUT;
+    return rv > 0;
+  }
+}
 
 // Native prompts keep using std::cin and tty fd 0 (including GetPass termios).
 // Only their stream buffer changes: poll includes a cancellation pipe, so a lender's
@@ -127,19 +147,23 @@ WriteAll(int fd, const std::string& data)
 
 // Reads one complete frame (blocking). False on EOF or a malformed frame.
 bool
-ReadFrame(int fd, std::string& buf, HarborWire::Kind& kind, std::string& payload)
+ReadFrame(int fd, std::string& buf, HarborWire::Kind& kind, std::string& payload, const Deadline* deadline = nullptr)
 {
   while (true)
   {
+    if (deadline && std::chrono::steady_clock::now() >= *deadline)
+    { errno = ETIMEDOUT; return false; }
     bool have = false;
     if (!HarborWire::NextFrame(buf, kind, payload, have))
     { HarborTrace::Event("socket.frame.rejected"); return false; }
     if (have)
       return true;
+    if (deadline && !WaitSocket(fd, POLLIN, *deadline)) return false;
     char chunk[65536];
-    ssize_t n = recv(fd, chunk, sizeof(chunk), 0);
+    ssize_t n = recv(fd, chunk, sizeof(chunk), deadline ? MSG_DONTWAIT : 0);
     if (n < 0 && errno == EINTR)
       continue;
+    if (deadline && n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) continue;
     if (n <= 0)
     { HarborTrace::Os("socket.read.ended", n < 0 ? errno : 0, {{"cause", n == 0 ? "eof" : "read_error"}}); return false; }
     buf.append(chunk, (size_t)n);
@@ -204,12 +228,23 @@ SocketPathProblem(const std::string& p_Path)
          "\nChoose a shorter configuration directory with -d.";
 }
 
+bool
+CompatibleVersions(const std::string& p_Client, const std::string& p_Backend)
+{
+  // Before these upgrade exceptions, session.cpp, session.h, wire.h and protocol.h were
+  // byte-identical in released 0.1.22 (c6e8ea23), strip 0.1.23 (6618ded3) and composer
+  // 0.1.24 (c23d36ef). No semver range: a new unequal pair needs its own protocol check.
+  return p_Client == p_Backend ||
+         (p_Client == "0.1.23" && p_Backend == "0.1.22") ||
+         (p_Client == "0.1.24" && (p_Backend == "0.1.22" || p_Backend == "0.1.23"));
+}
+
 // Window side ---------------------------------------------------------------------------------
 
 namespace
 {
 int
-ConnectSocket(const std::string& path)
+ConnectSocket(const std::string& path, const Deadline* deadline = nullptr)
 {
   int fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (fd < 0)
@@ -218,7 +253,19 @@ ConnectSocket(const std::string& path)
   memset(&addr, 0, sizeof(addr));
   addr.sun_family = AF_UNIX;
   strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
-  const int connected = connect(fd, (sockaddr*)&addr, sizeof(addr));
+  if (deadline && fcntl(fd, F_SETFL, O_NONBLOCK) != 0)
+  { const int error = errno; close(fd); errno = error; return -1; }
+  int connected = connect(fd, (sockaddr*)&addr, sizeof(addr));
+  if (deadline && connected != 0 && errno == EINPROGRESS)
+  {
+    if (WaitSocket(fd, POLLOUT, *deadline))
+    {
+      int error = 0;
+      socklen_t size = sizeof(error);
+      if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size) == 0)
+      { connected = error == 0 ? 0 : -1; if (error) errno = error; }
+    }
+  }
   if (connected != 0 || !SameUser(fd))
   {
     const int error = connected != 0 ? errno : EACCES;
@@ -234,20 +281,22 @@ ConnectSocket(const std::string& path)
 }
 
 bool
-ReadWelcome(int fd, std::string& buf, Attachment& out)
+ReadWelcome(int fd, std::string& buf, Attachment& out, const Deadline* deadline = nullptr)
 {
   HarborWire::Kind kind;
   std::string payload;
-  if (!ReadFrame(fd, buf, kind, payload))
+  errno = 0;
+  if (!ReadFrame(fd, buf, kind, payload, deadline))
   {
     HarborTrace::Event("handshake.failed", {{"cause", "frame_or_eof"}});
-    out.error = "Harbor's session ended before it started.";
+    out.error = deadline && errno == ETIMEDOUT ? "Harbor's session did not send a welcome within two seconds. Try again; if it persists, close the other Harbor windows and run harbor again." :
+                                               "Harbor's session ended before it started.";
     return false;
   }
   if (kind == HarborWire::KindEnded)
   {
     HarborTrace::Event("handshake.failed", {{"cause", "backend_startup_failure"}});
-    out.error = payload;
+    out.error = payload.empty() ? "Harbor's session ended before it started." : payload;
     return false;
   }
   HarborWire::Reader r(payload);
@@ -258,7 +307,7 @@ ReadWelcome(int fd, std::string& buf, Attachment& out)
     return false;
   }
   const std::string version = r.S();
-  if (r.ok && version != HarborUpdate::Version())
+  if (r.ok && !CompatibleVersions(HarborUpdate::Version(), version))
   {
     HarborTrace::Event("handshake.failed", {{"cause", "version_mismatch"}, {"expected_version", HarborUpdate::Version()}, {"peer_version", version.size() <= 24 && version.find_first_not_of("0123456789.") == std::string::npos ? version : "invalid"}});
     out.error = "Harbor " + version + " is still running in other windows; this is Harbor " +
@@ -283,6 +332,46 @@ ReadWelcome(int fd, std::string& buf, Attachment& out)
   HarborTrace::Event("handshake.ready", {{"peer_version", version}, {"connection_id", HarborTrace::Number(out.connectionId)}, {"profiles", HarborTrace::Number(out.profiles.size())}});
   return true;
 }
+}
+
+std::string
+CheckSession(const std::string& p_AppDir)
+{
+  const std::string path = SocketPath(p_AppDir);
+  const std::string problem = SocketPathProblem(path);
+  if (!problem.empty()) return problem;
+
+  // Only an absent path or a stale, same-user socket is a safe no-session result. Do not
+  // follow symlinks, certify another user's endpoint or hide filesystem/access failures.
+  struct stat st = {};
+  if (lstat(path.c_str(), &st) != 0)
+  {
+    if (errno == ENOENT) return {};
+    return "Could not inspect Harbor's session socket " + path + ": " + strerror(errno);
+  }
+  if (!S_ISSOCK(st.st_mode) || st.st_uid != geteuid())
+    return "Harbor's session path is not a same-user socket: " + path + ". Choose a different configuration directory with -d.";
+
+  const Deadline deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  const int fd = ConnectSocket(path, &deadline);
+  if (fd < 0)
+  {
+    const int error = errno;
+    if (error == ENOENT) return {};
+    if (error == ECONNREFUSED)
+    {
+      struct stat now = {};
+      if (lstat(path.c_str(), &now) == 0 && S_ISSOCK(now.st_mode) && now.st_uid == geteuid() &&
+          now.st_dev == st.st_dev && now.st_ino == st.st_ino)
+        return {}; // leave the same stale socket untouched; Attach owns locked recovery
+    }
+    return "Could not connect to Harbor's session socket " + path + ": " + strerror(error);
+  }
+  std::string buf;
+  Attachment out;
+  const bool ok = ReadWelcome(fd, buf, out, &deadline);
+  close(fd);
+  return ok ? std::string() : out.error;
 }
 
 Attachment

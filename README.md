@@ -38,6 +38,10 @@ The build script installs into a new directory under `~/.local/harbor/releases/`
 
 For a real Telegram account, run `harbor -s` once and complete Telegram authentication. After setup, use `harbor`. Configuration defaults to `~/.config/harbor`; the offline demo uses a separate directory. Updates do not require account setup again.
 
+Before arranging a terminal for Harbor, Office runs `harbor --check-session` with the same startup arguments. The check uses the effective configuration directory, including the existing order of `--demo` and `-d DIR` (or `--confdir DIR`). It validates initial conversation arguments without opening a conversation. Exit 0 means no running session or a compatible welcome; exit 1 prints the original session error on stderr. It creates no directories, logs, locks, profiles or backend. A live backend sees one transient same-user connection with no requests. Connection and welcome reads share a two-second limit. A stale same-user socket is left intact for ordinary startup to recover. Unknown path types, inaccessible peers, malformed welcomes and incompatible versions fail. Setup, removal, export, keydump, backend, UI-control, help and version modes cannot be combined with the check.
+
+Session versions normally must match exactly. The verified upgrade exceptions are client 0.1.23 with backend 0.1.22, and client 0.1.24 with backend 0.1.22 or 0.1.23. The session and wire sources were identical across those versions before the compatibility repair. No other unequal version pair is accepted. Existing windows and their drafts can stay open during those upgrades.
+
 [Interaction guide and terminal support](doc/harbor.md) · [Latest changes](doc/harbor-0.1.19.md)
 
 ## Development checks
@@ -50,6 +54,7 @@ python3 -m venv .venv
 .venv/bin/python tests/harbor/native_smoke.py
 .venv/bin/python tests/harbor/selection_smoke.py
 .venv/bin/python tests/harbor/desk_handoff_smoke.py
+.venv/bin/python tests/harbor/session_check_smoke.py
 ```
 
 Additional PTY checks cover formatting, history loading, updates, media, and word deletion. They use isolated offline demo accounts and do not send Telegram messages. macOS clipboard checks use a private named pasteboard. Set `HARBOR_EXECUTABLE` to test a specific installed binary.

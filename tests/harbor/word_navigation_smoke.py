@@ -134,3 +134,8 @@ with tempfile.TemporaryDirectory(prefix='harbor-word-navigation-') as directory:
         print('PASS word arrows/Alt-b/f, boundaries, whitespace, punctuation, Unicode, modifiers, paste, menus, caption and Desk cursor retention')
     finally:
         t.close()
+
+if __name__ == '__main__':
+    # Existing hosted native smoke entries exercise the session preflight after the composer.
+    from session_check_smoke import main as check_session
+    check_session()
