@@ -78,7 +78,17 @@ for name in lanes:
             sys.exit(f"input_decoding needs Go ({go}); none found, so no decoder evidence")
         argv, cwd = [go, "test", "./..."], root / "src/harbor/input"
     else:
-        argv = [python, inventory["lanes"][name][0]]
+        # A lane may name several Python checks (word_navigation names its component
+        # scripts); each runs once, in order. Non-Python entries such as a C++ probe
+        # source are inputs to the lane's first script, not checks of their own.
+        scripts = [s for s in inventory["lanes"][name] if s.endswith(".py")]
+        for script in scripts[:-1]:
+            argv = [python, script]
+            print("RUN", name, repr(argv), flush=True)
+            result = subprocess.run(argv, cwd=cwd, env=env, timeout=240)
+            if result.returncode:
+                sys.exit(result.returncode)
+        argv = [python, scripts[-1]]
     print("RUN", name, repr(argv), flush=True)
     if name == "media":
         with tempfile.TemporaryDirectory(prefix="harbor-media-check-") as directory:
