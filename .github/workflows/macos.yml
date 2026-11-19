@@ -33,14 +33,25 @@ jobs:
       uses: ./.github/actions/setup-ccache
     - name: Build macOS
       run: ./make.sh all -y
-    - name: Smoke test Harbor commands and popup hierarchy
+    - name: Smoke (side by side) - popup hierarchy, command keys, warm host protocol, warm handoff, word navigation
       env:
         HARBOR_EXECUTABLE: ${{ github.workspace }}/build/bin/harbor
       run: |
         python3 -m venv "$RUNNER_TEMP/harbor-smoke-venv"
-        "$RUNNER_TEMP/harbor-smoke-venv/bin/python" -m pip install -r tests/harbor/requirements.txt
-        "$RUNNER_TEMP/harbor-smoke-venv/bin/python" tests/harbor/popup_hierarchy_smoke.py
-        "$RUNNER_TEMP/harbor-smoke-venv/bin/python" tests/harbor/command_keys_smoke.py
-        "$RUNNER_TEMP/harbor-smoke-venv/bin/python" tests/harbor/warm_host_protocol.py
-        "$RUNNER_TEMP/harbor-smoke-venv/bin/python" tests/harbor/warm_handoff_smoke.py
-        "$RUNNER_TEMP/harbor-smoke-venv/bin/python" tests/harbor/word_navigation_smoke.py
+        py="$RUNNER_TEMP/harbor-smoke-venv/bin/python"
+        "$py" -m pip install -r tests/harbor/requirements.txt
+        scripts="popup_hierarchy_smoke command_keys_smoke warm_host_protocol warm_handoff_smoke word_navigation_smoke"
+        for s in $scripts; do
+          # The step's shell runs with -e, so the exit code is caught with || rather than read from $?.
+          ( start=$SECONDS; rc=0; "$py" "tests/harbor/$s.py" > "$RUNNER_TEMP/$s.log" 2>&1 || rc=$?
+            echo "$rc $((SECONDS - start))" > "$RUNNER_TEMP/$s.rc" ) &
+        done
+        wait
+        failed=0
+        for s in $scripts; do
+          rc=missing; secs=unknown
+          [ -r "$RUNNER_TEMP/$s.rc" ] && read -r rc secs < "$RUNNER_TEMP/$s.rc"
+          echo "::group::$s exit=$rc ${secs}s"; cat "$RUNNER_TEMP/$s.log"; echo "::endgroup::"
+          [ "$rc" = 0 ] || { echo "::error::$s failed (exit $rc)"; failed=1; }
+        done
+        exit $failed
