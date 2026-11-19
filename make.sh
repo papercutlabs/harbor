@@ -411,10 +411,10 @@ if [[ "${INSTALL}" == "1" ]]; then
   # check if we are already root
   if [ "$EUID" -ne 0 ]; then
     echo "-- Using ${INSTALL_CMD:+$INSTALL_CMD }make install"
-    cd build && ${INSTALL_CMD} make install && cd .. || exiterr "install failed (${OS}), exiting."
+    cd build && ${INSTALL_CMD} make install/fast && cd .. || exiterr "install failed (${OS}), exiting."
   else
     echo "-- Using make install"
-    cd build && make install && cd .. || exiterr "install failed (${OS}), exiting."
+    cd build && make install/fast && cd .. || exiterr "install failed (${OS}), exiting."
   fi
 fi
 

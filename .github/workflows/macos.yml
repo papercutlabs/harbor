@@ -30,11 +30,15 @@ jobs:
       with:
         persist-credentials: false
     - name: Setup ccache
+      id: ccache
       uses: ./.github/actions/setup-ccache
-    - name: Build macOS
+    - name: Install build tools, build, run ctest, write man page, install (make.sh all)
       run: ./make.sh all -y
-    - name: Smoke (side by side) - popup hierarchy, command keys, warm host protocol, warm handoff, word navigation
-      # One after another the five took 98 s on Linux and about 115 s on macOS; side by side about 45 s.
+    - name: Smoke - popup hierarchy, command keys, warm host protocol, warm handoff side by side, then word navigation alone
+      # One after another the five took 98 s on Linux and about 115 s on macOS. All five side by side took
+      # 88 s and 112 s, because word navigation slowed fourfold when sharing the runner (21 s to 85 s on Linux,
+      # 27 s to 107 s on macOS) while the other four kept their times. So the four share the runner and word
+      # navigation runs by itself after them.
       timeout-minutes: 5
       env:
         HARBOR_EXECUTABLE: ${{ github.workspace }}/build/bin/harbor
@@ -42,20 +46,30 @@ jobs:
         python3 -m venv "$RUNNER_TEMP/harbor-smoke-venv"
         py="$RUNNER_TEMP/harbor-smoke-venv/bin/python"
         "$py" -m pip install -r tests/harbor/requirements.txt
-        scripts="popup_hierarchy_smoke command_keys_smoke warm_host_protocol warm_handoff_smoke word_navigation_smoke"
+        shared="popup_hierarchy_smoke command_keys_smoke warm_host_protocol warm_handoff_smoke"
+        alone="word_navigation_smoke"
         # A cancelled or timed-out step still shows what each script printed.
-        trap 'for s in $scripts; do echo "::group::$s (unfinished)"; cat "$RUNNER_TEMP/$s.log" 2>/dev/null || true; echo "::endgroup::"; done' INT TERM
-        for s in $scripts; do
+        trap 'for s in $shared $alone; do echo "::group::$s (unfinished)"; cat "$RUNNER_TEMP/$s.log" 2>/dev/null || true; echo "::endgroup::"; done; exit 1' INT TERM
+        run_smoke() {
           # The step's shell runs with -e, so the exit code is caught with || rather than read from $?.
-          ( start=$SECONDS; rc=0; "$py" "tests/harbor/$s.py" > "$RUNNER_TEMP/$s.log" 2>&1 || rc=$?
-            echo "$rc $((SECONDS - start))" > "$RUNNER_TEMP/$s.rc" ) &
-        done
+          local s=$1 start=$SECONDS rc=0
+          "$py" "tests/harbor/$s.py" > "$RUNNER_TEMP/$s.log" 2>&1 || rc=$?
+          echo "$rc $((SECONDS - start))" > "$RUNNER_TEMP/$s.rc"
+        }
+        for s in $shared; do run_smoke "$s" & done
         wait
+        run_smoke "$alone"
         failed=0
-        for s in $scripts; do
+        for s in $shared $alone; do
           rc=missing; secs=unknown
           [ -r "$RUNNER_TEMP/$s.rc" ] && { read -r rc secs < "$RUNNER_TEMP/$s.rc" || rc=empty; }
           echo "::group::$s exit=$rc ${secs}s"; cat "$RUNNER_TEMP/$s.log" || true; echo "::endgroup::"
           [ "$rc" = 0 ] || { echo "::error::$s failed (exit $rc)"; failed=1; }
         done
         exit $failed
+    - name: Save build cache (main only)
+      if: ${{ !cancelled() && github.event_name == 'push' }}
+      uses: actions/cache/save@v5
+      with:
+        path: ${{ steps.ccache.outputs.path }}
+        key: ${{ steps.ccache.outputs.key }}

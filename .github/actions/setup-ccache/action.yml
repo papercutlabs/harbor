@@ -1,5 +1,5 @@
 name: setup-ccache
-description: Install ccache and restore the compiler cache for hosted builds.
+description: Restore the compiler cache for hosted builds and point ccache at it. make.sh deps installs ccache itself.
 
 inputs:
   max_size:
@@ -10,21 +10,17 @@ inputs:
     description: Cache key prefix
     default: ""   # leave empty, auto-use repo name
 
+outputs:
+  key:
+    description: The key a run saves its cache under. The workflow saves it on pushes to main only.
+    value: ${{ steps.cache-key.outputs.key }}
+  path:
+    description: The cache directory.
+    value: ${{ steps.cache-key.outputs.path }}
+
 runs:
   using: composite
   steps:
-    - name: Install ccache (Linux)
-      if: runner.os == 'Linux'
-      shell: bash
-      run: sudo apt-get update && sudo apt-get install -y ccache
-
-    - name: Install ccache (macOS)
-      if: runner.os == 'macOS'
-      shell: bash
-      run: |
-        export HOMEBREW_NO_AUTO_UPDATE=1
-        brew install ccache
-
     - name: Compute cache key
       id: cache-key
       shell: bash
@@ -36,21 +32,32 @@ runs:
         fi
         COMPILER_VER="$(cc --version 2>&1 | head -1)"
         COMPILER_HASH="$(echo "${COMPILER_VER}" | shasum -a 256 | cut -d' ' -f1 | head -c 16)"
-        echo "prefix=${PREFIX}" >> "$GITHUB_OUTPUT"
-        echo "ccache_dir=$HOME/.ccache" >> "$GITHUB_OUTPUT"
-        echo "compiler_hash=${COMPILER_HASH}" >> "$GITHUB_OUTPUT"
+        OS_KEY="${PREFIX}-${RUNNER_OS}-"
+        COMPILER_KEY="${OS_KEY}${COMPILER_HASH}-"
+        CMAKE_KEY="${COMPILER_KEY}${{ hashFiles('**/CMakeLists.txt','**/*.cmake') }}-"
+        # A key unique to this run, so the cache saved after each push to main is a new entry
+        # rather than a hit on an existing key that actions/cache would never overwrite.
+        echo "key=${CMAKE_KEY}${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+        echo "cmake_key=${CMAKE_KEY}" >> "$GITHUB_OUTPUT"
+        echo "compiler_key=${COMPILER_KEY}" >> "$GITHUB_OUTPUT"
+        echo "os_key=${OS_KEY}" >> "$GITHUB_OUTPUT"
+        echo "path=$HOME/.ccache" >> "$GITHUB_OUTPUT"
 
     - name: Restore ccache
+      # Restore only: the newest cache main saved under the closest matching key.
       # Check https://github.com/actions/cache/releases for newer major versions.
-      uses: actions/cache@v5
+      uses: actions/cache/restore@v5
       with:
-        path: ${{ steps.cache-key.outputs.ccache_dir }}
-        key: ${{ steps.cache-key.outputs.prefix }}-${{ runner.os }}-${{ steps.cache-key.outputs.compiler_hash }}-${{ hashFiles('**/CMakeLists.txt','**/*.cmake') }}
+        path: ${{ steps.cache-key.outputs.path }}
+        key: ${{ steps.cache-key.outputs.key }}
         restore-keys: |
-          ${{ steps.cache-key.outputs.prefix }}-${{ runner.os }}-
+          ${{ steps.cache-key.outputs.cmake_key }}
+          ${{ steps.cache-key.outputs.compiler_key }}
+          ${{ steps.cache-key.outputs.os_key }}
 
     - name: Configure ccache
+      # Through ccache's own environment variables, so ccache need not be installed yet.
       shell: bash
       run: |
-        ccache --set-config=cache_dir=${{ steps.cache-key.outputs.ccache_dir }}
-        ccache --set-config=max_size=${{ inputs.max_size }}
+        echo "CCACHE_DIR=${{ steps.cache-key.outputs.path }}" >> "$GITHUB_ENV"
+        echo "CCACHE_MAXSIZE=${{ inputs.max_size }}" >> "$GITHUB_ENV"
