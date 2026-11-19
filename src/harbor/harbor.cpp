@@ -615,6 +615,7 @@ Harbor::Run()
       continue;
     }
     const auto now = TimeUtil::GetCurrentTimeMSec();
+    if (m_DeskStrip.Poll(now)) m_Dirty = true;
     if (m_InitialRouteUntil && now >= m_InitialRouteUntil)
     {
       m_InitialRouteUntil = 0;
@@ -1392,10 +1393,16 @@ Harbor::Draw()
 {
   m_Media->BeginFrame();
   getmaxyx(stdscr, m_H, m_W);
-  if (m_W < 24 || m_H < 12)
+  const int stripHeight = m_DeskStrip.Enabled() ? 4 : 0;
+  if (m_W < 24 || m_H < 12 + stripHeight)
   {
     erase();
-    mvaddstr(0, 0, "Harbor · enlarge terminal");
+    m_Hits.clear();
+    m_CopyCells.clear();
+    for (int row = 0; row < stripHeight; ++row)
+      Text(row, 0, m_W, m_DeskStrip.Rows()[row], Muted);
+    Text(stripHeight, 0, m_W, L"Harbor · enlarge terminal", Muted);
+    curs_set(0);
     refresh();
     m_Media->EndFrame();
     return;
@@ -1415,29 +1422,29 @@ Harbor::Draw()
   // reply context), so neither the draft nor the reading position moves when it appears.
   bool newBar = c && !c->follow && c->unseen > 0;
   const int newBarY = m_Bottom;
-  m_Top = 3;
+  m_Top = 3 + stripHeight;
   bkgd(COLOR_PAIR(Base));
   erase();
   m_Hits.clear();
   m_CopyCells.clear();
   // The current chat is the first row; only a not-yet-connected state takes space on the account row.
-  Text(0, m_MainX + 2, m_MainW - 4, c ? W(c->name) : L"Connecting…", Accent, true);
+  Text(stripHeight, m_MainX + 2, m_MainW - 4, c ? W(c->name) : L"Connecting…", Accent, true);
   const std::wstring connection = !m_AuthOwner.empty()  ? L"● authenticating"
                                   : m_Connected.empty() ? L"○ connecting"
                                                         : L"";
-  Text(1,
+  Text(stripHeight + 1,
        m_MainX + 2,
        m_MainW - 4 - (connection.empty() ? 0 : Width(connection) + 2),
        c ? W(m_Protocols[c->profile]->GetProfileDisplayName()) : L"",
        Muted);
   if (!connection.empty())
-    Text(1, std::max(m_MainX + 2, m_W - 2 - Width(connection)), Width(connection), connection, Warning);
+    Text(stripHeight + 1, std::max(m_MainX + 2, m_W - 2 - Width(connection)), Width(connection), connection, Warning);
   if (m_MainX)
   {
-    for (int y = 0; y < m_H; y++)
+    for (int y = stripHeight; y < m_H; y++)
       Text(y, 24, 1, L"│", Muted);
-    Text(0, 2, 20, L"CONVERSATIONS", Muted);
-    int y = 2;
+    Text(stripHeight, 2, 20, L"CONVERSATIONS", Muted);
+    int y = stripHeight + 2;
     for (auto& key : m_ChatOrder)
     {
       if (y >= m_H - 2)
@@ -1719,6 +1726,8 @@ Harbor::Draw()
     Text(m_H - 1, m_MainX + 2, m_MainW - 4, L"Opening requested conversation…", Accent);
   if (!m_Menu.empty())
     DrawMenu();
+  for (int row = 0; row < stripHeight; ++row)
+    Text(row, 0, m_W, m_DeskStrip.Rows()[row], Muted);
   if (c && m_Menu.empty() && !m_Browse)
   {
     auto point = draftLayout.cursors[std::min(c->cursor, c->draft.size())];
@@ -3499,7 +3508,7 @@ Harbor::DrawMenu()
 {
   // Flatten the conversation into a quiet backdrop before painting the dialog.
   // Keep the text in place so closing the dialog does not change reading position.
-  for (int row = 0; row < m_H; ++row)
+  for (int row = m_DeskStrip.Enabled() ? 4 : 0; row < m_H; ++row)
     mvchgat(row, 0, m_W, A_NORMAL, Backdrop, nullptr);
   bool picker = m_Menu == "chats" || m_Menu == "forward";
   bool compact = m_Menu == "actions" || m_Menu == "message-tools" || m_Menu == "update" ||

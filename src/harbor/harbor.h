@@ -1,6 +1,7 @@
 #pragma once
 #include "format.h"
 #include "deskhost.h"
+#include "deskstrip.h"
 #include "uicontrol.h"
 #include "protocol.h"
 #include <deque>
@@ -164,6 +165,7 @@ private:
   bool CellSelected(const CopyCell&) const;
   void CopySelection();
   std::unique_ptr<HarborMedia> m_Media;
+  HarborDeskStrip m_DeskStrip;
   bool m_Running = true, m_Ready = false, m_Dirty = true, m_Browse = false,
        m_Motion = true, m_KeyIsSpecial = false;
   int64_t m_StatusUntil = 0, m_LastDraw = 0, m_AnimatedUntil = 0;

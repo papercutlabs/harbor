@@ -137,3 +137,100 @@ try:
     print('PASS explicit Desk commands take precedence and never fall back when their file is absent')
 finally:
     t.close()
+
+# Four-row inline strip: shared backend, per-window geometry and bounded untrusted input.
+# Each UI and backend owns one disposable config; inherited selectors cannot select a live account.
+import time
+import json
+with tempfile.TemporaryDirectory(prefix='harbor-inline-strip-', dir='/tmp') as directory:
+    work = Path(directory)
+    config = work/'config'
+    strip = work/'strip'
+    sentinel = work/'sentinel'
+    sentinel.write_text('keep')
+    commands = work/'commands'
+    commands.write_text('\n'.join('\t'.join([label, 'Strip return fixture', sys.executable, '-c',
+        'print("INLINE CHILD ' + label + '",flush=True);input()'])
+        for label in ['Everything', 'Quota']) + '\n')
+    env = {'HOME': str(work/'home'), 'XDG_CONFIG_HOME': str(work/'xdg'),
+           'HARBOR_DESK_COMMANDS': str(commands), 'HARBOR_DESK_WARM': '0'}
+    rows = ['Desk CPU 18% MEM 6% DISK 90%', 'CODEX 2.4/4 ▁▃▅ 0.017/h reset 19h',
+            'CLAUDE 2.2/6 ▁▂▆ 0.023/h reset 14h', 'GROK 1.0/1 ▇▇▇ 0.000/h reset 6d']
+    def write_rows(values=rows, stamp=None, raw=None):
+        stamp = int(time.time()*1000) if stamp is None else stamp
+        data = ('pcl.desk.strip.v1\t' + str(stamp) + '\n' + '\n'.join(values) + '\n').encode() if raw is None else raw
+        temporary = strip.with_suffix('.next')
+        temporary.write_bytes(data)
+        temporary.replace(strip)
+    def header(t, expected):
+        t.pump(.4)
+        actual = [line.rstrip() for line in t.screen.display[:4]]
+        assert actual == expected, (actual, expected, t.text)
+    def unknown(t):
+        header(t, ['Desk  CPU ?  MEM ?  DISK ?', 'CODEX  unavailable', 'CLAUDE unavailable', 'GROK   unavailable'])
+    def capture(t, name):
+        if os.environ.get('HARBOR_STRIP_EVIDENCE'):
+            out = Path(os.environ['HARBOR_STRIP_EVIDENCE'])/name
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.with_suffix('.txt').write_text(t.text)
+            out.with_suffix('.raw').write_bytes(t.raw)
+            out.with_suffix('.json').write_text(json.dumps({'title': t.screen.title, 'cursor': [t.screen.cursor.x, t.screen.cursor.y],
+                'cells': [[{k:getattr(t.screen.buffer[y][x], k) for k in ('data','fg','bg','bold')}
+                           for x in range(t.cols)] for y in range(t.rows)]}))
+    write_rows()
+    a = Terminal(cols=80, rows=38, config_dir=config, extra_env=dict(env, HARBOR_DESK_STRIP_FILE=str(strip)))
+    b = None
+    try:
+        a.picker('Saved Messages'); a.expect('Note 35:'); header(a, rows)
+        assert 'Saved Messages' in a.screen.display[4] and a.screen.cursor.y >= 4, a.text
+        a.send(b'\x1b[5~'); a.send('draft / e q'); a.send(b'\x1b[D')
+        before = state(a)
+        note_rows = [row for row in a.screen.display[7:] if 'Note ' in row]
+        capture(a, 'strip-80')
+        # The sibling attaches to the exact same backend but has no strip opt-in.
+        b = Terminal(cols=80, rows=38, config_dir=config, extra_env=dict(env, HARBOR_DESK_STRIP_FILE=''))
+        b.picker('Marina'); b.send('sibling draft'); b.pump(.3)
+        assert 'Marina' in b.screen.display[0] and 'CODEX' not in b.text and 'CPU' not in b.text, b.text
+        changed = [rows[0].replace('18%', '23%')] + rows[1:]
+        write_rows(changed); header(a, changed)  # idle file refresh, no input to a
+        b.pump(.3); assert 'CPU' not in b.text and 'sibling draft' in b.text, b.text
+        assert [row for row in a.screen.display[7:] if 'Note ' in row] == note_rows
+        assert state(a) == before, 'refresh changed draft/cursor/reading position'
+        # Each rejection must clear previously visible valid values, and recover without input.
+        cases = [b'wrong\n' + b'x\n'*4, b'x'*16385,
+                 ('pcl.desk.strip.v1\t0\n' + '\n'.join(rows) + '\n').encode(),
+                 ('pcl.desk.strip.v1\t' + str(int(time.time()*1000)+60000) + '\n' + '\n'.join(rows) + '\n').encode(),
+                 ('pcl.desk.strip.v1\t' + str(int(time.time()*1000)) + '\n' + '\n'.join(rows[:3]) + '\n').encode(),
+                 ('pcl.desk.strip.v1\t' + str(int(time.time()*1000)) + '\n' + '\n'.join(rows) + '\nextra\n').encode()]
+        for invalid in ['bad\x1b[2J', 'bad\x00', 'bad\t', 'bad\u009b31m']:
+            cases.append(('pcl.desk.strip.v1\t' + str(int(time.time()*1000)) + '\n' + '\n'.join([invalid]+rows[1:]) + '\n').encode())
+        cases.append(b'pcl.desk.strip.v1\t' + str(int(time.time()*1000)).encode() + b'\ninvalid\xff\nrow2\nrow3\nrow4\n')
+        for invalid in cases:
+            write_rows(raw=invalid); unknown(a); write_rows(); header(a, rows)
+        strip.unlink(); unknown(a); write_rows(); header(a, rows)
+        # Cross the real 90-second freshness boundary without waiting for a production interval.
+        write_rows(stamp=int(time.time()*1000)-88800); header(a, rows); a.pump(1.0); unknown(a)
+        capture(a, 'strip-unavailable-80'); write_rows(); header(a, rows)
+        for cols, height in [(110, 38), (26, 22), (18, 8), (1, 2), (80, 38)]:
+            a.resize(cols, height); a.pump(.3)
+            # Physical terminals shorter than four rows show only the rows that exist.
+            assert a.screen.display[0].startswith('Desk'[:cols]), a.text
+            assert a.screen.cursor.y >= min(4, height - 1) or a.screen.cursor.hidden, (cols, height, a.screen.cursor)
+            if cols == 110:
+                header(a, rows); assert 'CONVERSATIONS' in a.screen.display[4], a.text
+            capture(a, 'strip-' + str(cols) + 'x' + str(height))
+        a.expect('draft / e q'); header(a, rows)
+        assert state(a) == before, 'resize changed draft/cursor/reading position'
+        for key, label in [('e','Everything'), ('q','Quota')]:
+            a.send(b'\x0f'); a.expect('Desk · ' + label); header(a, rows)
+            a.send(key); a.expect('INLINE CHILD ' + label); a.send(b'\r'); a.expect('Back from Desk')
+            header(a, rows); a.expect('draft / e q')
+            assert state(a) == before, label + ' return changed saved state'
+        a.send('X'); a.expect('draft / e Xq')  # exact nonempty draft cursor survived both handoffs
+        assert a.screen.cursor.y >= 4 and sentinel.read_text() == 'keep'
+        assert 'sibling draft' in b.text and 'CPU' not in b.text
+        print('PASS inline strip: exactly four full-width rows, idle refresh/expiry, malformed/missing/oversize/control/UTF-8/future rejection, tiny resize recovery, independent shared-session sibling, draft/cursor/scroll and Ctrl+O E/Q return')
+    finally:
+        if b: b.close()
+        a.close()
+        assert sentinel.read_text() == 'keep'
