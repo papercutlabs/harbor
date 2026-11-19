@@ -53,6 +53,7 @@ private:
     std::vector<std::string> order;
     std::wstring draft;
     size_t cursor = 0;
+    bool cursorAtRowEnd = false; // transient visual affinity at a soft-wrap boundary
     std::wstring draftBeforeEdit;
     size_t cursorBeforeEdit = 0;
     std::string replyBeforeEdit;

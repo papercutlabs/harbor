@@ -1,4 +1,4 @@
-"""Cmd+Backspace / Ctrl+U delete only the current hard draft line, through the real decoder."""
+"""Cmd+Backspace / Ctrl+U delete only the current display row, through the real decoder."""
 import unicodedata
 from native_smoke import Terminal, ROOT
 
@@ -55,12 +55,12 @@ try:
         assert '你好' not in t.text and '🌊' not in t.text, (key, t.text)
         assert row(t, 'qkeep café'), (key, t.text)
 
-        # A wrapped logical line goes as a whole; the hard line before it stays.
+        # A wrapped logical line keeps preceding display rows and the hard line before it.
         long = 'qone two three four five six seven eight nine ten eleven twelve'
         draft(t, 'qhead', long)
         assert row(t, 'eleven twelve') and not row(t, long), t.text  # really wrapped
         t.send(key)
-        assert 'qone two' not in t.text and 'eleven twelve' not in t.text, (key, t.text)
+        assert 'qone two' in t.text and 'eleven twelve' not in t.text, (key, t.text)
         assert row(t, 'qhead'), (key, t.text)
 
     # Option+Backspace still deletes one word; plain Backspace one character.

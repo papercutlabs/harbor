@@ -10,16 +10,16 @@ try:
     t.picker('Studio');t.send('hello world')
     y=t.screen.cursor.y
     click(t,8,y);t.send('X');t.expect('heXllo world')
-    t.send(b'\x05');t.send(b'\x15');t.send('one two three four five six seven eight nine ten')
+    t.clear_draft();t.send('one two three four five six seven eight nine ten')
     y=next(y for y,row in enumerate(t.screen.display) if 'eight nine ten' in row)
     click(t,12,y);t.send('X');t.expect('eight Xnine ten')
-    t.send(b'\x05');t.send(b'\x15');t.send('界e\u0301abc')
+    t.clear_draft();t.send('界e\u0301abc')
     y=t.screen.cursor.y
     click(t,8,y);t.send('X');t.expect('界Xéabc')
     click(t,10,y);t.send('Y');t.expect('界XéYabc')
     # A click after the last glyph goes to end, not the next visual line.
     click(t,43,y);t.send('Z');t.expect('YabcZ')
-    t.send(b'\x05');t.send(b'\x15')
+    t.clear_draft()
     content='\n'.join('line '+str(i) for i in range(1,11))
     t.send('\x1b[200~'+content+'\x1b[201~')
     y=next(y for y,row in enumerate(t.screen.display) if 'line 6' in row)
