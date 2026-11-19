@@ -234,3 +234,5 @@ with tempfile.TemporaryDirectory(prefix='harbor-inline-strip-', dir='/tmp') as d
         if b: b.close()
         a.close()
         assert sentinel.read_text() == 'keep'
+
+import desk_update_smoke  # same declared Desk lane; owns only disposable offline UI state
