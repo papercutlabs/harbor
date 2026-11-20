@@ -97,8 +97,13 @@ for record in (home/'.office/harbor-windows').iterdir():
         a.expect('anchored draft');a.expect('Replying');b.expect('edited draft');b.expect('Editing your message');b.expect('Studio')
         expected_version=subprocess.run([str(target_binary),'--version'],text=True,capture_output=True,check=True).stdout.split()[1]
         assert all(expected_version==record.read_text().split('\t')[2] for record in names)
-        after=[row.strip() for row in a.screen.display if 'Note ' in row]
-        assert after==before,(before,after)
+        # A fresh backend may supply chat metadata/drafts before the anchored message page.
+        end=time.monotonic()+5
+        while time.monotonic()<end:
+            a.pump(.05);b.pump(.05)
+            after=[row.strip() for row in a.screen.display if 'Note ' in row]
+            if after==before:break
+        else:raise AssertionError((before,after,a.text))
         assert a.screen.title=='Saved Messages' and b.screen.title=='Studio'
         a.send('!');a.expect('anchored dr!aft');b.send('!');b.expect('edited draft!')
         b.send(b'\x1b');b.expect('live draft')
