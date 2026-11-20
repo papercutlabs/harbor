@@ -202,7 +202,7 @@ static int ApplicationMain(int argc, char* argv[])
   }
   std::vector<std::string> windowArgs; // forwarded to a spawned backend and to a restart
   HarborRoute::Target initialTarget;
-  std::string targetSurface, targetPid;
+  std::string targetSurface, targetPid, uiAction, uiToken;
   bool showHelp = false, showVersion = false, isExport = false;
 #endif
   for (auto it = args.begin(); it != args.end(); ++it)
@@ -224,6 +224,13 @@ static int ApplicationMain(int argc, char* argv[])
       FileUtil::SetApplicationDir(*it);
     }
 #ifdef HARBOR_BUILD
+    else if (*it == "--inspect-ui") { if (!uiAction.empty()) { std::cerr << "Choose one UI control operation.\n"; return 1; } uiAction = "inspect"; }
+    else if (*it == "--park-ui")
+    {
+      if (std::distance(it + 1, args.end()) <= 0) { std::cerr << "--park-ui requires the inspected token.\n"; return 1; }
+      if (!uiAction.empty()) { std::cerr << "Choose one UI control operation.\n"; return 1; }
+      uiAction = "park"; uiToken = *++it;
+    }
     else if (*it == "--open-telegram-chat" || *it == "--open-telegram-topic" || *it == "--open-profile" || *it == "--target-surface" || *it == "--target-pid")
     {
       const auto flag = *it;
@@ -314,7 +321,7 @@ static int ApplicationMain(int argc, char* argv[])
 
 #ifdef HARBOR_BUILD
   if (checkSession && (sessionBackend || isSetup || isRemove || isKeyDump || isExport ||
-                       !targetSurface.empty() || !targetPid.empty() || showHelp || showVersion))
+                       !targetSurface.empty() || !targetPid.empty() || !uiAction.empty() || showHelp || showVersion))
   { std::cerr << "--check-session applies only to ordinary Harbor startup arguments; setup, removal, export, keydump, backend, UI control, help and version modes cannot be combined with it.\n"; return 1; }
   if (showHelp) { ShowHelp(); return 0; }
   if (showVersion) { ShowVersion(); return 0; }
@@ -333,13 +340,18 @@ static int ApplicationMain(int argc, char* argv[])
     {"mode", isSetup ? "setup" : isRemove ? "remove" : isKeyDump ? "keydump" : !exportDir.empty() ? "export" : "normal"}});
   if (initialTarget.Present() && (sessionFd >= 0 || isSetup || isRemove || isKeyDump || !exportDir.empty()))
   { std::cerr << "Initial conversation selection applies only to an ordinary Harbor window.\n"; return 1; }
-  if (!targetSurface.empty() || !targetPid.empty())
+  if (!targetSurface.empty() || !targetPid.empty() || !uiAction.empty())
   {
     if (targetSurface.empty() || targetPid.empty())
     { std::cerr << "--target-surface and --target-pid must identify the same existing Harbor UI.\n"; return 1; }
-    try { HarborUiControl::Send(FileUtil::GetApplicationDir(), targetSurface, targetPid, initialTarget); }
+    try {
+      if (!uiAction.empty() && (initialTarget.Present() || sessionBackend || isSetup || isRemove || isKeyDump || isExport || checkSession))
+        throw std::invalid_argument("UI inspection and parking require only an exact existing UI target.");
+      const auto response = HarborUiControl::Send(FileUtil::GetApplicationDir(), targetSurface, targetPid, initialTarget, uiAction, uiToken);
+      if (uiAction == "inspect") { std::cout << response; return 0; }
+    }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
-    std::cout << "Requested conversation opened in the selected Harbor UI.\n";
+    std::cout << (uiAction == "park" ? "Duplicate view returned to Chats; drafts retained.\n" : "Requested conversation opened in the selected Harbor UI.\n");
     return 0;
   }
   // An ordinary run is a window of the directory's shared session. Setup, removal, export and
@@ -917,6 +929,8 @@ void ShowHelp()
     "  --open-telegram-topic ID  select this positive decimal forum topic in that chat\n"
     "  --open-profile ID        select the exact native Telegram account profile\n"
     "  --target-surface ID --target-pid PID   route only that existing UI; never launch another\n"
+    "  --inspect-ui            read current conversation identity of the exact targeted UI\n"
+    "  --park-ui TOKEN         return an unchanged duplicate UI to Chats, retaining its drafts\n"
     "  -s         set up your Telegram account\n"
     "  -d DIR     use a separate configuration directory\n"
     "  -k         inspect terminal key sequences\n"

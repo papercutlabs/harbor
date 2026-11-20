@@ -549,6 +549,22 @@ Harbor::BeginUiRoute()
     Request(m_ControlProfile, request);
   }
 }
+std::string
+Harbor::UiSnapshot() const
+{
+  // An opaque comparison token includes composer and action context, without disclosing it.
+  std::ostringstream state;
+  state << m_Current << m_Menu << m_InDeskView << m_ControlReply << m_InitialChat;
+  const auto at = m_Chats.find(m_Current);
+  if (at != m_Chats.end())
+  {
+    const auto& c = at->second;
+    state << S(c.draft) << c.cursor << c.reply << c.editing << S(c.draftBeforeEdit)
+          << c.selected << c.scroll << c.follow << c.visit;
+  }
+  for (const auto& attachment : m_Attachments) state << attachment;
+  return std::to_string(std::hash<std::string>{}(state.str()));
+}
 void
 Harbor::PollUiControl()
 {
@@ -569,6 +585,23 @@ Harbor::PollUiControl()
     m_ControlProfile = selected; m_ControlConversation = target.conversation;
     m_ControlKey = Key(selected, target.conversation); m_ControlReply = reply;
     m_ControlPending = true; m_ControlError.clear();
+  }, [this](const std::string& action, const std::string& token, int reply) {
+    const auto at = m_Chats.find(m_Current);
+    const bool ready = m_ControlReply < 0 && m_InitialChat.empty() && !m_InColdDeskView && m_Menu.empty() && m_Attachments.empty() && m_AuthOwner.empty();
+    if (action == "__inspect__")
+    {
+      const char* surface = getenv("CMUX_SURFACE_ID");
+      const auto text = "pcl.harbor.ui.v1\t" + std::to_string(getpid()) + "\t" + HarborUiControl::Surface(surface ? surface : "") + "\t" +
+        (at == m_Chats.end() ? "" : at->second.profile) + "\t" + (at == m_Chats.end() ? "" : at->second.id) + "\t" + UiSnapshot() + "\t" +
+        (at != m_Chats.end() && (!at->second.draft.empty() || !at->second.reply.empty() || !at->second.editing.empty()) ? "1" : "0") + "\t" + (ready ? "1" : "0") + "\n";
+      (void)!send(reply, text.data(), text.size(), MSG_NOSIGNAL); close(reply); return;
+    }
+    if (!ready || token != UiSnapshot())
+    { HarborUiControl::Reply(reply, "The inspected Harbor view changed or has an active action. Its conversation and drafts were retained."); return; }
+    // Keep the window and every conversation object alive, including drafts, reply/edit and reading state.
+    m_DeskParked = true; m_Current.clear(); m_RestoreChat.clear(); m_Dirty = true;
+    SetTitle("Chats");
+    HarborUiControl::Reply(reply);
   });
   if (!m_InDeskView) BeginUiRoute();
 }
@@ -1136,7 +1169,7 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
       }
       else if (!m_RestoreChat.empty() && m_Chats.count(m_RestoreChat))
         OpenChat(m_RestoreChat);
-      else if (m_Current.empty() && !m_ChatOrder.empty())
+      else if (!m_DeskParked && m_Current.empty() && !m_ChatOrder.empty())
       {
         auto pending = m_RestoreChat;
         OpenChat(m_ChatOrder.front());
@@ -1429,6 +1462,7 @@ Harbor::OpenChat(const std::string& key)
     m_Search = m_Reactions = Pending();
   const bool restoreBrowse = !m_RestoreChat.empty() && m_RestoreChat == key && m_RestoreBrowse;
   if (m_RestoreChat == key) m_RestoreBrowse = false;
+  m_DeskParked = false;
   m_Current = key;
   m_RestoreChat.clear();
   m_InitialChat.clear();

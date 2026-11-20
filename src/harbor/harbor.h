@@ -128,6 +128,8 @@ private:
   int m_ControlReply = -1;
   std::string m_ControlProfile, m_ControlConversation, m_ControlKey, m_ControlError;
   bool m_ControlPending = false, m_InDeskView = false, m_InColdDeskView = false;
+  bool m_DeskParked = false;
+  std::string UiSnapshot() const;
   void PollUiControl();
   void BeginUiRoute();
   void FinishUiRoute(const std::string& error = {});
