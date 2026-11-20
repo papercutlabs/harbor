@@ -18,7 +18,8 @@
     "tests/harbor/wheel_burst_smoke.py",
     "tests/harbor/appearance_smoke.py",
     "tests/harbor/message_click_smoke.py",
-    "tests/harbor/restart_all_smoke.py"
+    "tests/harbor/restart_all_smoke.py",
+    "tests/harbor/input_latency_smoke.py"
   ],
   "lanes": {
     "typing": [
@@ -143,6 +144,9 @@
     ],
     "restart_all": [
       "tests/harbor/restart_all_smoke.py"
+    ],
+    "input_latency": [
+      "tests/harbor/input_latency_smoke.py"
     ]
   }
 }
