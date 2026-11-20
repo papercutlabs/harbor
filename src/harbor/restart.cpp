@@ -1,6 +1,7 @@
 #include "harbor.h"
 #include "restart.h"
 #include "session.h"
+#include "sessiongeneration.h"
 #include "apputil.h"
 #include <iostream>
 #include "fileutil.h"
@@ -117,6 +118,8 @@ void Harbor::TryRestartAll()
     return;
   }
   setenv("HARBOR_RESTART_STATE_ID", m_RestartStateId.c_str(), 1);
+  if (!m_BackendGeneration.empty()) setenv("HARBOR_RESTART_OLD_GENERATION", m_BackendGeneration.c_str(), 1);
+  else unsetenv("HARBOR_RESTART_OLD_GENERATION");
   struct stat socket{};
   if (lstat(HarborSession::SocketPath(FileUtil::GetApplicationDir()).c_str(), &socket) == 0 && S_ISSOCK(socket.st_mode))
   {
@@ -158,6 +161,10 @@ bool HarborRestart::WaitForBackend(const std::string& appDir)
   if (!value || !*value) return true;
   const std::string identity = value;
   unsetenv("HARBOR_RESTART_OLD_SOCKET");
+  const char* generationValue = getenv("HARBOR_RESTART_OLD_GENERATION");
+  const std::string oldGeneration = generationValue ? generationValue : "";
+  unsetenv("HARBOR_RESTART_OLD_GENERATION");
+  if (!oldGeneration.empty() && !HarborSessionGeneration::Valid(oldGeneration)) return false;
   if (identity.find_first_not_of("0123456789:") != std::string::npos) return false;
   const auto path = HarborSession::SocketPath(appDir);
   bool said = false;
@@ -168,9 +175,15 @@ bool HarborRestart::WaitForBackend(const std::string& appDir)
     if (!S_ISSOCK(socket.st_mode) || socket.st_uid != geteuid()) return false;
     const auto current = std::to_string(socket.st_dev) + ":" + std::to_string(socket.st_ino);
     if (current != identity) return true; // another updated window already started the new backend
+    std::string generation;
+    if (!HarborSessionGeneration::Read(appDir, socket, generation)) return false;
+    // New exporters name the backend lifetime they left. Installed legacy exporters name
+    // only dev:ino: a live generation publisher cannot be their old, pre-generation backend.
+    // Stale records never authorize either transition because their lifetime lock is gone.
+    if (!generation.empty() && generation != oldGeneration) return true;
     if (!said)
     {
-      HarborTrace::Event("ui.restart.waiting-backend", {{"old_socket", identity}, {"current_socket", current}});
+      HarborTrace::Event("ui.restart.waiting-backend", {{"old_socket", identity}, {"current_socket", current}, {"old_generation", oldGeneration}, {"current_generation", generation}});
       std::cout << "Updating Harbor: waiting for the other windows to finish leaving the old version.\n"
                    "Finish any pending Desk, sign-in or attachment action to continue.\n" << std::flush;
       said = true;

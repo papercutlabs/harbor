@@ -1,4 +1,5 @@
 #include "session.h"
+#include "sessiongeneration.h"
 #include "update.h"
 #include "wire.h"
 #include "traceprotocol.h"
@@ -466,8 +467,15 @@ Attach(const std::string& p_AppDir, const std::string& p_Self, const std::vector
   // The backend listens before it sends a welcome, so releasing the lock after the welcome
   // guarantees the next window connects instead of spawning.
   const bool ok = ReadWelcome(fd, buf, out);
+  if (ok)
+  {
+    struct stat socket{};
+    if (lstat(path.c_str(), &socket) || !S_ISSOCK(socket.st_mode) || socket.st_uid != geteuid() ||
+        !HarborSessionGeneration::Read(p_AppDir, socket, out.generation))
+      out.error = "Could not identify Harbor's active session generation. Existing windows were retained.";
+  }
   close(lockFd);
-  if (!ok)
+  if (!ok || !out.error.empty())
   {
     close(fd);
     return out;
@@ -794,6 +802,7 @@ private:
   std::vector<std::shared_ptr<Peer>> m_Peers;
   std::map<std::string, std::string> m_ConnectFrames; // profile -> last ConnectNotify event frame
   int m_Listen = -1;
+  HarborSessionGeneration::Publisher m_Generation;
   int m_Wake[2] = { -1, -1 };
   uint32_t m_NextId = 1;
   bool m_Exhausted = false;
@@ -833,6 +842,12 @@ Backend::Listen(std::string& error)
     return false;
   }
   chmod(path.c_str(), 0600);
+  if (!m_Generation.Publish(m_AppDir, path))
+  {
+    error = "Could not publish Harbor's private session generation.";
+    close(m_Listen);m_Listen = -1;unlink(path.c_str());
+    return false;
+  }
   fcntl(m_Listen, F_SETFD, FD_CLOEXEC);
   fcntl(m_Listen, F_SETFL, O_NONBLOCK);
   return true;
