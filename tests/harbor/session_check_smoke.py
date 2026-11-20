@@ -202,6 +202,7 @@ def main():
             assert snapshot(other) == before_other
         finally:
             terminal.close()
+            terminal.wait_backend_shutdown()
         print("PASS real native demo backend and draft survive a read-only probe", flush=True)
 
 
