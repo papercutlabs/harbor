@@ -75,7 +75,9 @@ void Harbor::UnregisterRestart()
 void Harbor::TryRestartAll()
 {
   if (m_RestartRegistration.empty() || m_InDeskView || m_InColdDeskView || m_AuthSuspended || !m_AuthOwner.empty() ||
-      m_ControlPending || m_ControlReply >= 0 || m_InitialRouteUntil || !m_RestoreChat.empty() || m_MouseDown) return;
+      m_ControlPending || m_ControlReply >= 0 || m_InitialRouteUntil || !m_RestoreChat.empty() || m_MouseDown ||
+      (!m_Attachments.empty() && (m_Menu == "attachments" || m_Menu == "preview")) ||
+      (Current() && !Current()->visit.empty())) return;
   const auto path = m_RestartRegistration + ".restart";
   const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK | O_NOFOLLOW);
   if (fd < 0) return;
@@ -95,7 +97,13 @@ void Harbor::TryRestartAll()
   // Numeric slots can be reacquired in a different order when several UIs exec together.
   // A private identity resumes this window's own state irrespective of the next numeric slot.
   if (m_RestartStateId.empty()) m_RestartStateId = RandomId();
-  if (m_RestartStateId.empty() || !SaveState(true)) { Notify("Update waiting: this window could not save its state"); return; }
+  m_ManualRestart = true;
+  if (m_RestartStateId.empty() || !SaveState(true))
+  {
+    m_ManualRestart = false;
+    Notify("Update waiting: this window could not save its state");
+    return;
+  }
   setenv("HARBOR_RESTART_STATE_ID", m_RestartStateId.c_str(), 1);
   struct stat socket{};
   if (lstat(HarborSession::SocketPath(FileUtil::GetApplicationDir()).c_str(), &socket) == 0 && S_ISSOCK(socket.st_mode))
@@ -151,7 +159,7 @@ bool HarborRestart::WaitForBackend(const std::string& appDir)
     if (!said)
     {
       std::cout << "Updating Harbor: waiting for the other windows to finish leaving the old version.\n"
-                   "A window in Desk or sign-in continues when that view returns.\n" << std::flush;
+                   "Finish any pending Desk, sign-in or attachment action to continue.\n" << std::flush;
       said = true;
     }
     usleep(20000);

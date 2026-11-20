@@ -10,7 +10,7 @@ from native_smoke import Terminal, ROOT
 with tempfile.TemporaryDirectory(prefix='harbor-restart-all-') as directory:
     home=Path(directory); config=home/'profile'
     commands=home/'.office/desk/harbor-desk-commands';commands.parent.mkdir(parents=True)
-    env={'HOME':str(home),'HARBOR_DESK_COMMANDS':str(commands),'HARBOR_DESK_UPDATE_FILE':'','CMUX_SURFACE_ID':''}
+    env={'HOME':str(home),'HARBOR_DESK_COMMANDS':str(commands),'HARBOR_DESK_UPDATE_FILE':'','CMUX_SURFACE_ID':'','HARBOR_DEMO_RICH':'1'}
     binary=Path(os.environ.get('HARBOR_EXECUTABLE',ROOT/'build-harbor/bin/harbor')).resolve()
     target_binary=Path(os.environ.get('HARBOR_RESTART_TARGET',str(binary))).resolve()
     office=home/'office'; target=office/'dist/harbor-runtime/bin/harbor'
@@ -117,7 +117,63 @@ for record in (home/'.office/harbor-windows').iterdir():
         a.send('!');a.expect('anchored dr!aft');b.send('!');b.expect('edited draft!')
         b.send(b'\x1b');b.expect('live draft')
         if module:assert json.loads((home/'publisher-result.json').read_text())=={'requested':2,'unsupported':0}
-        print('PASS Settings preparation failure preserved both UIs; old Desk argv, two real native PTYs and replacement shared backend; independent chats, message/line position, draft cursor, reply/edit targets and pre-edit draft survived; both accept input')
+        print('PASS Settings preparation failure preserved both UIs; old Desk argv, two real native PTYs and replacement shared backend; independent chats, message/line position, draft cursor, reply/edit targets and pre-edit draft survived; both accept input',flush=True)
+        # A reply/search/pin visit has a separate Return mark. Manual update keeps the visible
+        # original and that mark; ordinary quit retains its existing return-before-visit policy.
+        a.picker('Doug formatting');a.send('visit draft')
+        def find_body(t,text):
+            t.send(b'\x07')
+            for _ in range(40):
+                if any(line.strip().startswith(text) for line in t.screen.display):return
+                t.send(b'\x1b[5~',wait=.05)
+            raise AssertionError(('message body unavailable',text,t.text))
+        find_body(a,'The code word');a.message_tool('The code word','Reveal spoiler')
+        a.expect('The code word is harbor-42, keep it.')
+        find_body(a,'That was the quote');a.message_tool('That was the quote','Expand quote')
+        a.expect('second quoted line');a.send(b'\x07')
+        def draft_history(t):
+            prompt=next(i for i,line in enumerate(t.screen.display) if '› visit draft' in line)
+            return [line.rstrip() for line in t.screen.display[3:prompt]]
+        return_view=draft_history(a)
+        a.send(b'\x0f');a.click_text('Search or pinned messages');a.click_text('Pinned messages')
+        a.expect('Original plan',timeout=5);a.click_text('Original plan');a.expect('Showing the message',timeout=5)
+        def original(t):
+            return next(((i,line.rstrip()) for i,line in enumerate(t.screen.display) if line.strip().startswith('Original plan:')),None)
+        end=time.monotonic()+5
+        while original(a) is None and time.monotonic()<end:a.pump(.05)
+        visited=original(a);assert visited,a.text
+        fixture=str(ROOT/'tests/harbor/fixtures/harbor.png')
+        b.send('\x1b[200~'+fixture+'\x1b[201~');b.expect('Preview attachments')
+        old_names=set((home/'.office/harbor-windows').iterdir())
+        b_name=next(path for path in old_names if path.name.startswith(str(b.pid)+'-'))
+        old_socket=(config/'session.sock').stat().st_ino
+        a_start,b_start=len(a.raw),len(b.raw)
+        update_from_settings(a)
+        end=time.monotonic()+5
+        while time.monotonic()<end:
+            a.pump(.05);b.pump(.05)
+            if not any(path.exists() for path in old_names if path!=b_name):break
+        else:raise AssertionError('initiating UI did not leave for the prepared version')
+        assert b_name.exists() and 'Preview attachments' in b.text,'pending attachment was interrupted'
+        b.click_text('Cancel')
+        end=time.monotonic()+12
+        while time.monotonic()<end:
+            a.pump(.05);b.pump(.05)
+            names=set((home/'.office/harbor-windows').iterdir())
+            if len(names)==2 and not names.intersection(old_names) and original(a)==visited:break
+        else:raise AssertionError(('visited position did not resume',visited,original(a),a.text,b.text))
+        assert (config/'session.sock').stat().st_ino!=old_socket
+        a.expect('visit draft');b.expect('live draft')
+        a.send(b'\x0f');a.click_text('Return to previous position')
+        end=time.monotonic()+5
+        while time.monotonic()<end:
+            a.pump(.05)
+            if draft_history(a)==return_view:break
+        else:raise AssertionError(('Return position changed',return_view,draft_history(a)))
+        a.expect('visit draft')
+        find_body(a,'The code word');a.expect('The code word is harbor-42, keep it.')
+        find_body(a,'That was the quote');a.expect('second quoted line')
+        print('PASS manual restart keeps a visited message at its line and Return action; quote expansion and spoiler reveal survive; pending attachment preview defers until cancelled without losing its draft',flush=True)
     finally:
         b.close();a.close()
         # Last-UI exit precedes backend cleanup. Wait for the backend's existing shutdown lock
