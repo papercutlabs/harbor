@@ -26,7 +26,8 @@
     "tests/harbor/restart_generation_smoke.py",
     "tests/harbor/picture_open_smoke.py",
     "tests/harbor/preview_guard_smoke.py",
-    "tests/harbor/command_menu_smoke.py"
+    "tests/harbor/command_menu_smoke.py",
+    "tests/harbor/reply_click_smoke.py"
   ],
   "lanes": {
     "typing": [
@@ -54,7 +55,8 @@
       "tests/harbor/composer_wheel_smoke.py",
       "tests/harbor/ui_identity_smoke.py",
       "tests/harbor/shell_copy_smoke.py",
-      "tests/harbor/restart_generation_smoke.py"
+      "tests/harbor/restart_generation_smoke.py",
+      "tests/harbor/reply_click_smoke.py"
     ],
     "format": [
       "tests/harbor/format_test.cpp"
@@ -177,6 +179,9 @@
     ],
     "preview_guard": [
       "tests/harbor/preview_guard_smoke.py"
+    ],
+    "reply_click": [
+      "tests/harbor/reply_click_smoke.py"
     ]
   }
 }
