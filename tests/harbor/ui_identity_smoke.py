@@ -55,6 +55,14 @@ with tempfile.TemporaryDirectory(prefix='hi-',dir='/tmp') as directory:
         reopened=inspect(first,'IDENTITY-ONE');assert reopened[4]==initial[4]
         assert inspect_window(first,'IDENTITY-ONE')[8]==window_initial[8]
         trace=home/'.local/state/harbor/operational.jsonl'
+        first.send('\r') # Offline protocol only: qualify a real semantic send and its native result.
+        until=time.monotonic()+6
+        while time.monotonic()<until:
+            records=[json.loads(line) for line in trace.read_text().splitlines()]
+            sends=[r for r in records if r.get('event')=='request.sent' and r.get('pid')==first.pid and r.get('operation')=='message.send']
+            if any(any(r.get('event')=='request.result.received' and r.get('pid')==first.pid and r.get('outcome')=='success' and (r.get('request_id'),r.get('connection_id'))==(s.get('request_id'),s.get('connection_id')) for r in records) for s in sends):break
+            first.pump(.03)
+        else:raise AssertionError('semantic send did not retain its correlated native success')
         data=trace.read_text();assert 'Retained unique draft' not in data and ' changed' not in data
         assert any(json.loads(line).get('event')=='ui.chat.opened' for line in data.splitlines())
         assert not any(json.loads(line).get('pid') in inspection_pids for line in data.splitlines()),'operational reads wrote the journal and would trigger a reporting loop'
