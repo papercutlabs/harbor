@@ -147,6 +147,26 @@ HarborDemo::SeedRich(const std::function<void(const std::string&, const std::str
     m_Messages["rich"].back().fileInfo = ProtocolUtil::FileInfoToHex(file);
     return;
   }
+  if (getenv("HARBOR_DEMO_CODE_COPY"))
+  {
+    const std::string shortCode = "printf 'right edge!'", shortPrefix = "Short command:\n";
+    rich("doug", 1, shortPrefix + shortCode + "\nAfter short command.",
+         { { RichText::Pre, U16(shortPrefix), U16(shortCode), "shell" } });
+    const std::string prefix = "Multiline command:\n",
+      command = "./a_very_long_script_name_that_requires_wrapping --keep-newlines\n\tprintf '你好 é'\nprintf 'tail'\n";
+    rich("doug", 2, prefix + command + "After multiline command.",
+         { { RichText::Pre, U16(prefix), U16(command), "bash" } });
+    const std::string first = "echo first\n", second = "echo second", lead = "Two code blocks:\n", between = "Between blocks.\n";
+    rich("doug", 3, lead + first + between + second,
+         { { RichText::Pre, U16(lead), U16(first), "sh" },
+           { RichText::Pre, U16(lead + first + between), U16(second), "" } });
+    const std::string hidden = "printf 'secret'", hiddenPrefix = "Concealed code:\n";
+    rich("doug", 4, hiddenPrefix + hidden,
+         { { RichText::Pre, U16(hiddenPrefix), U16(hidden), "shell" },
+           { RichText::Spoiler, U16(hiddenPrefix + "printf '"), 6, "" } });
+    add("rich", "doug", "Legacy cached code:\n```shell\nprintf 'cached'\n\tprintf 'second'\n\n```\nAfter cached code.", 5, "", "");
+    return;
+  }
   if (getenv("HARBOR_DEMO_REPLIES"))
   {
     const auto parent = rich("doug", 1, "Older parent outside the loaded page.", {});

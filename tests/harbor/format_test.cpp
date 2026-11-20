@@ -39,7 +39,7 @@ NativeTests()
                     suffix = "\n\nIt should end with Done. Paste me the output.";
   auto t = HarborFormatting::Native(
     Native(prefix + command + suffix, { { RichText::Pre, U16(prefix), U16(command), "shell" } }));
-  assert(t.text == Wide(prefix) + L"‹shell›\n" + Wide(command) + Wide(suffix));
+  assert(t.text == Wide(prefix) + Wide(command) + Wide(suffix));
   assert(t.codes.size() == 1 && t.codes[0].content == Wide(command) && t.codes[0].arg == L"shell");
   assert(t.text.substr(t.codes[0].begin, t.codes[0].end - t.codes[0].begin) == Wide(command));
   assert(t.copy == Wide(prefix + command + suffix));
@@ -177,6 +177,10 @@ NativeTests()
   assert(legacy.codes.size() == 1 && legacy.codes[0].content == L"echo a" && legacy.codes[0].arg == L"sh");
   assert(legacy.links.size() == 2 && legacy.links[0].arg == L"https://d.example" &&
          legacy.links[1].arg == L"https://e.example");
+  // The old-cache Markdown path must preserve original code newlines too.
+  const auto preserved = Parse(L"```shell\nprintf 'cached'\n\tprintf 'second'\n\n```");
+  assert(preserved.codes.size() == 1 &&
+         preserved.codes[0].content == L"printf 'cached'\n\tprintf 'second'\n\n");
   std::cout << "PASS native entities: producer pre shape, UTF-16 offsets, literal zero-entity text, malformed "
                "ranges, code blocks, links, spoilers, expandable quotes, encoding\n";
 }

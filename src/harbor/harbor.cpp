@@ -1554,6 +1554,24 @@ Harbor::BuildRows()
       m_CopyTexts[id] = formatted.text;
       m_CopyDecor[id] = formatted.decor;
       auto layout = Layout(formatted.text, width);
+      // Put the icon beside the first line when it fits. A full first line gets
+      // a display-only top row, so the icon never replaces command characters.
+      std::map<int, int> copyRows, copyHeaders;
+      for (size_t index = 0; index < formatted.codes.size(); ++index)
+      {
+        const auto& code = formatted.codes[index];
+        if (!code.block)
+          continue;
+        size_t begin = code.begin;
+        if (!code.arg.empty() && !HarborFormatting::ShellLanguage(code.arg) &&
+            begin >= code.arg.size() + 3)
+          begin -= code.arg.size() + 3; // existing non-shell language header
+        const int first = layout.cursors[begin].row;
+        if (Width(layout.lines[first]) <= width - 2)
+          copyRows[first] = int(index);
+        else
+          copyHeaders[first] = int(index);
+      }
       std::map<std::pair<int, int>, unsigned> styles;
       for (size_t i = 0; i < formatted.text.size(); ++i)
         if (!iswspace(formatted.text[i]))
@@ -1564,7 +1582,15 @@ Harbor::BuildRows()
         spaced.insert(layout.cursors[at].row);
       for (size_t r = 0; r < layout.lines.size(); ++r)
       {
+        if (copyHeaders.count(int(r)))
+        {
+          Row header{ L"", id, m.isOutgoing, false };
+          header.copyCode = copyHeaders[int(r)];
+          m_Rows.push_back(std::move(header));
+        }
         Row row{ layout.lines[r], id, m.isOutgoing, false };
+        if (copyRows.count(int(r)))
+          row.copyCode = copyRows[int(r)];
         row.sources = layout.sources[r];
         int col = 0;
         for (auto ch : row.text)
@@ -1891,6 +1917,12 @@ Harbor::Draw()
         }
       }
       m_Hits.push_back({ y, x, w, "message", row.id });
+      if (row.copyCode >= 0)
+      {
+        const int copyX = x + w - 3;
+        Text(y, copyX, 1, L"⧉", color);
+        m_Hits.push_back({ y, copyX - 1, 3, "code-copy", row.id, row.copyCode });
+      }
       if (row.attachment)
         m_Hits.push_back({ y, x, w, "attachment", row.id });
       if (row.text.size() && row.text[0] == 1)
@@ -3579,6 +3611,11 @@ Harbor::ReactionResults(std::shared_ptr<AvailableReactionsNotify> n)
                           } });
 }
 void
+Harbor::CopyCode(const std::wstring& content)
+{
+  Notify(m_Media->CopyText(S(content)) ? "Copied code" : "Could not copy code");
+}
+void
 Harbor::CodeChooser(const std::string& key, const std::string& id)
 {
   HarborTrace::Event("ui.code.open");
@@ -3590,7 +3627,7 @@ Harbor::CodeChooser(const std::string& key, const std::string& id)
   auto copy = [this](const std::wstring& content)
   {
     CloseMenu();
-    Notify(m_Media->CopyText(S(content)) ? "Copied code" : "Could not copy code");
+    CopyCode(content);
   };
   if (codes.size() == 1)
   {
@@ -3843,6 +3880,17 @@ Harbor::MessageClick(int x, int y)
   auto* c = Current();
   if (!c)
     return;
+  for (const auto& hit : m_Hits)
+    if (hit.type == "code-copy" && hit.y == y && x >= hit.x && x < hit.x + hit.w)
+    {
+      auto message = c->messages.find(hit.value);
+      if (message == c->messages.end())
+        return;
+      const auto codes = Format(*c, message->second).codes;
+      if (hit.code >= 0 && size_t(hit.code) < codes.size() && codes[hit.code].block)
+        CopyCode(codes[hit.code].content);
+      return;
+    }
   for (const auto& hit : m_Hits)
     if (hit.type == "attachment" && hit.y == y && x >= hit.x && x < hit.x + hit.w)
     {
@@ -4808,7 +4856,7 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown, int wheelTicks)
       OpenChat(hit.value);
     else if (hit.type == "option")
       Choose(std::stoi(hit.value));
-    else if ((hit.type == "message" || hit.type == "attachment") && c)
+    else if ((hit.type == "message" || hit.type == "attachment" || hit.type == "code-copy") && c)
     {
       MessageClick(e.x, e.y);
       m_Browse = false;

@@ -105,7 +105,7 @@ for cols in (56, 110):
     t = Terminal(cols=cols, rows=60, extra_env=env())
     try:
         open_rich(t)
-        visible(t, '‹shell›'); t.expect('‹shell›'); t.expect('sh ~/Downloads/create-hive-next-repos.sh'); gone(t, '```')
+        visible(t, 'sh ~/Downloads/create-hive-next-repos.sh'); t.expect('sh ~/Downloads/create-hive-next-repos.sh'); gone(t, '‹shell›'); gone(t, '```')
         visible(t, 'The code word is ▒▒▒▒▒▒▒▒▒, keep it.'); t.expect('The code word is ▒▒▒▒▒▒▒▒▒, keep it.'); gone(t, 'harbor-42')
         visible(t, '│ first quoted line …'); t.expect('│ first quoted line …'); gone(t, 'second quoted line')
         visible(t, '**literal** stars and `ticks` stay as typed.'); t.expect('**literal** stars and `ticks` stay as typed.')
@@ -121,10 +121,10 @@ for cols in (56, 110):
         assert read(clip) == 'cd ~/src\n\tmake **all** _x_\n', repr(read(clip))
         actions(t, 'Two steps'); t.click_text('Copy code…'); t.send(b'\x1b[B'); t.send(b'\r'); t.expect('Copied code')
         assert read(clip) == "printf '%s\\n' \"done\"", repr(read(clip))
-        # a drag across the code header and its command copies the command, never the ‹shell› decor
-        visible(t, '‹shell›'); start = cell(t, '‹shell›'); end = cell(t, 'repos.sh')
+        # a drag across the command copies its text, without icon or wrapping
+        visible(t, 'sh ~/Downloads/create-hive-next-repos.sh'); start = cell(t, 'sh ~/Downloads'); end = cell(t, 'repos.sh')
         drag(t, start, (end[0] + 7, end[1]))
-        assert '‹' not in read(clip) and '›' not in read(clip) and '```' not in read(clip), repr(read(clip))
+        assert '‹' not in read(clip) and '›' not in read(clip) and '```' not in read(clip) and '⧉' not in read(clip), repr(read(clip))
         assert 'sh ~/Downloads/create-hive-next-repos.s' in read(clip), repr(read(clip))
         # a reply excerpt quoting the spoiler message keeps it concealed
         visible(t, 'Got it, I will keep that word private.'); t.expect('│ Doug: The code word is ▒▒▒'); gone(t, 'harbor-42')
