@@ -190,6 +190,21 @@ for record in (home/'.office/harbor-windows').iterdir():
         find_body(a,'The code word');a.expect('The code word is harbor-42, keep it.')
         find_body(a,'That was the quote');a.expect('second quoted line')
         print('PASS manual restart keeps a visited message at its line and Return action; quote expansion and spoiler reveal survive; pending attachment preview defers until cancelled without losing its draft',flush=True)
+    except BaseException:
+        snapshot={'old_backend_pid':locals().get('old_backend'),'old_socket_inode':locals().get('old_socket')}
+        try:snapshot['current_backend_pid']=backend_pid()
+        except Exception as error:snapshot['backend_read_error']=str(error)
+        try:
+            st=(config/'session.sock').stat();snapshot['current_socket']={'device':st.st_dev,'inode':st.st_ino,'ctime_ns':st.st_ctime_ns}
+        except OSError as error:snapshot['socket_read_error']=str(error)
+        snapshot['registrations']=[p.name for p in (home/'.office/harbor-windows').iterdir()]
+        trace=home/'.local/state/harbor/operational.jsonl'
+        if trace.exists():
+            events=[json.loads(line) for line in trace.read_text().splitlines()]
+            keep=('ui.restart.all','ui.restart.deferred','ui.restart.waiting-backend','backend.spawned','backend.shutdown','handshake.ready')
+            snapshot['events']=[{key:value for key,value in e.items() if key in ('event','pid','child_pid','reason','old_socket','current_socket','peer_version','ts_ms')} for e in events if e.get('event') in keep][-30:]
+        print('RESTART_FAILURE_EVIDENCE '+json.dumps(snapshot),flush=True)
+        raise
     finally:
         b.close();a.close()
         # Last-UI exit precedes backend cleanup. Wait for the backend's existing shutdown lock
