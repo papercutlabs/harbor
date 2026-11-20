@@ -1394,6 +1394,7 @@ Harbor::OpenChat(const std::string& key)
   auto it = m_Chats.find(key);
   if (it == m_Chats.end())
     return;
+  m_ComposerFollowCursor = true;
   if (auto* previous = Current(); previous && !previous->follow &&
       previous->restoreAnchor.empty() && previous->scroll < int(m_Rows.size()))
   {
@@ -1909,10 +1910,13 @@ Harbor::Draw()
       Fill(m_ComposerY + row, m_MainX + 2, m_MainW - 4, Surface);
     auto point = CursorPoint(draftLayout, std::min(c->cursor, c->draft.size()), c->cursorAtRowEnd);
     m_ComposerFirstLine = std::max(0, std::min(m_ComposerFirstLine, int(draftLines.size()) - m_ComposerRows));
-    if (point.row < m_ComposerFirstLine)
-      m_ComposerFirstLine = point.row;
-    if (point.row >= m_ComposerFirstLine + m_ComposerRows)
-      m_ComposerFirstLine = point.row - m_ComposerRows + 1;
+    if (m_ComposerFollowCursor)
+    {
+      if (point.row < m_ComposerFirstLine)
+        m_ComposerFirstLine = point.row;
+      if (point.row >= m_ComposerFirstLine + m_ComposerRows)
+        m_ComposerFirstLine = point.row - m_ComposerRows + 1;
+    }
     Text(m_ComposerY + 1, m_MainX + 4, 2, L"›", Surface);
     for (int i = 0; i < m_ComposerRows && m_ComposerFirstLine + i < int(draftLines.size()); i++)
       Text(m_ComposerY + 1 + i, m_MainX + 6, textWidth, draftLines[m_ComposerFirstLine + i], Surface);
@@ -2078,6 +2082,7 @@ Harbor::Select(int delta)
 void
 Harbor::Insert(const std::wstring& text)
 {
+  m_ComposerFollowCursor = true;
   auto* c = Current();
   if (!c)
     return;
@@ -2091,6 +2096,7 @@ Harbor::Insert(const std::wstring& text)
 void
 Harbor::EditKey(wint_t k)
 {
+  m_ComposerFollowCursor = true;
   auto* c = Current();
   if (!c)
     return;
@@ -4187,6 +4193,7 @@ Harbor::KeyPress(wint_t k)
   }
   if (k == KEY_RESIZE)
   {
+    m_ComposerFollowCursor = true;
     PreserveReadingPosition();
     clearok(stdscr, TRUE);
     return;
@@ -4459,6 +4466,7 @@ Harbor::ReadInput()
   {
     PreserveReadingPosition();
     resizeterm(size.ws_row, size.ws_col);
+    m_ComposerFollowCursor = true;
     clearok(stdscr, TRUE);
     m_Dirty = true;
   }
@@ -4586,6 +4594,7 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown, int wheelTicks)
         }
     c->cursor = best;
     c->cursorAtRowEnd = best == end;
+    m_ComposerFollowCursor = true;
     c->selected.clear();
     m_Browse = m_MouseDown = m_MouseDragging = m_HasSelection = false;
   };
@@ -4710,6 +4719,18 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown, int wheelTicks)
       m_Option = std::min(int(m_Options.size()) - 1, m_Option + wheelTicks);
       return;
     }
+  }
+  if (c && m_Menu.empty() && (wheelDown || (e.bstate & BUTTON4_PRESSED)) &&
+      e.y >= m_ComposerY && e.y < m_ComposerY + m_ComposerRows + 2 &&
+      e.x >= m_MainX + 2 && e.x < m_W - 2)
+  {
+    const auto layout = Layout(c->draft, std::max(1, m_MainW - 11));
+    const int last = std::max(0, int(layout.lines.size()) - m_ComposerRows);
+    const int64_t first = m_ComposerFirstLine + (wheelDown ? 3LL : -3LL) * wheelTicks;
+    m_ComposerFirstLine = int(std::max<int64_t>(0, std::min<int64_t>(last, first)));
+    // Browsing a draft moves its viewport only. Editing resumes following its unchanged caret.
+    m_ComposerFollowCursor = false;
+    return;
   }
   if (e.bstate & BUTTON4_PRESSED)
   {

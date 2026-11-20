@@ -190,6 +190,7 @@ private:
   int m_H = 0, m_W = 0, m_MainX = 0, m_MainW = 0, m_Top = 5, m_Bottom = 0, m_ComposerY = 0,
       m_ComposerRows = 1;
   int m_DialogY = 0, m_DialogX = 0, m_DialogW = 0, m_DialogH = 0, m_OptionY = 0, m_ComposerFirstLine = 0;
+  bool m_ComposerFollowCursor = true;
   bool m_AuthSuspended = false;
   std::string Key(const std::string&, const std::string&) const;
   Conversation* Current();
