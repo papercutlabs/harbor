@@ -1775,8 +1775,11 @@ Harbor::Draw()
       const int x = m_MainX + 2, y = m_Bottom - 1;
       Fill(y, x, 11, Received);
       for (int dot = 0; dot < 3; ++dot)
-        Text(y, x + 3 + dot * 2, 1, L"●", Received,
-             !m_Motion || dot == HarborTyping::Phase(TimeUtil::GetCurrentTimeMSec()));
+      {
+        const bool bright = !m_Motion || dot == HarborTyping::Phase(TimeUtil::GetCurrentTimeMSec());
+        attrset(COLOR_PAIR(Received) | (bright ? A_BOLD : A_DIM));
+        mvaddnwstr(y, x + 3 + dot * 2, L"●", 1);
+      }
     }
     if (!c->reply.empty() || !c->editing.empty())
       Text(m_ComposerY - 1,

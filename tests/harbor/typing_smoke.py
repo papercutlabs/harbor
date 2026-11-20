@@ -38,6 +38,7 @@ for mode, cols in [('stop', 56), ('reply', 110), ('expire', 56)]:
     try:
         t.picker('Marina'); t.send('unsent draft stays here')
         before = next(y for y, row in enumerate(t.screen.display) if '›' in row)
+        assert DOTS not in t.text, t.text
         wait(t, True)
         y = next(y for y, row in enumerate(t.screen.display) if DOTS in row)
         assert y < before and before == next(y for y, row in enumerate(t.screen.display) if '›' in row)
@@ -59,6 +60,8 @@ for mode, cols in [('stop', 56), ('reply', 110), ('expire', 56)]:
 t = Terminal(cols=56, rows=38, extra_env={'HARBOR_DEMO_TYPING': 'hold'})
 try:
     t.picker('Marina'); t.send('draft during history'); wait(t, True)
+    y = next(y for y, row in enumerate(t.screen.display) if DOTS in row)
+    assert all(t.screen.buffer[y][x].bold for x in range(t.cols) if t.screen.buffer[y][x].data == '●')
     t.send(b'\x1b[5~'); assert DOTS not in t.text, t.text
     history = t.screen.display[4:20]
     t.pump(.5); assert history == t.screen.display[4:20]
