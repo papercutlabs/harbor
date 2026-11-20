@@ -58,7 +58,7 @@ def main():
         version = identity.stdout.split()[1]
         accepted = {"0.1.23": ("0.1.22", "0.1.23"),
                     "0.1.24": ("0.1.22", "0.1.23", "0.1.24"),
-                    "0.1.25": ("0.1.25",)}[version]
+                    "0.1.25": ("0.1.24", "0.1.25")}[version]
 
         def probe(args, error=None, check_first=False):
             before = snapshot(root)

@@ -233,10 +233,12 @@ CompatibleVersions(const std::string& p_Client, const std::string& p_Backend)
 {
   // Before these upgrade exceptions, session.cpp, session.h, wire.h and protocol.h were
   // byte-identical in released 0.1.22 (c6e8ea23), strip 0.1.23 (6618ded3) and composer
-  // 0.1.24 (c23d36ef). No semver range: a new unequal pair needs its own protocol check.
+  // 0.1.24 (c23d36ef). The pinned 0.1.24 (3cc477f6) session/wire/protocol sources
+  // also match 0.1.25 before this allowlist addition. No general semver range.
   return p_Client == p_Backend ||
          (p_Client == "0.1.23" && p_Backend == "0.1.22") ||
-         (p_Client == "0.1.24" && (p_Backend == "0.1.22" || p_Backend == "0.1.23"));
+         (p_Client == "0.1.24" && (p_Backend == "0.1.22" || p_Backend == "0.1.23")) ||
+         (p_Client == "0.1.25" && p_Backend == "0.1.24");
 }
 
 // Window side ---------------------------------------------------------------------------------
