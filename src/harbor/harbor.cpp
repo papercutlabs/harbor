@@ -1091,12 +1091,25 @@ Harbor::Merge(Conversation& c, const std::vector<ChatMessage>& messages, bool ou
       c.detached.erase(m.id);
     else if (!c.messages.count(m.id) && previousOldest >= 0 && m.timeSent < previousOldest)
       c.detached.insert(m.id);
+    std::string localFileInfo;
+    const auto prior = c.messages.find(m.id);
+    if (prior != c.messages.end() && !prior->second.fileInfo.empty() && !m.fileInfo.empty())
+    {
+      const auto local = ProtocolUtil::FileInfoFromHex(prior->second.fileInfo);
+      const auto incoming = ProtocolUtil::FileInfoFromHex(m.fileInfo);
+      // History can replay pre-transfer metadata while this UI owns the download.
+      // Preserve only the same file's live transfer or an existing completed file.
+      if (!local.fileId.empty() && local.fileId == incoming.fileId && incoming.fileStatus == FileStatusNotDownloaded &&
+          (local.fileStatus == FileStatusDownloading || (local.fileStatus == FileStatusDownloaded && File(local.filePath))))
+        localFileInfo = prior->second.fileInfo;
+    }
     c.messages[m.id] = m;
+    if (!localFileInfo.empty()) c.messages[m.id].fileInfo = localFileInfo;
     // Cached Telegram photos from earlier builds lack MIME metadata. Their
     // protocol placeholder still identifies them before the local file exists.
     if (!m.fileInfo.empty())
     {
-      auto file = ProtocolUtil::FileInfoFromHex(m.fileInfo);
+      auto file = ProtocolUtil::FileInfoFromHex(c.messages[m.id].fileInfo);
       if (file.fileType.empty() && file.filePath == "[Photo]")
       {
         file.fileType = "image/jpeg";
