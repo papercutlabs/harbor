@@ -668,6 +668,13 @@ Harbor::Run()
     if (auto* c = Current())
       if (c->historyRetryAt && c->historyStalls < 3 && now >= c->historyRetryAt)
         m_Dirty = true;
+    for (auto& entry : m_Chats)
+      if (entry.second.typing.Expire(now) && entry.first == m_Current) m_Dirty = true;
+    if (auto* c = Current())
+    {
+      const int phase = c->follow && c->typing.Active() ? (m_Motion ? HarborTyping::Phase(now) : 0) : -1;
+      if (phase != m_TypingPhase) { m_TypingPhase = phase; m_Dirty = true; }
+    }
     Timeouts(now);
     if (now - lastSave > 2000)
     {
@@ -1091,6 +1098,12 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
         BuildRows();
         previousRows = int(m_Rows.size());
       }
+      // Only a newly received incoming message ends that sender's activity. Cache/history replies
+      // and duplicate updates must not clear a newer typing pulse.
+      if (n->success && !n->cached && n->fromMsgId.empty())
+        for (const auto& message : n->chatMessages)
+          if (!message.isOutgoing && !message.isDeleted && !c.messages.count(message.id))
+            c.typing.Complete(message.senderId, message.timeSent);
       Merge(c, n->chatMessages, !n->sequence);
       if (n->success)
         c.loaded = true;
@@ -1217,8 +1230,7 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
     case ReceiveTypingNotifyType:
     {
       auto n = std::static_pointer_cast<ReceiveTypingNotify>(e);
-      if (n->isTyping && m_Current == Key(p, n->chatId))
-        Notify(Name(p, n->userId) + " is typing…");
+      Ensure(p, n->chatId).typing.Update(n->userId, n->isTyping, TimeUtil::GetCurrentTimeMSec());
       break;
     }
     case ProtocolUiControlNotifyType:
@@ -1756,6 +1768,16 @@ Harbor::Draw()
       for (const auto& picture : pictures)
         m_Media->DrawImage(
           *picture.image, picture.y, picture.x, picture.cols, picture.rows, picture.sourceRow);
+    // The last history row is already a blank spacer after the latest message. Reuse it so
+    // activity never changes history offsets, composer geometry, selections or drafts.
+    if (c->follow && c->typing.Active())
+    {
+      const int x = m_MainX + 2, y = m_Bottom - 1;
+      Fill(y, x, 11, Received);
+      for (int dot = 0; dot < 3; ++dot)
+        Text(y, x + 3 + dot * 2, 1, L"●", Received,
+             !m_Motion || dot == HarborTyping::Phase(TimeUtil::GetCurrentTimeMSec()));
+    }
     if (!c->reply.empty() || !c->editing.empty())
       Text(m_ComposerY - 1,
            m_MainX + 2,

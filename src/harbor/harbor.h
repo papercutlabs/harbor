@@ -1,5 +1,6 @@
 #pragma once
 #include "format.h"
+#include "typing.h"
 #include "deskhost.h"
 #include "deskstrip.h"
 #include "deskupdate.h"
@@ -49,6 +50,7 @@ private:
   struct Conversation
   {
     std::string profile, id, name;
+    HarborTyping typing;
     std::map<std::string, ChatMessage> messages;
     std::vector<std::string> order;
     std::wstring draft;
@@ -175,6 +177,7 @@ private:
   HarborDeskStrip m_DeskStrip;
   bool m_Running = true, m_Ready = false, m_Dirty = true, m_Browse = false,
        m_Motion = true, m_KeyIsSpecial = false;
+  int m_TypingPhase = -1;
   int64_t m_StatusUntil = 0, m_LastDraw = 0, m_AnimatedUntil = 0;
   int m_H = 0, m_W = 0, m_MainX = 0, m_MainW = 0, m_Top = 5, m_Bottom = 0, m_ComposerY = 0,
       m_ComposerRows = 1;
