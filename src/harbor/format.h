@@ -172,7 +172,7 @@ Spacers(const Text& t)
   struct Line
   {
     size_t begin, end;
-    bool blank = true, framed = false, numbered = false, heading = false;
+    bool blank = true, framed = false, numbered = false, listed = false, heading = false;
   };
   std::vector<Line> lines;
   for (size_t begin = 0;;)
@@ -207,7 +207,9 @@ Spacers(const Text& t)
         ++digits;
       line.numbered = digits > first && digits + 1 < end && (t.text[digits] == L'.' || t.text[digits] == L')') &&
                       t.text[digits + 1] == L' ';
-      line.heading = emphasis && !line.numbered;
+      line.listed = line.numbered || (first + 1 < end && t.text[first + 1] == L' ' &&
+                        (t.text[first] == L'-' || t.text[first] == L'*' || t.text[first] == L'•'));
+      line.heading = emphasis && !line.listed;
     }
     lines.push_back(line);
     if (end == t.text.size())
@@ -226,7 +228,7 @@ Spacers(const Text& t)
       continue;
     // a run of emphasized lines is a bold paragraph, not a heading
     const bool heading = line.heading && !next.heading && (n == 0 || !lines[n - 1].heading);
-    if ((item && next.numbered) || heading)
+    if ((!line.blank && !line.framed && !line.listed && next.listed) || (item && next.numbered) || heading)
       out.push_back(line.end);
   }
   return out;

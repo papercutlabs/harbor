@@ -36,7 +36,7 @@ try:
     t.picker('Infrastructure');t.expect('different topic')
     assert 'Topic-specific history' not in t.text
     t.send('Sibling topic draft')
-    t.picker('DEMO-421');t.expect('Draft for Desk topic');t.send(b'\r');t.expect('Sent')
+    t.picker('DEMO-421');t.expect('Draft for Desk topic');t.send(b'\r');t.delivered('Draft for Desk topic')
     exact_parent(t)
     assert 'Draft for Desk topic' not in t.text and 'Topic-specific history' not in t.text
     t.picker('Infrastructure');t.expect('Sibling topic draft')

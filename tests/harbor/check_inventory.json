@@ -1,5 +1,6 @@
 {
   "static": [
+    "tests/harbor/typing_smoke.py",
     "tests/harbor/run_checks.py",
     "tests/harbor/native_smoke.py",
     "tests/harbor/rich_actions_smoke.py",
@@ -15,9 +16,13 @@
     "tests/harbor/composer_rows_smoke.py",
     "tests/harbor/cursor_click_smoke.py",
     "tests/harbor/wheel_burst_smoke.py",
-    "tests/harbor/typing_smoke.py"
+    "tests/harbor/appearance_smoke.py"
   ],
   "lanes": {
+    "typing": [
+      "tests/harbor/typing_smoke.py",
+      "tests/harbor/typing_test.cpp"
+    ],
     "static": [
       "tests/harbor/run_checks.py",
       "tests/harbor/native_smoke.py",
@@ -33,7 +38,8 @@
       "tests/harbor/session_check_smoke.py",
       "tests/harbor/composer_rows_smoke.py",
       "tests/harbor/cursor_click_smoke.py",
-      "tests/harbor/wheel_burst_smoke.py"
+      "tests/harbor/wheel_burst_smoke.py",
+      "tests/harbor/appearance_smoke.py"
     ],
     "format": [
       "tests/harbor/format_test.cpp"
@@ -126,9 +132,8 @@
     "wheel_burst": [
       "tests/harbor/wheel_burst_smoke.py"
     ],
-    "typing": [
-      "tests/harbor/typing_smoke.py",
-      "tests/harbor/typing_test.cpp"
+    "appearance": [
+      "tests/harbor/appearance_smoke.py"
     ]
   }
 }

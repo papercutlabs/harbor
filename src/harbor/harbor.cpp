@@ -67,7 +67,10 @@ enum
   Backdrop,
   DialogMuted,
   SelectedMuted,
-  NoticeBar
+  NoticeBar,
+  QuoteShade,
+  CodePlain,
+  LinkPlain
 };
 enum
 {
@@ -426,6 +429,7 @@ Harbor::Init()
   HarborTrace::Event("ui.init.attempt");
   // SetSession selects the view slot before Init; classic Harbor keeps slot 0.
   LoadState();
+  LoadAppearance();
   if (!m_InitialChat.empty())
   {
     m_RestoreChat.clear();
@@ -459,6 +463,9 @@ Harbor::Init()
     else
       init_pair(id, fg == 19 ? COLOR_CYAN : COLOR_WHITE, -1);
   };
+  pair(QuoteShade, 18, 23);
+  pair(CodePlain, 22, 16);
+  pair(LinkPlain, 19, 16);
   pair(Base, 17, 16);
   pair(Muted, 18, 16);
   pair(Accent, 19, 16);
@@ -1156,7 +1163,8 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
       {
         if (!n->chatMessage.id.empty())
           Merge(Ensure(p, n->chatId), { n->chatMessage });
-        Notify("Sent");
+        m_Status.clear();
+        m_StatusUntil = 0;
       }
       else
       {
@@ -1414,7 +1422,9 @@ Harbor::BuildRows()
       int room = std::max(4, width - 2);
       if (Width(excerpt) > room)
         excerpt = Pad(excerpt, room - 1) + L"…";
-      m_Rows.push_back({ L"│ " + excerpt, id, m.isOutgoing, false });
+      Row quote{ (m_QuoteAppearance == 1 ? L"│ " : L"") + excerpt, id, m.isOutgoing, false };
+      quote.quote = true;
+      m_Rows.push_back(std::move(quote));
     }
     if (!m.text.empty() || !m.richText.empty())
     {
@@ -1484,6 +1494,12 @@ Harbor::BuildRows()
         value += r.first + " " + std::to_string(r.second) + " ";
       m_Rows.push_back({ W(value), id, m.isOutgoing, false });
     }
+    if (m_TimestampPosition == 1)
+    {
+      Row stamp{ W(time), id, m.isOutgoing, false };
+      stamp.timestamp = true;
+      m_Rows.push_back(std::move(stamp));
+    }
     m_Rows.push_back({ L"", id, m.isOutgoing, false });
     m_Rows.push_back({ L"", "", false, false });
   }
@@ -1523,23 +1539,25 @@ Harbor::Draw()
   // reply context), so neither the draft nor the reading position moves when it appears.
   bool newBar = c && !c->follow && c->unseen > 0;
   const int newBarY = m_Bottom;
-  m_Top = 3 + stripHeight;
+  const int chatY = stripHeight + ((stripHeight || m_CommandHint == 8) ? 1 : 0);
+  m_Top = 3 + chatY;
   bkgd(COLOR_PAIR(Base));
   erase();
   m_Hits.clear();
   m_CopyCells.clear();
   // The current chat is the first row; only a not-yet-connected state takes space on the account row.
-  Text(stripHeight, m_MainX + 2, m_MainW - 4, c ? W(c->name) : L"Connecting…", Accent, true);
+  const int titleHint = m_CommandHint == 0 ? 17 : 0;
+  Text(chatY, m_MainX + 2, m_MainW - 4 - titleHint, c ? W(c->name) : L"Connecting…", Accent, true);
   const std::wstring connection = !m_AuthOwner.empty()  ? L"● authenticating"
                                   : m_Connected.empty() ? L"○ connecting"
                                                         : L"";
-  Text(stripHeight + 1,
+  Text(chatY + 1,
        m_MainX + 2,
        m_MainW - 4 - (connection.empty() ? 0 : Width(connection) + 2),
        c ? W(m_Protocols[c->profile]->GetProfileDisplayName()) : L"",
        Muted);
   if (!connection.empty())
-    Text(stripHeight + 1, std::max(m_MainX + 2, m_W - 2 - Width(connection)), Width(connection), connection, Warning);
+    Text(chatY + 1, std::max(m_MainX + 2, m_W - 2 - Width(connection)), Width(connection), connection, Warning);
   if (m_MainX)
   {
     for (int y = stripHeight; y < m_H; y++)
@@ -1631,7 +1649,8 @@ Harbor::Draw()
       int x = m_MainX + (row.sent ? 4 : 2);
       int w = m_MainW - 6;
       const bool selected = m_Browse && row.id == c->selected && !row.id.empty();
-      const int color = selected ? Selected : row.sent ? Sent : Received;
+      const int color = selected ? Selected : row.quote && m_QuoteAppearance == 2 ? QuoteShade :
+                        m_MessageAppearance == 1 ? Base : row.sent ? Sent : Received;
       if (row.id.empty())
       {
         Text(y, m_MainX + 2, m_MainW - 4, row.text, Muted);
@@ -1641,7 +1660,7 @@ Harbor::Draw()
       Text(y,
            x + 2,
            w - 4,
-           (row.header || (row.text.size() && row.text[0] == 1)) ? L"" : row.text,
+           (row.header || row.timestamp || (row.text.size() && row.text[0] == 1)) ? L"" : row.text,
            color,
            row.header);
       if (!row.styles.empty())
@@ -1659,23 +1678,23 @@ Harbor::Draw()
           int pair = color;
           int attr = 0;
           if (style & Quote)
-            pair = selected ? Selected : row.sent ? MetadataOut : Metadata;
+            pair = selected ? Selected : m_MessageAppearance == 1 ? Muted : row.sent ? MetadataOut : Metadata;
           if (style & Emphasis)
           {
-            pair = selected ? EmphasisSelected : row.sent ? LinkOut : LinkIn;
+            pair = selected ? EmphasisSelected : m_MessageAppearance == 1 ? LinkPlain : row.sent ? LinkOut : LinkIn;
             attr |= A_BOLD;
           }
           if (style & Code)
-            pair = selected ? CodeSelected : row.sent ? CodeOut : CodeIn;
+            pair = selected ? CodeSelected : m_MessageAppearance == 1 ? CodePlain : row.sent ? CodeOut : CodeIn;
           if (style & Link)
           {
-            pair = selected ? LinkSelected : row.sent ? LinkOut : LinkIn;
+            pair = selected ? LinkSelected : m_MessageAppearance == 1 ? LinkPlain : row.sent ? LinkOut : LinkIn;
             attr |= A_UNDERLINE;
           }
           if (style & Underline)
             attr |= A_UNDERLINE;
           if (style & Spoiler)
-            pair = selected ? Selected : row.sent ? MetadataOut : Metadata;
+            pair = selected ? Selected : m_MessageAppearance == 1 ? Muted : row.sent ? MetadataOut : Metadata;
 #ifdef A_ITALIC
           if (style & Italic)
             attr |= A_ITALIC;
@@ -1702,22 +1721,23 @@ Harbor::Draw()
           col += Width(row.text[j]);
         }
       }
+      if (row.timestamp)
+        Text(y, x + w - 2 - std::min(w - 4, Width(row.text)), std::min(w - 4, Width(row.text)),
+             row.text, selected ? Selected : m_MessageAppearance == 1 ? Muted : row.sent ? MetadataOut : Metadata);
       if (row.header)
       {
         const auto& message = c->messages[row.id];
         std::wstring name = W(message.isOutgoing ? "You" : Name(c->profile, message.senderId));
         auto time = W(Time(message.timeSent) + (message.isOutgoing ? Receipt(message.isRead) : "") +
                       (message.isEdited ? " · edited" : ""));
-        const int tw = std::min((w - 4) / 2, Width(time));
+        const int tw = m_TimestampPosition == 0 ? std::min((w - 4) / 2, Width(time)) : 0;
         Text(y,
              x + 2,
              std::max(1, w - tw - 5),
              name,
-             selected   ? Selected
-             : row.sent ? SenderOut
-                        : Sender,
+             selected ? Selected : m_MessageAppearance == 1 ? Accent : row.sent ? SenderOut : Sender,
              true);
-        Text(y, x + w - tw - 2, tw, time, selected ? Selected : row.sent ? MetadataOut : Metadata);
+        if (tw) Text(y, x + w - tw - 2, tw, time, selected ? Selected : m_MessageAppearance == 1 ? Muted : row.sent ? MetadataOut : Metadata);
       }
       if (!row.sources.empty())
       {
@@ -1804,11 +1824,35 @@ Harbor::Draw()
     Text(m_Top + 1, m_MainX + 2, m_MainW - 4,
          m_InitialRouteStatus.empty() ? L"Waiting for your conversations…" : W(m_InitialRouteStatus), Muted);
   }
-  Text(
-    m_H - 2, m_MainX + 2, std::max(1, m_MainW - 21), m_Browse ? L"MESSAGES · ↑↓ · Enter" : L"COMPOSE", Muted);
+  if (m_Browse)
+    Text(m_H - 2, m_MainX + 2, std::max(1, m_MainW - 21), L"MESSAGES · ↑↓ · Enter", Muted);
   {
-    Text(m_H - 2, m_W - 18, 16, L"Ctrl+/ Commands", Muted);
-    m_Hits.push_back({ m_H - 2, m_W - 18, 16, "commands", "" });
+    const bool typing = c && !c->draft.empty();
+    std::wstring hint = L"Ctrl+/ Commands";
+    int y = chatY, x = m_W - 17;
+    switch (m_CommandHint)
+    {
+      case 1: y = m_ComposerY; break;
+      case 2: y = m_ComposerY; break;
+      case 3: y = m_ComposerY; x = m_MainX + 2; break;
+      case 4: y = m_ComposerY + 1; x = m_MainX + 6; if (typing) hint.clear(); break;
+      case 5: y = m_H - 2; hint = L"[Ctrl+/] Commands"; x = m_W - 19; break;
+      case 6: y = m_ComposerY + 1; if (typing) hint = L"Ctrl+/"; x = m_W - Width(hint) - 3; break;
+      case 7: y = m_ComposerY + 1; hint = L"Ctrl+/"; x = m_W - 9; break;
+      case 8: y = stripHeight; x = m_MainX + 2; break;
+    }
+    // Prompt-side hints use only empty cells after the current draft, never cover typed text.
+    if ((m_CommandHint == 6 || m_CommandHint == 7) && typing &&
+        (draftLines.size() > 1 || Width(draftLines[0]) + m_MainX + 8 >= x)) hint.clear();
+    if (m_CommandHint == 1)
+      Text(m_ComposerY, m_MainX + 2, m_MainW - 4, std::wstring(m_MainW - 4, L'─'), Muted);
+    if (!hint.empty())
+    {
+      x = std::max(m_MainX + 2, x);
+      Text(y, x, std::min(Width(hint), m_W - x - 1), hint,
+           (m_CommandHint == 4 || m_CommandHint == 6 || m_CommandHint == 7) ? Surface : Muted);
+      m_Hits.push_back({ y, x, std::min(Width(hint), m_W - x - 1), "commands", "" });
+    }
   }
   Text(m_H - 1, m_MainX + 2, m_MainW - 4, W(m_Status), m_Status.empty() ? Muted : Good);
   if (!m_UpdateTarget.empty())
@@ -2317,6 +2361,77 @@ Harbor::UpdatePrompt()
                 { "Later", "", [this] { CloseMenu(); } } };
   m_Dirty = true;
 }
+// Appearance preferences are shared by this configuration's windows, separate from drafts.
+void
+Harbor::LoadAppearance()
+{
+  std::ifstream in(FileUtil::GetApplicationDir() + "/harbor-appearance");
+  std::string key;
+  int value;
+  while (in >> key >> value)
+  {
+    if (key == "quote" && value >= 0 && value < 3) m_QuoteAppearance = value;
+    if (key == "messages" && value >= 0 && value < 2) m_MessageAppearance = value;
+    if (key == "timestamp" && value >= 0 && value < 2) m_TimestampPosition = value;
+    if (key == "commands" && value >= 0 && value < 9) m_CommandHint = value;
+  }
+}
+bool
+Harbor::SaveAppearance()
+{
+  const auto path = FileUtil::GetApplicationDir() + "/harbor-appearance";
+  const auto temporary = path + "." + std::to_string(getpid());
+  std::ofstream out(temporary, std::ios::trunc);
+  out << "quote " << m_QuoteAppearance << "\nmessages " << m_MessageAppearance
+      << "\ntimestamp " << m_TimestampPosition << "\ncommands " << m_CommandHint << "\n";
+  out.close();
+  if (!out || rename(temporary.c_str(), path.c_str()) != 0)
+  { unlink(temporary.c_str()); Notify("Could not save appearance settings"); return false; }
+  chmod(path.c_str(), 0600);
+  return true;
+}
+void
+Harbor::Settings()
+{
+  LoadAppearance();
+  m_Menu = "settings";
+  m_Filter.clear(); m_Option = 0; m_MenuOffset = 0;
+  const std::vector<std::string> quotes = { "Plain", "Left rule", "Shaded" };
+  const std::vector<std::string> hints = { "Chat title", "Composer divider", "Above prompt right", "Above prompt left",
+    "Empty prompt", "Footer keycap", "Contracts while typing", "Prompt key only", "Between quota and chat" };
+  m_Options = {
+    { "Quoted replies", quotes[m_QuoteAppearance], [this] { AppearanceChoices("quote"); } },
+    { "Messages", m_MessageAppearance ? "Plain" : "Panels", [this] { AppearanceChoices("messages"); } },
+    { "Timestamps", m_TimestampPosition ? "Bottom right" : "Top right", [this] { AppearanceChoices("timestamp"); } },
+    { "Commands hint", hints[m_CommandHint], [this] { AppearanceChoices("commands"); } }
+  };
+  m_Dirty = true;
+}
+void
+Harbor::AppearanceChoices(const std::string& field)
+{
+  m_Menu = "appearance"; m_Options.clear(); m_Option = 0; m_MenuOffset = 0;
+  std::vector<std::string> labels;
+  int selected = 0;
+  if (field == "quote") { labels = { "Plain", "Left rule", "Shaded" }; selected = m_QuoteAppearance; }
+  if (field == "messages") { labels = { "Panels", "Plain" }; selected = m_MessageAppearance; }
+  if (field == "timestamp") { labels = { "Top right", "Bottom right" }; selected = m_TimestampPosition; }
+  if (field == "commands")
+  {
+    labels = { "Chat title", "Composer divider", "Above prompt right", "Above prompt left", "Empty prompt",
+      "Footer keycap", "Contracts while typing", "Prompt key only", "Between quota and chat" };
+    selected = m_CommandHint;
+  }
+  for (size_t i = 0; i < labels.size(); ++i)
+    m_Options.push_back({ labels[i], int(i) == selected ? "Selected" : "", [this, field, i] {
+      if (field == "quote") m_QuoteAppearance = i;
+      if (field == "messages") m_MessageAppearance = i;
+      if (field == "timestamp") m_TimestampPosition = i;
+      if (field == "commands") m_CommandHint = i;
+      SaveAppearance(); CloseMenu();
+    } });
+  m_Dirty = true;
+}
 void
 Harbor::Commands()
 {
@@ -2434,6 +2549,7 @@ Harbor::Commands()
           AttachPreview({ f.filePath });
         }
       } },
+    { "Settings", "Appearance and preferences", [this] { Settings(); } },
     { "Update Harbor", "Restart when an installed update is ready", [this] { UpdatePrompt(); } },
     { "Quit Harbor", "Ctrl+Q", [this] { m_Running = false; } }
   };
@@ -3666,7 +3782,9 @@ Harbor::DrawMenu()
     Text(row, x + width - 1, 1, L"│", DialogBorder);
   }
 
-  std::string title = m_Menu == "chats"           ? "Find a conversation"
+  std::string title = m_Menu == "settings"        ? "Settings"
+                      : m_Menu == "appearance"      ? "Appearance"
+                      : m_Menu == "chats"           ? "Find a conversation"
                       : m_Menu == "forward"       ? "Forward to…"
                       : m_Menu == "actions"       ? "Message actions"
                       : m_Menu == "message-tools" ? "Message tools"
@@ -3839,6 +3957,7 @@ Harbor::KeyPress(wint_t k)
   }
   if (k == KEY_RESIZE)
   {
+    PreserveReadingPosition();
     clearok(stdscr, TRUE);
     return;
   }
@@ -4085,12 +4204,30 @@ Harbor::CopySelection()
   }
 }
 void
+Harbor::PreserveReadingPosition()
+{
+    // Rewrapping earlier messages must not change the row the reader is looking at.
+    if (auto* c = Current(); c && !c->follow && c->scroll < int(m_Rows.size()))
+    {
+      int row = c->scroll;
+      while (row < int(m_Rows.size()) && m_Rows[row].id.empty()) ++row;
+      if (row < int(m_Rows.size()))
+      {
+        c->restoreAnchor = m_Rows[row].id;
+        int first = row;
+        while (first > 0 && m_Rows[first - 1].id == c->restoreAnchor) --first;
+        c->restoreOffset = c->scroll - first;
+      }
+    }
+}
+void
 Harbor::ReadInput()
 {
   struct winsize size = {};
   if (ioctl(STDIN_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_row && size.ws_col &&
       (size.ws_row != m_H || size.ws_col != m_W))
   {
+    PreserveReadingPosition();
     resizeterm(size.ws_row, size.ws_col);
     clearok(stdscr, TRUE);
     m_Dirty = true;

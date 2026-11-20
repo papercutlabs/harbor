@@ -202,12 +202,13 @@ SpacingTests()
   const std::wstring list = L"Plan:\n1. A long first item that wraps across several terminal rows when narrow\n"
                             L"2) Second\n3. Third\nThanks";
   auto t = Parse(list);
-  assert(Spaced(t) == Lines({ L"1. A long first item that wraps across several terminal rows when narrow", L"2) Second" }));
+  assert(Spaced(t) == Lines({ L"Plan:", L"1. A long first item that wraps across several terminal rows when narrow", L"2) Second" }));
   assert(t.text == list && t.copy == list); // spacing never touches the text or its copy
   // continuation lines stay with their item; the gap goes before the next number
   assert(Spaced(Parse(L"1. First\n   more of first\n2. Second")) == Lines({ L"   more of first" }));
   // already spaced lists and paragraphs keep their single blank line
   assert(Spaced(Parse(L"1. a\n\n2. b\n\nPara one\n\nPara two\nsame paragraph")).empty());
+  assert(Spaced(Parse(L"Plan:\n- First\n- Second")) == Lines({ L"Plan:" }));
   // numbers that are not list markers
   assert(Spaced(Parse(L"1.5 million\n2024 was long\n3 items")).empty());
   // numbered text in code blocks and quotes, Markdown and native

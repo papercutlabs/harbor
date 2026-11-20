@@ -8,7 +8,8 @@ t = Terminal(cols=96, rows=38)
 try:
     t.picker('Saved Messages')
     t.expect('Note 35:')
-    notes = lambda: [row.strip() for row in t.screen.display if 'Note ' in row]
+    # Compare positions too: a precise tick can move the same messages within a taller panel.
+    notes = lambda: [(y, row.strip()) for y, row in enumerate(t.screen.display) if 'Note ' in row]
     latest = notes()
     t.send(up)
     precise = notes()

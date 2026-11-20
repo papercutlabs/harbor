@@ -100,6 +100,7 @@ private:
     std::wstring text;
     std::string id;
     bool sent = false, header = false;
+    bool quote = false, timestamp = false;
     std::vector<unsigned> styles = {};
     std::vector<size_t> sources = {};
   };
@@ -210,12 +211,18 @@ private:
   void KeyPress(wint_t);
   void Mouse(const MEVENT& e, bool wheelDown = false, int wheelTicks = 1);
   void ReadInput();
+  void PreserveReadingPosition();
   void EditKey(wint_t);
   void Insert(const std::wstring&);
   void Paste(const std::wstring&);
   void ChatPicker(bool forward = false);
   void RebuildPicker(bool preserveSelection = true);
   void Commands();
+  void Settings();
+  void AppearanceChoices(const std::string&);
+  void LoadAppearance();
+  bool SaveAppearance();
+  int m_QuoteAppearance = 1, m_MessageAppearance = 0, m_TimestampPosition = 1, m_CommandHint = 0;
   // Optional Desk entries named by HARBOR_DESK_COMMANDS, each run as an argv child on this same terminal.
   std::vector<Option> DeskOptions();
   HarborDeskHost m_DeskHost;
