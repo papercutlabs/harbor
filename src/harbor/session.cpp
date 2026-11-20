@@ -237,13 +237,15 @@ CompatibleVersions(const std::string& p_Client, const std::string& p_Backend)
   // 0.1.24 (c23d36ef). The pinned 0.1.24 (3cc477f6) session/wire/protocol sources
   // also match 0.1.25 before this allowlist addition. The pinned 0.1.25 (885ebd85)
   // sources also match pre-allowlist 0.1.26 (63453e4b). Pinned 0.1.26 (750136da)
-  // sources match pre-allowlist 0.1.27 (dd0541b2). No general semver range.
+  // sources match pre-allowlist 0.1.27 (dd0541b2). Released 0.1.27 (c9935c28)
+  // matches pre-allowlist 0.1.28 (09db5368). No general semver range.
   return p_Client == p_Backend ||
          (p_Client == "0.1.23" && p_Backend == "0.1.22") ||
          (p_Client == "0.1.24" && (p_Backend == "0.1.22" || p_Backend == "0.1.23")) ||
          (p_Client == "0.1.25" && p_Backend == "0.1.24") ||
          (p_Client == "0.1.26" && p_Backend == "0.1.25") ||
-         (p_Client == "0.1.27" && p_Backend == "0.1.26");
+         (p_Client == "0.1.27" && p_Backend == "0.1.26") ||
+         (p_Client == "0.1.28" && p_Backend == "0.1.27");
 }
 
 // Window side ---------------------------------------------------------------------------------

@@ -11,7 +11,7 @@ namespace HarborUpdate
 inline const char*
 Version()
 {
-  return "0.1.27";
+  return "0.1.28";
 }
 inline std::string&
 RestartTarget()
