@@ -22,14 +22,14 @@ def check(mode):
         def log():return requests.read_text() if requests.exists() else ''
         def opens():return opened.read_text().splitlines() if opened.exists() else []
         samples=[]
-        def inspect():
-            child=subprocess.Popen([os.environ['HARBOR_EXECUTABLE'],'-d',str(config),'--target-surface','PICTURE-TEST','--target-pid',str(t.pid),'--inspect-ui'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=dict(os.environ,**env))
+        def inspect(window=False):
+            child=subprocess.Popen([os.environ['HARBOR_EXECUTABLE'],'-d',str(config),'--target-surface','PICTURE-TEST','--target-pid',str(t.pid),'--inspect-window' if window else '--inspect-ui'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=dict(os.environ,**env))
             until=time.monotonic()+8
             while child.poll() is None and time.monotonic()<until:t.pump(.01)
             if child.poll() is None:child.kill();child.wait();raise AssertionError('inspect timed out')
             out,err=child.communicate();assert child.returncode==0,err
             samples.append(out)
-            fields=out.rstrip('\n').split('\t');assert len(fields)==9 and fields[0]=='pcl.harbor.ui.v2',fields
+            fields=out.rstrip('\n').split('\t');assert len(fields)==(10 if window else 9) and fields[0]==('pcl.harbor.window.v1' if window else 'pcl.harbor.ui.v2'),fields
             return fields
         try:
             if 'photo-shown' not in t.text:t.picker('Studio')
@@ -48,9 +48,11 @@ def check(mode):
             assert log().count('picture-download photo-shown')==1,log()
             assert not list(downloads.iterdir())
             first=inspect();assert int(first[8])>0 and first[6]=='1',first
+            assert inspect(True)[9]=='external-preview'
             t.expect('draft stays')
             t.send(b'\x1b[I');after=inspect()
             assert after[8]=='0' and first[5]!=after[5],after
+            assert inspect(True)[9]=='conversation'
             assert 'draft stays' in t.text and 'Message actions' not in t.text
             # A downloaded filename is still the explicit Save action.
             t.click_text('harbor.png');t.expect('Saved to ')

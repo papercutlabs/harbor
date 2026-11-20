@@ -23,6 +23,12 @@ Office's normal update installs the exact macOS arm64 bundle selected by `office
 
 The hosted `Harbor macOS bundle` workflow builds and smoke-tests the bundle. A dispatch produces a dry-run artifact. A tag named `harbor-<native-version>-<full-source-commit>` publishes the exact matching private release. Its generated `harbor-release.json` is the consumer pin; copy it into Office only after the release exists. The archive checksum binds the uploaded bytes, including the exact source manifest and CPU target. Rebuilding a dry run does not establish the checksum of a later release.
 
+## Operational observations
+
+The private operational journal records native run identity, loaded version and source revision, semantic UI actions and typed request outcomes. Account and conversation keys are opaque identifiers. Keystrokes, draft or message text, clipboard contents, search contents and draft-derived UI comparison tokens are excluded.
+
+The authenticated UI control offers a separate window-metadata read, listed in `harbor --help`. It returns the exact native run and loaded build for its PID and cmux surface, plus opaque conversation identity and current view mode. PID alone is insufficient because an in-place restart keeps it. This read writes no journal event, so observing a window cannot retrigger diagnostics. A launch workspace is historical metadata; Office’s current cmux read supplies the current location.
+
 ## Build from source (developers)
 
 Install the [nchat build dependencies](doc/nchat-upstream-readme.md#dependencies), plus Go 1.26 or later, FFmpeg and Python 3. On macOS, Harbor also uses the system audio player and clipboard.
