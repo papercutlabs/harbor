@@ -137,3 +137,7 @@ for cols in (34, 50, 112):
             assert actual == expected, (cols, operation, actual, expected)
             assert int(fields[2]) == cursor, (cols, operation, fields[2], cursor)
         print(f'PASS exact saved draft at {cols} columns after row-end click + {operation}')
+
+# Run the viewport regression in this existing hosted native composer lane.
+from composer_wheel_smoke import check as check_composer_wheel
+check_composer_wheel()

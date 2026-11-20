@@ -19,7 +19,8 @@
     "tests/harbor/appearance_smoke.py",
     "tests/harbor/message_click_smoke.py",
     "tests/harbor/restart_all_smoke.py",
-    "tests/harbor/input_latency_smoke.py"
+    "tests/harbor/input_latency_smoke.py",
+    "tests/harbor/composer_wheel_smoke.py"
   ],
   "lanes": {
     "typing": [
@@ -43,7 +44,8 @@
       "tests/harbor/cursor_click_smoke.py",
       "tests/harbor/wheel_burst_smoke.py",
       "tests/harbor/appearance_smoke.py",
-      "tests/harbor/message_click_smoke.py"
+      "tests/harbor/message_click_smoke.py",
+      "tests/harbor/composer_wheel_smoke.py"
     ],
     "format": [
       "tests/harbor/format_test.cpp"
@@ -147,6 +149,9 @@
     ],
     "input_latency": [
       "tests/harbor/input_latency_smoke.py"
+    ],
+    "composer_wheel": [
+      "tests/harbor/composer_wheel_smoke.py"
     ]
   }
 }
