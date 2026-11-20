@@ -72,7 +72,7 @@ inline std::string Send(const std::string& dir, std::string surface, const std::
   if (pid.empty() || pid.size() > 12 || !std::all_of(pid.begin(), pid.end(), [](char c) { return c >= '0' && c <= '9'; }) || std::stoll(pid) <= 0)
     throw std::invalid_argument("--target-pid requires the exact current native Harbor UI PID.");
   if ((action.empty() && !target.Present()) || !Field(target.chat) || !Field(target.topic) || !Field(target.profile) ||
-      (!action.empty() && action != "inspect" && action != "park") || !Field(token))
+      (!action.empty() && action != "inspect" && action != "inspect-window" && action != "park") || !Field(token))
     throw std::invalid_argument("Targeted Harbor control requires a valid conversation route.");
   sockaddr_un addr;
   if (!Address(Path(dir, surface), addr)) throw std::invalid_argument("Harbor control socket path is too long for this configuration directory.");
@@ -85,7 +85,7 @@ inline std::string Send(const std::string& dir, std::string surface, const std::
   if (send(fd, request.data(), request.size(), MSG_NOSIGNAL) != ssize_t(request.size()))
   { close(fd); throw std::runtime_error("Harbor control delivery is unknown. Inspect the selected window before retrying."); }
   std::string response;
-  const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(action == "inspect" ? 2 : 45);
+  const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(action == "inspect" || action == "inspect-window" ? 2 : 45);
   while (response.find('\n') == std::string::npos && response.size() <= 1024)
   {
     const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(until - std::chrono::steady_clock::now()).count();
@@ -102,6 +102,7 @@ inline std::string Send(const std::string& dir, std::string surface, const std::
   close(fd);
   if (response == "ok\n") return response;
   if (action == "inspect" && response.rfind("pcl.harbor.ui.v1\t", 0) == 0 && response.back() == '\n') return response;
+  if (action == "inspect-window" && response.rfind("pcl.harbor.window.v1\t", 0) == 0 && response.back() == '\n') return response;
   if (response.rfind("error\t", 0) == 0 && response.back() == '\n' && Field(response.substr(6, response.size() - 7)))
     throw std::runtime_error(response.substr(6, response.size() - 7));
   throw std::runtime_error("Harbor control outcome is unknown. Inspect the selected window before retrying.");
@@ -176,7 +177,7 @@ public:
           if (fields.size() != 5 || !std::all_of(fields.begin(), fields.end(), Field)) throw std::invalid_argument("Malformed Harbor UI request.");
           if (fields[0] != std::to_string(getpid()) || fields[1] != m_Surface)
             throw std::invalid_argument("The selected Harbor UI changed. Refresh Desk before trying again; no conversation changed.");
-          if (control && fields[4].empty() && (fields[2] == "__inspect__" || fields[2] == "__park__"))
+          if (control && fields[4].empty() && (fields[2] == "__inspect__" || fields[2] == "__inspect-window__" || fields[2] == "__park__"))
           { control(fields[2], fields[3], it->fd); it->fd = -1; remove = true; }
           else {
           HarborRoute::Target target{ fields[2], fields[3], fields[4], {} }; HarborRoute::Validate(target);

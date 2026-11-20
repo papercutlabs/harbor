@@ -9,8 +9,9 @@ from native_smoke import Terminal, ROOT
 
 with tempfile.TemporaryDirectory(prefix='harbor-restart-all-') as directory:
     home=Path(directory); config=home/'profile'
+    (home/'.local/state').mkdir(parents=True)
     commands=home/'.office/desk/harbor-desk-commands';commands.parent.mkdir(parents=True)
-    env={'HOME':str(home),'HARBOR_DESK_COMMANDS':str(commands),'HARBOR_DESK_UPDATE_FILE':'','CMUX_SURFACE_ID':'','HARBOR_DEMO_RICH':'1'}
+    env={'HOME':str(home),'XDG_STATE_HOME':str(home/'.local/state'),'HARBOR_DESK_COMMANDS':str(commands),'HARBOR_DESK_UPDATE_FILE':'','CMUX_SURFACE_ID':'','HARBOR_DEMO_RICH':'1'}
     binary=Path(os.environ.get('HARBOR_EXECUTABLE',ROOT/'build-harbor/bin/harbor')).resolve()
     target_binary=Path(os.environ.get('HARBOR_RESTART_TARGET',str(binary))).resolve()
     office=home/'office'; target=office/'dist/harbor-runtime/bin/harbor'
@@ -87,6 +88,16 @@ for record in (home/'.office/harbor-windows').iterdir():
         b.picker('Studio'); b.send('live draft')
         b.message_tool('Keep the details quiet','Edit')
         b.clear_draft();b.send('edited draft');b.expect('Editing your message')
+        def native_window_runs():
+            trace=home/'.local/state/harbor/operational.jsonl'
+            result={}
+            for line in trace.read_text().splitlines():
+                event=json.loads(line)
+                if event.get('event')=='ui.run' and event.get('pid') in (a.pid,b.pid):
+                    assert event.get('loaded_version') and event.get('loaded_revision') and event.get('started_ms')
+                    result[event['pid']]=event['run_id']
+            return result
+        original_window_runs=native_window_runs();assert len(original_window_runs)==2
         old_names=set((home/'.office/harbor-windows').iterdir())
         old_socket=(config/'session.sock').stat().st_ino
         old_backend=backend_pid()
@@ -112,6 +123,8 @@ for record in (home/'.office/harbor-windows').iterdir():
         else:raise AssertionError('both native registrations did not change after exec\nA:\n'+a.text+'\nB:\n'+b.text)
         new_backend=backend_pid()
         assert new_backend!=old_backend,'old shared backend process survived restart'
+        replaced_window_runs=native_window_runs();assert set(replaced_window_runs)==set(original_window_runs)
+        assert all(replaced_window_runs[pid]!=original_window_runs[pid] for pid in original_window_runs),'exec-in-place kept an old diagnostic generation'
         print('BACKEND_RESTART '+json.dumps({'before_pid':old_backend,'after_pid':new_backend,'socket_inode_reused':(config/'session.sock').stat().st_ino==old_socket}),flush=True)
         end=time.monotonic()+5
         while time.monotonic()<end:

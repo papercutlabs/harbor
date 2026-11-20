@@ -225,6 +225,7 @@ static int ApplicationMain(int argc, char* argv[])
     }
 #ifdef HARBOR_BUILD
     else if (*it == "--inspect-ui") { if (!uiAction.empty()) { std::cerr << "Choose one UI control operation.\n"; return 1; } uiAction = "inspect"; }
+    else if (*it == "--inspect-window") { if (!uiAction.empty()) { std::cerr << "Choose one UI control operation.\n"; return 1; } uiAction = "inspect-window"; }
     else if (*it == "--park-ui")
     {
       if (std::distance(it + 1, args.end()) <= 0) { std::cerr << "--park-ui requires the inspected token.\n"; return 1; }
@@ -348,7 +349,7 @@ static int ApplicationMain(int argc, char* argv[])
       if (!uiAction.empty() && (initialTarget.Present() || sessionBackend || isSetup || isRemove || isKeyDump || isExport || checkSession))
         throw std::invalid_argument("UI inspection and parking require only an exact existing UI target.");
       const auto response = HarborUiControl::Send(FileUtil::GetApplicationDir(), targetSurface, targetPid, initialTarget, uiAction, uiToken);
-      if (uiAction == "inspect") { std::cout << response; return 0; }
+      if (uiAction == "inspect" || uiAction == "inspect-window") { std::cout << response; return 0; }
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
     std::cout << (uiAction == "park" ? "Duplicate view returned to Chats; drafts retained.\n" : "Requested conversation opened in the selected Harbor UI.\n");
@@ -930,6 +931,7 @@ void ShowHelp()
     "  --open-profile ID        select the exact native Telegram account profile\n"
     "  --target-surface ID --target-pid PID   route only that existing UI; never launch another\n"
     "  --inspect-ui            read current conversation identity of the exact targeted UI\n"
+    "  --inspect-window        read native window generation, loaded build and opaque conversation identity\n"
     "  --park-ui TOKEN         return an unchanged duplicate UI to Chats, retaining its drafts\n"
     "  -s         set up your Telegram account\n"
     "  -d DIR     use a separate configuration directory\n"
@@ -1152,10 +1154,10 @@ int main(int argc, char* argv[])
 {
 #ifdef HARBOR_BUILD
   // A check must not create even the operational-log directories before parsing its args.
-  const bool checking = std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string(arg) == "--check-session"; });
+  const bool checking = std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string(arg) == "--check-session" || std::string(arg) == "--inspect-window"; });
   if (!checking)
   {
-    HarborTrace::Start(FileUtil::GetSelfPath(), HarborUpdate::Version(), SysUtil::GetBuildInfo());
+    HarborTrace::Start(FileUtil::GetSelfPath(), HarborUpdate::Version(), SysUtil::GetBuildInfo(), SysUtil::GetBuildGitSha());
     AppUtil::SetSignalObserver(HarborTrace::Signal);
   }
 #endif
