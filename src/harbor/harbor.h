@@ -103,6 +103,7 @@ private:
     bool quote = false, timestamp = false;
     std::vector<unsigned> styles = {};
     std::vector<size_t> sources = {};
+    bool attachment = false;
   };
   struct Option
   {
@@ -238,6 +239,9 @@ private:
   void RebuildFiles();
   void AttachPreview(std::vector<std::string>);
   void SendAttachments();
+  void MessageClick(int x, int y);
+  void OpenLink(const std::string&);
+  void SaveAttachment(const std::string&, const std::string&, const std::string&);
   void OpenAttachment(const std::string&, const std::string&, const std::string&, bool preview = false);
   void ClipboardPaste();
   HarborFormatting::Text Format(const Conversation&, const ChatMessage&, bool forceConceal = false) const;

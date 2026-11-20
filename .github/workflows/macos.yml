@@ -45,7 +45,7 @@ jobs:
         py="$RUNNER_TEMP/harbor-smoke-venv/bin/python"
         "$py" -m pip install -r tests/harbor/requirements.txt
         scripts="appearance_smoke wheel_burst_smoke popup_hierarchy_smoke command_keys_smoke warm_host_protocol warm_handoff_smoke word_navigation_smoke session_check_smoke composer_rows_smoke cursor_click_smoke"
-        scripts="$scripts typing_smoke"
+        scripts="$scripts typing_smoke message_click_smoke"
         # A cancelled or timed-out step still shows what each script printed.
         trap 'for s in $scripts; do echo "::group::$s (unfinished)"; cat "$RUNNER_TEMP/$s.log" 2>/dev/null || true; echo "::endgroup::"; done' INT TERM
         for s in $scripts; do
