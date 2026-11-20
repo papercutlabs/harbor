@@ -18,6 +18,7 @@ var events chan uv.Event
 var cancel context.CancelFunc
 var reader cancelreader.CancelReader
 var done chan struct{}
+var pending uv.Event
 
 //export HarborInputStart
 func HarborInputStart() C.int {
@@ -29,6 +30,7 @@ func HarborInputStart() C.int {
 	var ctx context.Context
 	ctx, cancel = context.WithCancel(context.Background())
 	events = make(chan uv.Event, 256)
+	pending = nil
 	d := uv.NewTerminalReader(reader, os.Getenv("TERM"))
 	d.EscTimeout = 100 * time.Millisecond
 	ch := events
@@ -90,14 +92,55 @@ func mouse(m uv.Mouse, action int) (out C.HarborInputEvent) {
 	return
 }
 
+// Batch only already queued, consecutive wheel ticks. No timer or synthetic
+// momentum: isolated ticks stay precise and a direction change/key/click keeps
+// its place. Rendering each tick separately lets a hard flick outlive its input.
+func wheelBatch(e uv.Event) C.HarborInputEvent {
+	wheel, ok := e.(uv.MouseWheelEvent)
+	if !ok {
+		return translate(e)
+	}
+	count := 1
+	for count < 256 {
+		select {
+		case next, open := <-events:
+			if !open {
+				out := translate(e)
+				out.code = C.int(count)
+				return out
+			}
+			if other, ok := next.(uv.MouseWheelEvent); ok && other == wheel {
+				count++
+			} else {
+				pending = next
+				out := translate(e)
+				out.code = C.int(count)
+				return out
+			}
+		default:
+			out := translate(e)
+			out.code = C.int(count)
+			return out
+		}
+	}
+	out := translate(e)
+	out.code = C.int(count)
+	return out
+}
+
 //export HarborInputPoll
 func HarborInputPoll(ms C.int) C.HarborInputEvent {
+	if pending != nil {
+		e := pending
+		pending = nil
+		return wheelBatch(e)
+	}
 	select {
 	case e, ok := <-events:
 		if !ok {
 			return C.HarborInputEvent{kind: -1}
 		}
-		return translate(e)
+		return wheelBatch(e)
 	case <-time.After(time.Duration(ms) * time.Millisecond):
 		return C.HarborInputEvent{}
 	}

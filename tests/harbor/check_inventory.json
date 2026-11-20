@@ -13,7 +13,8 @@
     "tests/harbor/initial_route_smoke.py",
     "tests/harbor/session_check_smoke.py",
     "tests/harbor/composer_rows_smoke.py",
-    "tests/harbor/cursor_click_smoke.py"
+    "tests/harbor/cursor_click_smoke.py",
+    "tests/harbor/wheel_burst_smoke.py"
   ],
   "lanes": {
     "static": [
@@ -30,7 +31,8 @@
       "tests/harbor/initial_route_smoke.py",
       "tests/harbor/session_check_smoke.py",
       "tests/harbor/composer_rows_smoke.py",
-      "tests/harbor/cursor_click_smoke.py"
+      "tests/harbor/cursor_click_smoke.py",
+      "tests/harbor/wheel_burst_smoke.py"
     ],
     "format": [
       "tests/harbor/format_test.cpp"
@@ -119,6 +121,9 @@
     ],
     "ui_control": [
       "tests/harbor/ui_control_smoke.py"
+    ],
+    "wheel_burst": [
+      "tests/harbor/wheel_burst_smoke.py"
     ]
   }
 }
