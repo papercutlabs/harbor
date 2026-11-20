@@ -13,7 +13,7 @@ Harbor lets its user hold Telegram conversations in a terminal.
 9. React with a reaction the selected message actually allows; opening the chooser sends nothing, and late replies never apply to another conversation or message. Choose which of a message’s real link destinations to open.
 10. See which conversation is open: its name heads the screen and titles the terminal. Normal connected state shows no brand or status row; only connecting or authenticating is shown. While reading older messages, new incoming messages show one count-only bar (`↓ N new messages`, Ctrl+G) above the composer; Ctrl+G or a click goes to the latest and keeps the draft, reply/edit and attachments.
 
-11. See incoming Telegram typing as an animated three-dot bubble below the latest message. Activity is specific to the account and conversation or topic, clears on stop, reply or expiry, and stays out of older history without moving the draft. Reduced motion keeps the dots still.
+11. See incoming Telegram typing as an animated three-dot bubble below the latest message. Activity is specific to the account and conversation or topic, clears on provider stop, provider expiry, reply or disconnect, and stays out of older history without moving the draft. Reduced motion keeps the dots still.
 
 Source: PCL-1467, Teren’s incoming typing request in Telegram 11355.
 

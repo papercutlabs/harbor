@@ -257,12 +257,28 @@ HarborDemo::Login()
       Later(delay, typing);
     };
     activity(2200, true);
-    if (std::string(mode) != "expire") activity(3600, true);
+    if (std::string(mode) != "expire" && std::string(mode) != "coalesced") activity(3600, true);
+    // TDLib sends state changes, not every renewed action. One active notification may remain
+    // valid for a long turn; only its eventual stop is delivered to the UI.
+    if (std::string(mode) == "coalesced") activity(11000, false);
+    // An unrenewed TDLib action times out after 5.5s and produces a stop notification.
+    if (std::string(mode) == "expire") activity(7700, false);
+    if (std::string(mode) == "delayed")
+    {
+      activity(7200, true);
+      activity(12200, true);
+      activity(13200, false);
+    }
     if (std::string(mode) == "stop") activity(5000, false);
+    if (std::string(mode) == "disconnect")
+    {
+      auto disconnected = std::make_shared<ConnectNotify>(m_Id);
+      disconnected->success = false; Later(5000, disconnected);
+    }
     if (std::string(mode) == "reply")
     {
       ChatMessage reply;
-      reply.id = "typing-complete"; reply.senderId = "marina";
+      reply.id = "typing-complete"; reply.senderId = "marina"; reply.isOutgoing = false;
       reply.text = "The active reply is complete."; reply.timeSent = TimeUtil::GetCurrentTimeMSec() + 5000;
       auto incoming = std::make_shared<NewMessagesNotify>(m_Id);
       incoming->success = true; incoming->chatId = chat; incoming->chatMessages = {reply};
