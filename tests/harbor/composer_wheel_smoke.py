@@ -70,6 +70,7 @@ def check():
                 assert view(t)[1][0].startswith('R00') and history_rows(t) == history
             finally:
                 t.close()
+                t.wait_backend_shutdown()
             actual, cursor, follow = saved(config)
             assert actual == source and cursor == len(source), ('wheel edited draft/caret', actual, cursor)
             assert follow == '1', 'draft wheel disabled following conversation history'
@@ -108,6 +109,7 @@ def check():
             assert 'ROZW00' in view(t)[1][0], 'conversation switch lost the caret row'
         finally:
             t.close()
+            t.wait_backend_shutdown()
         actual, cursor, _ = saved(config)
         assert actual == source and cursor == 3, ('follow/edit changed source unexpectedly', actual, cursor, source)
     print('PASS Unicode draft: typing, arrows, resize and clicking resume caret following; '

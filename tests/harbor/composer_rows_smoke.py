@@ -130,6 +130,7 @@ for cols in (34, 50, 112):
                 assert 'Delete message' not in t.text
             finally:
                 t.close()
+                t.wait_backend_shutdown()
             records = Path(directory, 'harbor-state').read_text().splitlines()
             active = next(row.split()[1] for row in records if row.startswith('active '))
             fields = next(row.split() for row in records if row.split()[0] == active)
