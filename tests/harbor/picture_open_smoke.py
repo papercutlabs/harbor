@@ -37,6 +37,8 @@ def check(mode):
             assert 'picture-download photo-shown action=0' in log(),log()
             assert 'photo-offscreen' not in log(),log()+'\n'+t.text
             assert not opens() and not list(downloads.iterdir()),'automatic download opened or saved'
+            # A history refresh may replay stale remote metadata during the local transfer.
+            t.send(b'\x12');t.expect('Refreshing conversation')
             before_open=inspect();assert before_open[8]=='0'
             y=next(y for y,line in enumerate(t.screen.display) if '[Photo]' in line)
             # Thumbnail rows are reserved even while its original download finishes.
@@ -50,7 +52,9 @@ def check(mode):
             first=inspect();assert int(first[8])>0 and first[6]=='1',first
             assert inspect(True)[9]=='external-preview'
             t.expect('draft stays')
-            t.send(b'\x1b[I');after=inspect()
+            t.send(b'\x1b[I');late_focus=inspect()
+            assert late_focus[8]==first[8],late_focus
+            t.send(b'\x05');after=inspect()
             assert after[8]=='0' and first[5]!=after[5],after
             assert inspect(True)[9]=='conversation'
             assert 'draft stays' in t.text and 'Message actions' not in t.text
@@ -63,8 +67,10 @@ def check(mode):
             second=inspect();assert int(second[8])>int(first[8]),second
             t.send('!');assert inspect()[8]=='0'
             assert 'draft stays!' in t.text and len(opens())==2
+            t.send(b'\x12');t.expect('Refreshing conversation');t.pump(.2)
+            assert log().count('picture-download photo-shown')==1 and len(opens())==2,log()
             print('PREVIEW_NATIVE_SAMPLES '+json.dumps({'mode':mode,'raw':samples}),flush=True)
-            print('PASS visible largest-photo metadata path auto-downloads once; offscreen/chat scope; pending-click Preview; no auto-open/save; explicit save; fresh Focus token and focus/input return; draft preserved')
+            print('PASS visible largest-photo metadata path auto-downloads once; offscreen/chat scope; pending-click Preview; no auto-open/save; explicit save; fresh Focus token and late focus-in ignored; deliberate input return; draft preserved')
         finally:
             t.close()
             t.wait_backend_shutdown()

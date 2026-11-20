@@ -8,6 +8,7 @@
 #include "fileutil.h"
 #include "format.h"
 #include "media.h"
+#include "previewguard.h"
 #include "messagecache.h"
 #include "protocolutil.h"
 #include "strutil.h"
@@ -16,6 +17,7 @@
 #include "update.h"
 #include <algorithm>
 #include <clocale>
+#include <chrono>
 #include <cmath>
 #include <cwctype>
 #include <dirent.h>
@@ -563,6 +565,7 @@ Harbor::UiSnapshot() const
           << c.selected << c.scroll << c.follow << c.visit;
   }
   for (const auto& attachment : m_Attachments) state << attachment;
+  for (const auto& picture : m_PreviewOpens) state << picture;
   return std::to_string(std::hash<std::string>{}(state.str()));
 }
 void
@@ -587,7 +590,7 @@ Harbor::PollUiControl()
     m_ControlPending = true; m_ControlError.clear();
   }, [this](const std::string& action, const std::string& token, int reply) {
     const auto at = m_Chats.find(m_Current);
-    const bool ready = m_ControlReply < 0 && m_InitialChat.empty() && !m_InColdDeskView && m_Menu.empty() && m_Attachments.empty() && m_AuthOwner.empty();
+    const bool ready = m_ControlReply < 0 && m_InitialChat.empty() && !m_InColdDeskView && m_Menu.empty() && m_Attachments.empty() && m_PreviewOpens.empty() && m_AuthOwner.empty();
     if (action == "__inspect-window__")
     {
       const auto& identity = HarborTrace::Get();
@@ -693,6 +696,7 @@ Harbor::Run()
     TryRestartAll();
     if (!m_Running) break;
     PollUiControl();
+    TryOpenPictures();
     if (!m_MouseDown)
       ProcessEvents();
     if (m_MouseDown != deferring)
@@ -1087,12 +1091,25 @@ Harbor::Merge(Conversation& c, const std::vector<ChatMessage>& messages, bool ou
       c.detached.erase(m.id);
     else if (!c.messages.count(m.id) && previousOldest >= 0 && m.timeSent < previousOldest)
       c.detached.insert(m.id);
+    std::string localFileInfo;
+    const auto prior = c.messages.find(m.id);
+    if (prior != c.messages.end() && !prior->second.fileInfo.empty() && !m.fileInfo.empty())
+    {
+      const auto local = ProtocolUtil::FileInfoFromHex(prior->second.fileInfo);
+      const auto incoming = ProtocolUtil::FileInfoFromHex(m.fileInfo);
+      // History can replay pre-transfer metadata while this UI owns the download.
+      // Preserve only the same file's live transfer or an existing completed file.
+      if (!local.fileId.empty() && local.fileId == incoming.fileId && incoming.fileStatus == FileStatusNotDownloaded &&
+          (local.fileStatus == FileStatusDownloading || (local.fileStatus == FileStatusDownloaded && File(local.filePath))))
+        localFileInfo = prior->second.fileInfo;
+    }
     c.messages[m.id] = m;
+    if (!localFileInfo.empty()) c.messages[m.id].fileInfo = localFileInfo;
     // Cached Telegram photos from earlier builds lack MIME metadata. Their
     // protocol placeholder still identifies them before the local file exists.
     if (!m.fileInfo.empty())
     {
-      auto file = ProtocolUtil::FileInfoFromHex(m.fileInfo);
+      auto file = ProtocolUtil::FileInfoFromHex(c.messages[m.id].fileInfo);
       if (file.fileType.empty() && file.filePath == "[Photo]")
       {
         file.fileType = "image/jpeg";
@@ -2930,7 +2947,7 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
     // Harbor still owns input during preparation. Launch typeahead cannot become a draft or Desk action.
     const auto event = HarborInputPoll(0);
     if (event.kind > 0) m_LastInput = HarborDeskUpdate::Now();
-    if (event.kind > 0 && (event.kind != 4 || event.action != 3)) m_PreviewActive = false; // focus-in or explicit user input returns to Harbor
+    if (event.kind >= 1 && event.kind <= 4 && (event.kind != 4 || event.action != 3)) m_PreviewActive = false; // deliberate key, paste or mouse input returns to Harbor
     const bool cancel = m_ControlPending || AppUtil::IsTerminateRequested() || event.kind == -1 || (event.kind == 1 && (event.code == 27 || event.code == 3 || (event.code == 'c' && (event.mods & 4))));
     free(event.text);
     return cancel;
@@ -4101,17 +4118,43 @@ Harbor::OpenAttachment(const std::string& p, const std::string& chatId, const st
                     "Preview",
                     [this, f]
                     {
-                      if (m_Media->Open(f.filePath, true)) { ++m_PreviewSequence; m_PreviewActive = true; }
+                      OpenPicture(f.filePath);
                       CloseMenu();
                     } },
                   { "Back to conversation", "Esc", [this] { CloseMenu(); } } };
   }
   else if (type.find("image") == 0)
   {
-    if (m_Media->Open(f.filePath, true)) { ++m_PreviewSequence; m_PreviewActive = true; }
+    OpenPicture(f.filePath);
   }
   else
     m_Media->Open(f.filePath);
+  m_Dirty = true;
+}
+void
+Harbor::OpenPicture(const std::string& path)
+{
+  m_PreviewOpens.push_back(path);
+  TryOpenPictures();
+  if (!m_PreviewOpens.empty()) Notify("Opening picture…");
+}
+void
+Harbor::TryOpenPictures()
+{
+  if (m_PreviewOpens.empty()) return;
+  HarborPreviewGuard::Lease guard(false);
+  if (guard.busy) return; // queue only this open; input and inspection keep running
+  const auto path = m_PreviewOpens.front(); m_PreviewOpens.pop_front();
+  if (guard.fd < 0) { Notify(guard.error); return; }
+  if (m_Media->Open(path, true))
+  {
+    // A successful open is a new event even after exec preserves PID and surface.
+    // Microseconds from the boot clock remain exact in the Office numeric decoder.
+    const auto tick = uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count());
+    m_PreviewSequence = std::max(m_PreviewSequence + 1, tick);
+    m_PreviewActive = true;
+  }
   m_Dirty = true;
 }
 void
@@ -4623,7 +4666,7 @@ Harbor::ReadInput()
   }
   auto event = HarborInputPoll(20);
   if (event.kind > 0) m_LastInput = HarborDeskUpdate::Now();
-  if (event.kind > 0 && (event.kind != 4 || event.action != 3)) m_PreviewActive = false; // focus-in or explicit user input returns to Harbor
+  if (event.kind >= 1 && event.kind <= 4 && (event.kind != 4 || event.action != 3)) m_PreviewActive = false; // deliberate key, paste or mouse input returns to Harbor
   if (event.kind == -1)
     m_Running = false;
   else if (event.kind == 2)

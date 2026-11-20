@@ -129,6 +129,7 @@ private:
   HarborUiControl::Server m_UiControl;
   uint64_t m_PreviewSequence = 0;
   bool m_PreviewActive = false;
+  std::deque<std::string> m_PreviewOpens;
   std::set<std::string> m_PendingPictures;
   int m_ControlReply = -1;
   std::string m_ControlProfile, m_ControlConversation, m_ControlKey, m_ControlError;
@@ -258,6 +259,8 @@ private:
   void OpenLink(const std::string&);
   void SaveAttachment(const std::string&, const std::string&, const std::string&);
   void OpenAttachment(const std::string&, const std::string&, const std::string&, bool preview = false);
+  void OpenPicture(const std::string&);
+  void TryOpenPictures();
   void ClipboardPaste();
   HarborFormatting::Text Format(const Conversation&, const ChatMessage&, bool forceConceal = false) const;
   std::wstring Excerpt(const Conversation&, const ChatMessage&) const;

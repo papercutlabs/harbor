@@ -176,6 +176,9 @@ def main():
                      ["--session-backend", "-1"], ["--target-surface", "s"], ["--target-pid", "123"],
                      ["--help"], ["--version"]):
             probe([*args, "-d", str(missing)], "only to ordinary Harbor startup arguments")
+        for flag in ("--focus-guard", "--focus-guard-effect"):
+            for check_first in (False, True):
+                probe([flag, "-d", str(missing)], "only to ordinary Harbor startup arguments", check_first)
         for args, error in ((["--open-telegram-chat", "0"], "cannot be zero"),
                             (["--open-telegram-topic", "3"], "require --open-telegram-chat"),
                             (["--open-telegram-chat", "abc"], "signed decimal")):

@@ -55,6 +55,7 @@
 #include "harbor/restart.h"
 #include "harbor/session.h"
 #include "harbor/trace.h"
+#include "harbor/previewguard.h"
 #include "harbor/launchroute.h"
 #include "harbor/uicontrol.h"
 static bool harborDemo = false;
@@ -930,6 +931,7 @@ void ShowHelp()
     "  --open-telegram-topic ID  select this positive decimal forum topic in that chat\n"
     "  --open-profile ID        select the exact native Telegram account profile\n"
     "  --target-surface ID --target-pid PID   route only that existing UI; never launch another\n"
+    "  --focus-guard           hold Focus/Preview ordering through one framed osascript effect\n"
     "  --inspect-ui            read current conversation identity of the exact targeted UI\n"
     "  --inspect-window        read native window generation, loaded build and opaque conversation identity\n"
     "  --park-ui TOKEN         return an unchanged duplicate UI to Chats, retaining its drafts\n"
@@ -1153,6 +1155,16 @@ static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs, const 
 int main(int argc, char* argv[])
 {
 #ifdef HARBOR_BUILD
+  const bool sessionProbe = std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string(arg) == "--check-session"; });
+  const bool focusHelper = std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string(arg) == "--focus-guard" || std::string(arg) == "--focus-guard-effect"; });
+  if (sessionProbe && focusHelper)
+  { std::cerr << "--check-session applies only to ordinary Harbor startup arguments; Focus helper modes cannot be combined with it.\n"; return 1; }
+  if (argc > 1 && std::string(argv[1]) == "--focus-guard-effect") return HarborPreviewGuard::Effect(argc, argv);
+  if (std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string(arg) == "--focus-guard"; }))
+  {
+    if (argc != 2) { std::cerr << "Focus guard takes no arguments; invoke harbor --focus-guard and send the framed request on stdin.\n"; return 2; }
+    return HarborPreviewGuard::Run();
+  }
   // A check must not create even the operational-log directories before parsing its args.
   const bool checking = std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string(arg) == "--check-session" || std::string(arg) == "--inspect-window"; });
   if (!checking)
