@@ -1,7 +1,7 @@
 """Read current chat through the real CLI and park duplicates without discarding composer state."""
 from native_smoke import Terminal
 from pathlib import Path
-import json, os, subprocess, tempfile, time
+import json, os, shutil, subprocess, tempfile, time
 exe=os.environ['HARBOR_EXECUTABLE']
 with tempfile.TemporaryDirectory(prefix='hi-',dir='/tmp') as directory:
     config=Path(directory)/'config'; home=Path(directory)/'home';home.mkdir();(home/'.local/state').mkdir(parents=True)
@@ -30,6 +30,34 @@ with tempfile.TemporaryDirectory(prefix='hi-',dir='/tmp') as directory:
         assert all(not value or value.isdigit() for value in fields[7:9])
         assert fields[9] in ('picker','conversation')
         samples.append(out);return fields
+    def retain_failure():
+        # Preserve the owned fictional demo's actual evidence before profile cleanup.
+        # On CI the bounded stdout summary survives even without an artifact directory.
+        try:
+            destination=Path(os.environ.get('HARBOR_EVIDENCE_DIR') or tempfile.mkdtemp(prefix='harbor-identity-failure-'))
+            destination.mkdir(parents=True,exist_ok=True)
+            journal=home/'.local/state/harbor/operational.jsonl'
+            records=[]
+            if journal.exists():
+                shutil.copyfile(journal,destination/'operational-native.jsonl')
+                for line in journal.read_text().splitlines():
+                    try:records.append(json.loads(line))
+                    except json.JSONDecodeError:pass # retain the original bytes, including a concurrent final write
+            (destination/'window-observations.json').write_text(json.dumps(samples))
+            views=[]
+            for index,view in enumerate(windows):
+                (destination/f'window-{index}.raw').write_bytes(view.raw)
+                (destination/f'window-{index}.txt').write_text(view.text)
+                views.append({'pid':view.pid,'screen':view.text})
+            keys=('event','pid','ts_ms','run_id','operation','request_id','connection_id','outcome','type','cause')
+            events=[{k:r[k] for k in keys if k in r} for r in records
+                if r.get('pid') in [v.pid for v in windows] or r.get('event') in
+                ('request.backend.received','request.result.produced','backend.shutdown')]
+            summary={'evidence_directory':str(destination),'windows':views,'window_samples':samples,'events':events[-60:]}
+            (destination/'failure-summary.json').write_text(json.dumps(summary))
+            print('IDENTITY_FAILURE_EVIDENCE '+json.dumps(summary),flush=True)
+        except Exception as evidence_error:
+            print('IDENTITY_FAILURE_EVIDENCE_ERROR '+type(evidence_error).__name__,flush=True)
     try:
         backend_window=Terminal(cols=110,config_dir=config,extra_env=dict(env,CMUX_SURFACE_ID='IDENTITY-BACKEND'));windows.append(backend_window)
         backend_window.picker('Saved Messages')
@@ -73,7 +101,14 @@ with tempfile.TemporaryDirectory(prefix='hi-',dir='/tmp') as directory:
             (destination/'operational-native.jsonl').write_text(data)
         print('NATIVE_IDENTITY_SAMPLES '+json.dumps({'initial':initial,'switched':different,'parked':parked,'reopened':reopened}),flush=True)
         print('PASS actual CLI current identity differs from launch argv; conditional parking rejects draft races; all draft state and other UI preserved',flush=True)
+    except BaseException:
+        retain_failure()
+        raise
     finally:
-        for view in windows:view.close()
-        if windows:windows[-1].wait_backend_shutdown()
-        if windows:windows[-1].wait_backend_shutdown()
+        try:
+            for view in windows:view.close()
+            if windows:windows[-1].wait_backend_shutdown()
+            if windows:windows[-1].wait_backend_shutdown()
+        except BaseException:
+            retain_failure()
+            raise

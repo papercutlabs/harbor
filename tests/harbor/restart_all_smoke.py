@@ -72,8 +72,8 @@ for record in (home/'.office/harbor-windows').iterdir():
             cells=[[{key:getattr(t.screen.buffer[y][x],key) for key in ('data','fg','bg','bold','reverse')} for x in range(t.cols)] for y in range(t.rows)]
             (out/'settings.json').write_text(json.dumps(cells))
         t.click_text('Update all windows')
-    a=Terminal(config_dir=config,extra_env=env,executable=binary)
-    b=Terminal(config_dir=config,extra_env=env,executable=binary)
+    a=Terminal(config_dir=config,extra_env=dict(env,CMUX_SURFACE_ID='RESTART-A'),executable=binary)
+    b=Terminal(config_dir=config,extra_env=dict(env,CMUX_SURFACE_ID='RESTART-B'),executable=binary)
     try:
         a.picker('Saved Messages'); a.send(b'\x1b[5~')
         note=re.search(r'Note \d+:',a.text).group()
@@ -88,16 +88,26 @@ for record in (home/'.office/harbor-windows').iterdir():
         b.picker('Studio'); b.send('live draft')
         b.message_tool('Keep the details quiet','Edit')
         b.clear_draft();b.send('edited draft');b.expect('Editing your message')
-        def native_window_runs():
-            trace=home/'.local/state/harbor/operational.jsonl'
+        def native_window_runs(until):
             result={}
-            for line in trace.read_text().splitlines():
-                event=json.loads(line)
-                if event.get('event')=='ui.run' and event.get('pid') in (a.pid,b.pid):
-                    assert event.get('loaded_version') and event.get('loaded_revision') and event.get('started_ms')
-                    result[event['pid']]=event['run_id']
+            for window,surface in ((a,'RESTART-A'),(b,'RESTART-B')):
+                child=subprocess.Popen([str(binary),'-d',str(config),'--target-surface',surface,
+                    '--target-pid',str(window.pid),'--inspect-window'],stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,text=True,env=dict(os.environ,**env))
+                try:
+                    while child.poll() is None and time.monotonic()<until:
+                        a.pump(.01);b.pump(.01)
+                    assert child.poll() is not None,'addressed window inspection did not finish'
+                    out,err=child.communicate();assert child.returncode==0,err
+                    fields=out.rstrip('\n').split('\t')
+                    assert len(fields)==10 and fields[:3]==['pcl.harbor.window.v1',str(window.pid),surface],fields
+                    assert fields[3].startswith(str(window.pid)+'-') and fields[4].isdigit(),fields
+                    assert fields[5].count('.')==2 and fields[6],fields
+                    result[window.pid]=fields[3:7] # actual run, start, loaded version and revision
+                finally:
+                    if child.poll() is None:child.kill();child.wait()
             return result
-        original_window_runs=native_window_runs();assert len(original_window_runs)==2
+        original_window_runs=native_window_runs(time.monotonic()+12);assert len(original_window_runs)==2
         old_names=set((home/'.office/harbor-windows').iterdir())
         old_socket=(config/'session.sock').stat().st_ino
         old_backend=backend_pid()
@@ -123,8 +133,11 @@ for record in (home/'.office/harbor-windows').iterdir():
         else:raise AssertionError('both native registrations did not change after exec\nA:\n'+a.text+'\nB:\n'+b.text)
         new_backend=backend_pid()
         assert new_backend!=old_backend,'old shared backend process survived restart'
-        replaced_window_runs=native_window_runs();assert set(replaced_window_runs)==set(original_window_runs)
-        assert all(replaced_window_runs[pid]!=original_window_runs[pid] for pid in original_window_runs),'exec-in-place kept an old diagnostic generation'
+        replaced_window_runs=native_window_runs(end);assert set(replaced_window_runs)==set(original_window_runs)
+        assert all(replaced_window_runs[pid][0]!=original_window_runs[pid][0] and
+                   int(replaced_window_runs[pid][1])>=int(original_window_runs[pid][1])
+                   for pid in original_window_runs),'exec-in-place kept an old native generation'
+        print('NATIVE_WINDOW_RESTART '+json.dumps({'before':original_window_runs,'after':replaced_window_runs}),flush=True)
         print('BACKEND_RESTART '+json.dumps({'before_pid':old_backend,'after_pid':new_backend,'socket_inode_reused':(config/'session.sock').stat().st_ino==old_socket}),flush=True)
         end=time.monotonic()+5
         while time.monotonic()<end:
@@ -134,6 +147,9 @@ for record in (home/'.office/harbor-windows').iterdir():
         a.expect('anchored draft');a.expect('Replying');b.expect('edited draft');b.expect('Editing your message');b.expect('Studio')
         expected_version=subprocess.run([str(target_binary),'--version'],text=True,capture_output=True,check=True).stdout.split()[1]
         assert all(expected_version==record.read_text().split('\t')[2] for record in names)
+        assert all(fields[2]==expected_version for fields in replaced_window_runs.values()),replaced_window_runs
+        if target_binary==binary:
+            assert all(fields[3]==original_window_runs[pid][3] for pid,fields in replaced_window_runs.items()),replaced_window_runs
         # A fresh backend may supply chat metadata/drafts before the anchored message page.
         end=time.monotonic()+5
         while time.monotonic()<end:
@@ -204,7 +220,8 @@ for record in (home/'.office/harbor-windows').iterdir():
         find_body(a,'That was the quote');a.expect('second quoted line')
         print('PASS manual restart keeps a visited message at its line and Return action; quote expansion and spoiler reveal survive; pending attachment preview defers until cancelled without losing its draft',flush=True)
     except BaseException:
-        snapshot={'old_backend_pid':locals().get('old_backend'),'old_socket_inode':locals().get('old_socket')}
+        snapshot={'old_backend_pid':locals().get('old_backend'),'old_socket_inode':locals().get('old_socket'),
+                  'original_windows':locals().get('original_window_runs'),'replacement_windows':locals().get('replaced_window_runs')}
         try:snapshot['current_backend_pid']=backend_pid()
         except Exception as error:snapshot['backend_read_error']=str(error)
         try:
