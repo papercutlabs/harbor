@@ -1567,7 +1567,7 @@ Harbor::BuildRows()
             begin >= code.arg.size() + 3)
           begin -= code.arg.size() + 3; // existing non-shell language header
         const int first = layout.cursors[begin].row;
-        if (Width(layout.lines[first]) <= width - 4)
+        if (Width(layout.lines[first]) <= width - 2)
           copyRows[first] = int(index);
         else
           copyHeaders[first] = int(index);
@@ -1919,9 +1919,9 @@ Harbor::Draw()
       m_Hits.push_back({ y, x, w, "message", row.id });
       if (row.copyCode >= 0)
       {
-        const int copyX = x + w - 5;
-        Text(y, copyX, 3, L" ⧉ ", color);
-        m_Hits.push_back({ y, copyX, 3, "code-copy", row.id, row.copyCode });
+        const int copyX = x + w - 3;
+        Text(y, copyX, 1, L"⧉", color);
+        m_Hits.push_back({ y, copyX - 1, 3, "code-copy", row.id, row.copyCode });
       }
       if (row.attachment)
         m_Hits.push_back({ y, x, w, "attachment", row.id });

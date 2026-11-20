@@ -13,7 +13,7 @@ clipboard, opened = work/'clipboard', work/'opened'
 opener = work/'opener.sh'
 opener.write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "'+str(opened)+'"\n')
 opener.chmod(0o755)
-short = "printf 'short'"
+short = "printf 'right edge!'"
 multiline = "printf '%s\\n' 'first line deliberately crosses a narrow pane'\n\tprintf '你好 é'\nprintf 'tail'\n"
 
 def point(t, text):
@@ -62,6 +62,7 @@ for cols in (32,56,110):
         t.send('draft stays')
         p=icon(t,'Short command:');x,y=point(t,short)
         assert p[1]==y and p[0]>x+len(short),t.text
+        if cols==32: assert len(short)==cols-12  # exact command + gap + icon fit
         assert '‹shell›' not in t.text
         copy(t,p,short)
         t.snapshot(f'harbor-shell-copy-short-{cols}')

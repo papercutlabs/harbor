@@ -149,7 +149,7 @@ HarborDemo::SeedRich(const std::function<void(const std::string&, const std::str
   }
   if (getenv("HARBOR_DEMO_CODE_COPY"))
   {
-    const std::string shortCode = "printf 'short'", shortPrefix = "Short command:\n";
+    const std::string shortCode = "printf 'right edge!'", shortPrefix = "Short command:\n";
     rich("doug", 1, shortPrefix + shortCode + "\nAfter short command.",
          { { RichText::Pre, U16(shortPrefix), U16(shortCode), "shell" } });
     const std::string prefix = "Multiline command:\n",
