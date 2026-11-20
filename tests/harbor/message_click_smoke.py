@@ -45,6 +45,8 @@ for cols in (42, 110):
         'HARBOR_DEMO_REQUEST_LOG': str(requests), 'XDG_STATE_HOME': str(work / f'state-{cols}')})
     try:
         t.picker('Doug formatting')
+        # Picker closure precedes the asynchronous history response.
+        t.expect('PcL')
         original_config = (config / 'app.conf').read_bytes()
         original_mtime = (config / 'app.conf').stat().st_mtime_ns
         # Native text_url words, an internal space, and a word on a wrapped row.
