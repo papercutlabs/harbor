@@ -63,6 +63,8 @@ python3 -m venv .venv
 .venv/bin/python tests/harbor/session_check_smoke.py
 ```
 
+The command menu proof can also exercise actual muted voice playback on a media-capable host: `HARBOR_COMMAND_MENU_AUDIO=1 .venv/bin/python tests/harbor/command_menu_smoke.py`. Generic hosted builders qualify menu and contextual navigation without requiring ffmpeg or an audio device.
+
 Additional PTY checks cover formatting, history loading, updates, media, and word deletion. They use isolated offline demo accounts and do not send Telegram messages. macOS clipboard checks use a private named pasteboard. Set `HARBOR_EXECUTABLE` to test a specific installed binary.
 
 The native implementation has been exercised on macOS/cmux. Other terminal and Linux paths are present but have less runtime coverage. Video playback opens an external player; it is not an in-terminal video player. The update prompt applies already-installed releases rather than downloading or building them automatically.
