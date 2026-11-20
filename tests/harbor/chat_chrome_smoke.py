@@ -110,7 +110,9 @@ for cols, rows, use_click in [(56, 38, False), (110, 40, True), (26, 30, False)]
         else:
             t.picker('Marina')
         t.send('kept draft'); t.send(b'\x1b[5~')
-        t.expect('▀')  # wait for the asynchronous image, so loading completion is not mistaken for a reader jump
+        # The bottom timestamp uses an extra row; at 26 columns the image is above this viewport.
+        if cols >= 30:
+            t.expect('▀')  # settle the visible image before comparing reading positions
         before_prompt = prompt_row(t)
         main_x = 25 if cols >= 100 else 0
         history = [line[main_x:] for line in t.screen.display[:before_prompt - 2]]
@@ -158,7 +160,7 @@ for use_click in (False, True):
         else: t.send(b'\x07')
         t.expect('Preview attachments'); t.expect('harbor.png'); t.expect('kept attachment caption')
         assert '↓ 3 new' not in t.text and 'Sending attachments' not in t.text and 'Sent' not in t.text
-        t.click_text('Send 1 attachment'); t.expect('Sent'); t.expect('kept attachment caption')
+        t.click_text('Send 1 attachment'); t.delivered('kept attachment caption')
         assert 'Preview attachments' not in t.text, t.text
         print(f'PASS {"click" if use_click else "Ctrl+G"} keeps pending attachment, caption and confirmation; '
               'the attachment sends only after explicit Send')

@@ -182,7 +182,7 @@ with tempfile.TemporaryDirectory(prefix='harbor-multiwindow-', dir='/tmp') as di
 
         # Same text from both windows; the session fails only the second send.
         a.picker('Marina'); b.picker('Marina')
-        a.send('ok'); a.send(b'\r'); a.expect('Sent')
+        a.send('ok'); a.send(b'\r'); a.delivered('ok')
         b.send('ok'); b.send(b'\r'); b.expect('Send failed')
         a.pump(.4)
         assert 'Send failed' not in a.text, a.text
@@ -191,7 +191,7 @@ with tempfile.TemporaryDirectory(prefix='harbor-multiwindow-', dir='/tmp') as di
         print('PASS same-text ownership: only the failing window restores its draft')
 
         # A send from B appears in A.
-        b.send('from window b'); b.send(b'\r'); b.expect('Sent')
+        b.send('from window b'); b.send(b'\r'); b.delivered('from window b')
         a.expect('from window b')
         print('PASS shared live updates')
 
@@ -217,7 +217,7 @@ with tempfile.TemporaryDirectory(prefix='harbor-multiwindow-', dir='/tmp') as di
 
         # Close one window: the survivor keeps sending.
         a.close(); windows.remove(a)
-        b.send(' survivor'); b.send(b'\r'); b.expect('Sent')
+        b.send(' survivor'); b.send(b'\r'); b.delivered('survivor')
         assert len(backends(config)) == 1
         print('PASS survivor sends after the other window closes')
 
@@ -225,7 +225,7 @@ with tempfile.TemporaryDirectory(prefix='harbor-multiwindow-', dir='/tmp') as di
         a = Terminal(config_dir=config, extra_env=env); windows.append(a)
         os.kill(a.pid, signal.SIGKILL); os.waitpid(a.pid, 0)
         os.close(a.master); windows.remove(a)
-        b.send(' after peer kill'); b.send(b'\r'); b.expect('Sent')
+        b.send(' after peer kill'); b.send(b'\r'); b.delivered('after peer kill')
         assert len(backends(config)) == 1
         print('PASS SIGKILL of one view leaves the other usable')
 
@@ -257,7 +257,7 @@ with tempfile.TemporaryDirectory(prefix='harbor-multiwindow-', dir='/tmp') as di
             detached = subprocess.run(['/usr/sbin/lsof', '-a', '-p', str(pid), '-d', '0,1', '-Fn'],
                                       capture_output=True, text=True, timeout=8)
             assert detached.returncode == 0 and detached.stdout.count('n/dev/null') == 2, detached
-        a.picker('Marina'); a.send('after sign-in'); a.send(b'\r'); a.expect('Sent')
+        a.picker('Marina'); a.send('after sign-in'); a.send(b'\r'); a.delivered('after sign-in')
         a.close(); windows.remove(a)
         print('PASS sign-in prompt on the lending terminal, terminal returned')
         # The supported process signal handler also reaches the backend loop and saves views.
