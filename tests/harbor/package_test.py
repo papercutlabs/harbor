@@ -33,7 +33,7 @@ class PackageTest(unittest.TestCase):
             self.assertIn('harbor-runtime/bin/harbor', tar.getnames())
             self.assertIn('harbor-runtime/share/harbor/demo/sample.txt', tar.getnames())
             manifest = json.load(tar.extractfile('harbor-runtime/manifest.json'))
-            self.assertEqual(manifest['capabilities'], {'telegramRouting': 1, 'targetSurface': 1, 'deskStrip': 1, 'inspectUi': 1, 'previewFocus': 1})
+            self.assertEqual(manifest['capabilities'], {'telegramRouting': 1, 'targetSurface': 1, 'deskStrip': 1, 'inspectUi': 1, 'previewFocus': 1, 'windowDiagnostics': 1})
             self.assertEqual(pin['telegramRouting'], 1)
             self.assertEqual(pin['targetSurface'], 1)
             self.assertEqual(pin['deskStrip'], 1)
