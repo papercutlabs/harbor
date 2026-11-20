@@ -16,6 +16,8 @@ func TestStreamDecoder(t *testing.T) {
 		chunks []string
 		check  func(uv.Event) bool
 	}{
+		{"focus return", []string{"\x1b[I"}, func(e uv.Event) bool { return translate(e).kind == 5 }},
+		{"focus departure", []string{"\x1b[O"}, func(e uv.Event) bool { return translate(e).kind == 0 }},
 		{"fragmented CSI", []string{"\x1b", "[", "D"}, func(e uv.Event) bool { k, ok := e.(uv.KeyPressEvent); return ok && k.Code == uv.KeyLeft }},
 		{"fragmented UTF8", []string{"\xe7", "\x95", "\x8c"}, func(e uv.Event) bool { k, ok := e.(uv.KeyPressEvent); return ok && k.Code == '界' }},
 		{"modified arrow", []string{"\x1b[1;5C"}, func(e uv.Event) bool {

@@ -501,7 +501,7 @@ Harbor::Init()
   }
   mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, nullptr);
   mouseinterval(0);
-  printf("\033[?1003l\033[?1002h\033[?2004h\033[>1u");
+  printf("\033[?1003l\033[?1002h\033[?1004h\033[?2004h\033[>1u");
   fflush(stdout);
   m_Ready = true;
   RegisterRestart();
@@ -554,7 +554,7 @@ Harbor::UiSnapshot() const
 {
   // An opaque comparison token includes composer and action context, without disclosing it.
   std::ostringstream state;
-  state << m_Current << m_Menu << m_InDeskView << m_ControlReply << m_InitialChat;
+  state << m_PreviewSequence << m_PreviewActive << m_Current << m_Menu << m_InDeskView << m_ControlReply << m_InitialChat;
   const auto at = m_Chats.find(m_Current);
   if (at != m_Chats.end())
   {
@@ -591,9 +591,9 @@ Harbor::PollUiControl()
     if (action == "__inspect__")
     {
       const char* surface = getenv("CMUX_SURFACE_ID");
-      const auto text = "pcl.harbor.ui.v1\t" + std::to_string(getpid()) + "\t" + HarborUiControl::Surface(surface ? surface : "") + "\t" +
+      const auto text = "pcl.harbor.ui.v2\t" + std::to_string(getpid()) + "\t" + HarborUiControl::Surface(surface ? surface : "") + "\t" +
         (at == m_Chats.end() ? "" : at->second.profile) + "\t" + (at == m_Chats.end() ? "" : at->second.id) + "\t" + UiSnapshot() + "\t" +
-        (at != m_Chats.end() && (!at->second.draft.empty() || !at->second.reply.empty() || !at->second.editing.empty()) ? "1" : "0") + "\t" + (ready ? "1" : "0") + "\n";
+        (at != m_Chats.end() && (!at->second.draft.empty() || !at->second.reply.empty() || !at->second.editing.empty()) ? "1" : "0") + "\t" + (ready ? "1" : "0") + "\t" + std::to_string(m_PreviewActive ? m_PreviewSequence : 0) + "\n";
       (void)!send(reply, text.data(), text.size(), MSG_NOSIGNAL); close(reply); return;
     }
     if (!ready || token != UiSnapshot())
@@ -660,7 +660,7 @@ Harbor::Cleanup()
   HarborInputStop();
   m_Media->Stop();
   m_Media->ClearGraphics();
-  printf("\033[?1002l\033[<u\033[?2004l");
+  printf("\033[?1002l\033[<u\033[?1004l\033[?2004l");
   mousemask(0, nullptr);
   curs_set(1);
   endwin();
@@ -1074,6 +1074,17 @@ Harbor::Merge(Conversation& c, const std::vector<ChatMessage>& messages, bool ou
     else if (!c.messages.count(m.id) && previousOldest >= 0 && m.timeSent < previousOldest)
       c.detached.insert(m.id);
     c.messages[m.id] = m;
+    // Cached Telegram photos from earlier builds lack MIME metadata. Their
+    // protocol placeholder still identifies them before the local file exists.
+    if (!m.fileInfo.empty())
+    {
+      auto file = ProtocolUtil::FileInfoFromHex(m.fileInfo);
+      if (file.fileType.empty() && file.filePath == "[Photo]")
+      {
+        file.fileType = "image/jpeg";
+        c.messages[m.id].fileInfo = ProtocolUtil::FileInfoToHex(file);
+      }
+    }
     c.last = std::max(c.last, m.timeSent);
     if (m.timeSent >= c.actualLast)
     {
@@ -1324,8 +1335,14 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
       if (it != c.messages.end())
       {
         it->second.fileInfo = n->fileInfo;
-        if (n->downloadFileAction == DownloadFileActionOpen)
-          OpenAttachment(p, n->chatId, n->msgId);
+        const bool picturePending = m_PendingPictures.erase(Key(p, n->chatId) + "\n" + n->msgId) != 0;
+        if (n->downloadFileAction == DownloadFileActionOpen || picturePending)
+        {
+          if (File(ProtocolUtil::FileInfoFromHex(n->fileInfo).filePath))
+            OpenAttachment(p, n->chatId, n->msgId);
+          else
+            Notify("Could not download the picture");
+        }
         else if (n->downloadFileAction == DownloadFileActionSave)
         {
           if (File(ProtocolUtil::FileInfoFromHex(n->fileInfo).filePath))
@@ -1622,7 +1639,7 @@ Harbor::BuildRows()
       Row attachment{ W(label), id, m.isOutgoing, false };
       attachment.attachment = true;
       m_Rows.push_back(std::move(attachment));
-      if (File(f.filePath) && (type.find("image") == 0 || type.find("video") == 0))
+      if (type.find("image") == 0 || (File(f.filePath) && type.find("video") == 0))
       {
         int imageRows = 7;
 
@@ -1926,6 +1943,13 @@ Harbor::Draw()
       }
       if (row.attachment)
         m_Hits.push_back({ y, x, w, "attachment", row.id });
+      if (row.text.size() && row.text[0] == 1)
+      {
+        const auto file = ProtocolUtil::FileInfoFromHex(c->messages[row.id].fileInfo);
+        const auto type = file.fileType.empty() ? Type(file.filePath) : file.fileType;
+        if (type.find("image") == 0)
+          m_Hits.push_back({ y, x + 2, std::min(m_MainW - 10, 56), "picture", row.id });
+      }
       if (row.text.size() && row.text[0] == 1)
       {
         const auto path = S(row.text.substr(1));
@@ -2788,7 +2812,7 @@ Harbor::SuspendTerminal()
   HarborInputStop();
   m_Media->Stop();
   m_Media->ClearGraphics();
-  printf("\033[?1002l\033[<u\033[?2004l");
+  printf("\033[?1002l\033[<u\033[?1004l\033[?2004l");
   fflush(stdout);
   mousemask(0, nullptr);
   curs_set(1);
@@ -2804,7 +2828,7 @@ Harbor::ResumeTerminal()
     throw std::runtime_error("Could not resume terminal input reader");
   m_LastInput = HarborDeskUpdate::Now();
   mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, nullptr);
-  printf("\033[?1003l\033[?1002h\033[?2004h\033[>1u");
+  printf("\033[?1003l\033[?1002h\033[?1004h\033[?2004h\033[>1u");
   fflush(stdout);
   clearok(stdscr, TRUE);
   m_Dirty = true;
@@ -2884,6 +2908,7 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
     // Harbor still owns input during preparation. Launch typeahead cannot become a draft or Desk action.
     const auto event = HarborInputPoll(0);
     if (event.kind > 0) m_LastInput = HarborDeskUpdate::Now();
+    if (event.kind > 0 && (event.kind != 4 || event.action != 3)) m_PreviewActive = false; // focus-in or explicit user input returns to Harbor
     const bool cancel = m_ControlPending || AppUtil::IsTerminateRequested() || event.kind == -1 || (event.kind == 1 && (event.code == 27 || event.code == 3 || (event.code == 'c' && (event.mods & 4))));
     free(event.text);
     return cancel;
@@ -2903,7 +2928,7 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
   struct sigaction ignore = {}, oldInt = {}, oldQuit = {}, oldTstp = {};
   ignore.sa_handler = SIG_IGN; sigemptyset(&ignore.sa_mask);
   sigaction(SIGINT, &ignore, &oldInt); sigaction(SIGQUIT, &ignore, &oldQuit); sigaction(SIGTSTP, &ignore, &oldTstp);
-  printf("\033[?1002l\033[?1003l\033[<u\033[?2004l");
+  printf("\033[?1002l\033[?1003l\033[<u\033[?1004l\033[?2004l");
   mousemask(0, nullptr); fflush(stdout);
   tcflush(STDIN_FILENO, TCIFLUSH);
   // No endwin/reset_prog_mode here: both views retain Harbor's existing alternate screen.
@@ -2919,7 +2944,7 @@ Harbor::WarmDeskHandoff(const std::vector<std::string>& argv)
   if (!HarborInputStart()) throw std::runtime_error("Could not resume terminal input reader");
   m_LastInput = HarborDeskUpdate::Now();
   mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, nullptr);
-  printf("\033[?1003l\033[?1002h\033[?2004h\033[>1u"); fflush(stdout);
+  printf("\033[?1003l\033[?1002h\033[?1004h\033[?2004h\033[>1u"); fflush(stdout);
   struct winsize size = {};
   if (ioctl(STDIN_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_row && size.ws_col) resizeterm(size.ws_row, size.ws_col);
   clearok(stdscr, TRUE); m_Dirty = true; m_MouseDown = false; m_Title.clear(); // Desk may have retitled the terminal
@@ -3893,6 +3918,12 @@ Harbor::MessageClick(int x, int y)
       return;
     }
   for (const auto& hit : m_Hits)
+    if (hit.type == "picture" && hit.y == y && x >= hit.x && x < hit.x + hit.w)
+    {
+      OpenAttachment(c->profile, c->id, hit.value);
+      return;
+    }
+  for (const auto& hit : m_Hits)
     if (hit.type == "attachment" && hit.y == y && x >= hit.x && x < hit.x + hit.w)
     {
       SaveAttachment(c->profile, c->id, hit.value);
@@ -4012,6 +4043,13 @@ Harbor::OpenAttachment(const std::string& p, const std::string& chatId, const st
   auto f = ProtocolUtil::FileInfoFromHex(it->second.fileInfo);
   if (!File(f.filePath))
   {
+    const auto type = f.fileType.empty() ? Type(f.filePath) : f.fileType;
+    if (type.find("image") == 0)
+    {
+      m_PendingPictures.insert(Key(p, chatId) + "\n" + id);
+      if (f.fileStatus == FileStatusDownloading)
+      { Notify("Opening picture when download completes…"); return; }
+    }
     auto r = std::make_shared<DownloadFileRequest>();
     r->chatId = chatId;
     r->msgId = id;
@@ -4036,13 +4074,17 @@ Harbor::OpenAttachment(const std::string& p, const std::string& chatId, const st
     m_Menu = "preview";
     m_Option = 0;
     m_Options = { { "Open full image",
-                    "Default viewer",
+                    "Preview",
                     [this, f]
                     {
-                      m_Media->Open(f.filePath);
+                      if (m_Media->Open(f.filePath, true)) { ++m_PreviewSequence; m_PreviewActive = true; }
                       CloseMenu();
                     } },
                   { "Back to conversation", "Esc", [this] { CloseMenu(); } } };
+  }
+  else if (type.find("image") == 0)
+  {
+    if (m_Media->Open(f.filePath, true)) { ++m_PreviewSequence; m_PreviewActive = true; }
   }
   else
     m_Media->Open(f.filePath);
@@ -4555,6 +4597,7 @@ Harbor::ReadInput()
   }
   auto event = HarborInputPoll(20);
   if (event.kind > 0) m_LastInput = HarborDeskUpdate::Now();
+  if (event.kind > 0 && (event.kind != 4 || event.action != 3)) m_PreviewActive = false; // focus-in or explicit user input returns to Harbor
   if (event.kind == -1)
     m_Running = false;
   else if (event.kind == 2)
@@ -4857,7 +4900,7 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown, int wheelTicks)
       OpenChat(hit.value);
     else if (hit.type == "option")
       Choose(std::stoi(hit.value));
-    else if ((hit.type == "message" || hit.type == "attachment" || hit.type == "code-copy") && c)
+    else if ((hit.type == "message" || hit.type == "attachment" || hit.type == "code-copy" || hit.type == "picture") && c)
     {
       MessageClick(e.x, e.y);
       m_Browse = false;

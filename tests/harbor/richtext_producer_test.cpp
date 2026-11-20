@@ -4,6 +4,7 @@
 #include "format.h"
 #include "richtextutil.h"
 #include "replyutil.h"
+#include "photoutil.h"
 #include <cassert>
 #include <iostream>
 #include <td/telegram/Client.h>
@@ -25,6 +26,24 @@ Wide(const std::string& utf8)
 int
 main()
 {
+  api::photo photo;
+  for (const auto& id : { "small-photo", "largest-photo" })
+  {
+    auto size = api::make_object<api::photoSize>();
+    size->photo_ = api::make_object<api::file>();
+    size->photo_->remote_ = api::make_object<api::remoteFile>();
+    size->photo_->remote_->id_ = id;
+    size->photo_->local_ = api::make_object<api::localFile>();
+    photo.sizes_.push_back(std::move(size));
+  }
+  auto file = TelegramPhoto::File(photo);
+  assert(file.fileId == "largest-photo" && file.fileType == "image/jpeg" &&
+         file.filePath == "[Photo]" && file.fileStatus == FileStatusNotDownloaded);
+  photo.sizes_.back()->photo_->local_->path_ = "/cache/original.jpg";
+  file = TelegramPhoto::File(photo);
+  assert(file.fileId == "largest-photo" && file.fileType == "image/jpeg" &&
+         file.filePath == "/cache/original.jpg" && file.fileStatus == FileStatusDownloaded);
+
   api::messageReplyToMessage reply;
   reply.chat_id_ = -1234;
   reply.message_id_ = 5678;
