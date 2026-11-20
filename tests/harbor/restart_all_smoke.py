@@ -47,6 +47,17 @@ for record in (home/'.office/harbor-windows').iterdir():
         runner=sys.executable
     # An old Desk command format must suffice; no new command row is required for Settings.
     commands.write_text('Quota\tProvider capacity\t'+runner+'\t'+str(child)+'\tdesk\t--view\tquota\n')
+    def backend_pid():
+        # The filesystem can reuse a just-unlinked Unix socket inode. Inspect the actual
+        # owned backend process instead; this is read-only and attaches no extra client.
+        rows=subprocess.check_output(['ps','-eo','pid=,args='],text=True).splitlines()
+        found=[]
+        for line in rows:
+            row=line.strip().split(None,1)
+            if len(row)==2 and re.search(r'(?:^|\s)--session-backend(?:\s|$)',row[1]) and str(config) in row[1]:
+                found.append(int(row[0]))
+        assert len(found)==1,('expected one exact owned backend',found)
+        return found[0]
     def update_from_settings(t):
         t.send(b'\x0f')
         for _ in range(30):
@@ -78,11 +89,13 @@ for record in (home/'.office/harbor-windows').iterdir():
         b.clear_draft();b.send('edited draft');b.expect('Editing your message')
         old_names=set((home/'.office/harbor-windows').iterdir())
         old_socket=(config/'session.sock').stat().st_ino
+        old_backend=backend_pid()
         failure=home/'fail-update';failure.touch()
         update_from_settings(a);a.expect('fixture preparation failed',timeout=5)
         a.expect('press any key to return to Harbor',timeout=5)
         assert set((home/'.office/harbor-windows').iterdir())==old_names
         assert (config/'session.sock').stat().st_ino==old_socket
+        assert backend_pid()==old_backend,'preparation failure replaced the original backend'
         resumed=len(a.raw);a.send(b' ')
         end=time.monotonic()+5
         while b'\x1b]2;Saved Messages\x07' not in a.raw[resumed:] and time.monotonic()<end:a.pump(.05)
@@ -97,7 +110,9 @@ for record in (home/'.office/harbor-windows').iterdir():
             names=set((home/'.office/harbor-windows').iterdir())
             if len(names)==2 and not names.intersection(old_names):break
         else:raise AssertionError('both native registrations did not change after exec\nA:\n'+a.text+'\nB:\n'+b.text)
-        assert (config/'session.sock').stat().st_ino!=old_socket,'old shared backend survived restart'
+        new_backend=backend_pid()
+        assert new_backend!=old_backend,'old shared backend process survived restart'
+        print('BACKEND_RESTART '+json.dumps({'before_pid':old_backend,'after_pid':new_backend,'socket_inode_reused':(config/'session.sock').stat().st_ino==old_socket}),flush=True)
         end=time.monotonic()+5
         while time.monotonic()<end:
             a.pump(.05);b.pump(.05)
@@ -147,6 +162,7 @@ for record in (home/'.office/harbor-windows').iterdir():
         old_names=set((home/'.office/harbor-windows').iterdir())
         b_name=next(path for path in old_names if path.name.startswith(str(b.pid)+'-'))
         old_socket=(config/'session.sock').stat().st_ino
+        old_backend=backend_pid()
         a_start,b_start=len(a.raw),len(b.raw)
         update_from_settings(a)
         end=time.monotonic()+5
@@ -162,7 +178,7 @@ for record in (home/'.office/harbor-windows').iterdir():
             names=set((home/'.office/harbor-windows').iterdir())
             if len(names)==2 and not names.intersection(old_names) and original(a)==visited:break
         else:raise AssertionError(('visited position did not resume',visited,original(a),a.text,b.text))
-        assert (config/'session.sock').stat().st_ino!=old_socket
+        assert backend_pid()!=old_backend,'old shared backend process survived the attachment-deferred restart'
         a.expect('visit draft');b.expect('live draft')
         a.send(b'\x0f');a.click_text('Return to previous position')
         end=time.monotonic()+5
