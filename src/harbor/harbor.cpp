@@ -681,8 +681,6 @@ Harbor::Run()
     if (auto* c = Current())
       if (c->historyRetryAt && c->historyStalls < 3 && now >= c->historyRetryAt)
         m_Dirty = true;
-    for (auto& entry : m_Chats)
-      if (entry.second.typing.Expire(now) && entry.first == m_Current) m_Dirty = true;
     if (auto* c = Current())
     {
       const int phase = c->follow && c->typing.Active() ? (m_Motion ? HarborTyping::Phase(now) : 0) : -1;
@@ -1084,7 +1082,12 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
         Request(p, r);
       }
       else
+      {
+        m_Connected.erase(p);
+        for (auto& entry : m_Chats)
+          if (entry.second.profile == p) entry.second.typing.Clear();
         Notify("Connection failed; retry with harbor -s");
+      }
       break;
     }
     case NewContactsNotifyType:
@@ -1624,6 +1627,10 @@ Harbor::Draw()
   // reply context), so neither the draft nor the reading position moves when it appears.
   bool newBar = c && !c->follow && c->unseen > 0;
   const int newBarY = m_Bottom;
+  // Keep this row reserved even while idle. The existing final history margin now separates
+  // the latest message from the bubble, without moving messages when activity starts or stops.
+  const int typingY = m_Bottom - 1;
+  --m_Bottom;
   const int chatY = stripHeight + ((stripHeight || m_CommandHint == 8) ? 1 : 0);
   m_Top = 3 + chatY;
   bkgd(COLOR_PAIR(Base));
@@ -1875,17 +1882,18 @@ Harbor::Draw()
       for (const auto& picture : pictures)
         m_Media->DrawImage(
           *picture.image, picture.y, picture.x, picture.cols, picture.rows, picture.sourceRow);
-    // The last history row is already a blank spacer after the latest message. Reuse it so
-    // activity never changes history offsets, composer geometry, selections or drafts.
+    // The reserved row and the history spacer above it stay present in idle and active layouts.
     if (c->follow && c->typing.Active())
     {
-      const int x = m_MainX + 2, y = m_Bottom - 1;
+      const int x = m_MainX + 2, y = typingY;
       Fill(y, x, 11, Received);
       for (int dot = 0; dot < 3; ++dot)
       {
         const bool bright = !m_Motion || dot == HarborTyping::Phase(TimeUtil::GetCurrentTimeMSec());
         attrset(COLOR_PAIR(Received) | (bright ? A_BOLD : A_DIM));
-        mvaddnwstr(y, x + 3 + dot * 2, L"●", 1);
+        // Font weight/dim can render identically in a terminal. Different-size glyphs make
+        // the traveling pulse visible while keeping all three dots and a fixed cell width.
+        mvaddnwstr(y, x + 3 + dot * 2, bright ? L"●" : L"•", 1);
       }
     }
     if (!c->reply.empty() || !c->editing.empty())

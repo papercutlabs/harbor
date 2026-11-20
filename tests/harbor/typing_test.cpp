@@ -12,13 +12,13 @@ int main()
   a.Update("second", false, 200);
   assert(!a.Active());
   a.Update("user", true, 1000);
-  assert(!a.Expire(6999) && a.Active());
-  a.Update("user", true, 6900);
-  assert(!a.Expire(7000) && a.Active());
   a.Complete("user", -1); assert(a.Active());
-  assert(a.Expire(12900) && !a.Active());
+  // No repeated notification is required: TDLib owns renewal and timeout.
+  a.Update("other", false, 60000); assert(a.Active());
+  a.Update("user", false, 61000); assert(!a.Active());
+  a.Update("user", true, 62000); a.Clear(); assert(!a.Active());
   a.Update("", true, 0); assert(!a.Active());
   assert(HarborTyping::Phase(0) == 0 && HarborTyping::Phase(240) == 1 &&
          HarborTyping::Phase(480) == 2 && HarborTyping::Phase(720) == 0);
-  std::cout << "PASS typing renewal, expiry, stop, sender completion, isolation and animation phases\n";
+  std::cout << "PASS change-only activity, provider stop, disconnect, sender completion, isolation and animation phases\n";
 }
