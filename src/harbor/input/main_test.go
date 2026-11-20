@@ -5,6 +5,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -167,5 +168,55 @@ func TestInputOwnershipHandoff(t *testing.T) {
 	buf := make([]byte, 5)
 	if _, err := io.ReadFull(r, buf); err != nil || string(buf) != "login" {
 		t.Fatalf("stdin handoff: %q %v", buf, err)
+	}
+}
+
+// Replay actual SGR wire input through Ultraviolet and the exported polling
+// path. A queued flick must travel in batches without swallowing its stop,
+// reversal, different target, or the key/click immediately following it.
+func TestWheelQueue(t *testing.T) {
+	up, down := "\x1b[<64;30;12M", "\x1b[<65;30;12M"
+	cases := []struct {
+		name, wire string
+		count      int
+		want       [][4]int // kind, button, tick count, key code
+	}{
+		{"precise tick", up, 1, [][4]int{{4, 4, 1, 0}}},
+		{"hard flick", strings.Repeat(down, 200), 200, [][4]int{{4, 5, 200, 0}}},
+		{"reverse", strings.Repeat(up, 40) + strings.Repeat(down, 30), 70, [][4]int{{4, 4, 40, 0}, {4, 5, 30, 0}}},
+		{"key boundary", up + "\x1b[D" + up, 3, [][4]int{{4, 4, 1, 0}, {1, 0, 0, -1}, {4, 4, 1, 0}}},
+		{"click boundary", down + "\x1b[<0;30;12M" + down, 3, [][4]int{{4, 5, 1, 0}, {4, 1, 0, 0}, {4, 5, 1, 0}}},
+		{"target boundary", up + "\x1b[<64;31;13M", 2, [][4]int{{4, 4, 1, 0}, {4, 4, 1, 0}}},
+		{"modifier boundary", up + "\x1b[<68;30;12M", 2, [][4]int{{4, 4, 1, 0}, {4, 4, 1, 0}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			decoded := make(chan uv.Event, 256)
+			d := uv.NewTerminalReader(strings.NewReader(tc.wire), "xterm-256color")
+			go d.StreamEvents(ctx, decoded)
+			events = make(chan uv.Event, 256)
+			pending = nil
+			for i := 0; i < tc.count; i++ {
+				select {
+				case e := <-decoded:
+					events <- e
+				case <-time.After(time.Second):
+					t.Fatal("decoder did not emit the complete gesture")
+				}
+			}
+			for _, want := range tc.want {
+				got := HarborInputPoll(1000)
+				if int(got.kind) != want[0] || int(got.button) != want[1] ||
+					(want[0] == 4 && int(got.code) != want[2]) ||
+					(want[0] == 1 && int(got.code) != want[3]) {
+					t.Fatalf("got %#v; want %v", got, want)
+				}
+			}
+			if got := HarborInputPoll(0); got.kind != 0 {
+				t.Fatalf("gesture ended but input is still queued: %#v", got)
+			}
+		})
 	}
 }

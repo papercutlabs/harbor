@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 typedef struct {
+  // For mouse wheel events, code is the number of consecutive queued ticks.
   int kind, code, mods, x, y, button, action;
   char* text;
 } HarborInputEvent;

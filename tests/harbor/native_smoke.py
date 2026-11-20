@@ -161,7 +161,24 @@ class Terminal:
             os.kill(self.pid,signal.SIGKILL)
             os.waitpid(self.pid,0)
         os.close(self.master)
-        if self.dir: self.dir.cleanup()
+        if self.dir:
+            # The detached backend outlives its last UI while saving config. It
+            # removes the socket first and holds session.lock through those writes.
+            # Only wait here for a config this fixture owns; shared windows must
+            # remain usable when one Terminal closes.
+            deadline = time.monotonic() + 5
+            lock_path = Path(self.config) / 'session.lock'
+            while lock_path.exists():
+                with lock_path.open('r') as lock:
+                    try:
+                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        if not (Path(self.config) / 'session.sock').exists():
+                            break
+                    except BlockingIOError:
+                        pass
+                assert time.monotonic() < deadline, 'Owned Harbor backend did not finish shutdown'
+                time.sleep(.01)
+            self.dir.cleanup()
 
 if __name__=='__main__':
     passed=[]

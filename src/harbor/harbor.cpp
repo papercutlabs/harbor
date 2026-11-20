@@ -4122,7 +4122,7 @@ Harbor::ReadInput()
       mouse.bstate = REPORT_MOUSE_POSITION;
     // The decoder supplies wheel-down even when the selected ncurses headers
     // have no BUTTON5_PRESSED. Keep that typed event outside ncurses' mouse ABI.
-    Mouse(mouse, event.button == 5 && event.action == 1);
+    Mouse(mouse, event.button == 5 && event.action == 1, std::max(1, event.code));
   }
   else if (event.kind == 1)
   {
@@ -4192,7 +4192,7 @@ Harbor::ReadInput()
 }
 
 void
-Harbor::Mouse(const MEVENT& e, bool wheelDown)
+Harbor::Mouse(const MEVENT& e, bool wheelDown, int wheelTicks)
 {
   m_Dirty = true;
 
@@ -4335,12 +4335,12 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown)
     }
     if (e.bstate & BUTTON4_PRESSED)
     {
-      m_Option = std::max(0, m_Option - 1);
+      m_Option = std::max(0, m_Option - wheelTicks);
       return;
     }
     if (wheelDown)
     {
-      m_Option = std::min(int(m_Options.size()) - 1, m_Option + 1);
+      m_Option = std::min(int(m_Options.size()) - 1, m_Option + wheelTicks);
       return;
     }
   }
@@ -4349,7 +4349,7 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown)
     if (c)
     {
       c->follow = false;
-      c->scroll = std::max(0, c->scroll - 3);
+      c->scroll = std::max(0, c->scroll - 3 * wheelTicks);
       if (c->scroll < 5)
         Fetch(*c, true);
     }
@@ -4360,7 +4360,8 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown)
     if (c)
     {
       c->follow = false;
-      c->scroll += 3;
+      const int last = std::max(0, int(m_Rows.size()) - std::max(1, m_Bottom - m_Top));
+      c->scroll = std::min(last, c->scroll + 3 * wheelTicks);
     }
     return;
   }
