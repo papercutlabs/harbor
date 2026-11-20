@@ -588,6 +588,19 @@ Harbor::PollUiControl()
   }, [this](const std::string& action, const std::string& token, int reply) {
     const auto at = m_Chats.find(m_Current);
     const bool ready = m_ControlReply < 0 && m_InitialChat.empty() && !m_InColdDeskView && m_Menu.empty() && m_Attachments.empty() && m_AuthOwner.empty();
+    if (action == "__inspect-window__")
+    {
+      const auto& identity = HarborTrace::Get();
+      const auto account = at == m_Chats.end() ? "" : HarborTrace::Token(at->second.profile);
+      const auto conversation = at == m_Chats.end() ? "" : HarborTrace::Token(at->second.id);
+      const auto view = m_PreviewActive ? "external-preview" : m_InDeskView || m_InColdDeskView ? "desk" : m_AuthSuspended || !m_AuthOwner.empty() ? "authentication" :
+        m_Menu == "preview" || m_Menu == "attachments" ? "attachment-preview" : !m_Menu.empty() ? "menu" : at == m_Chats.end() ? "picker" : "conversation";
+      // Read-only diagnostics must not write the journal they are triggered by.
+      const char* surface = getenv("CMUX_SURFACE_ID");
+      const auto text = "pcl.harbor.window.v1\t" + std::to_string(getpid()) + "\t" + HarborUiControl::Surface(surface ? surface : "") + "\t" +
+        identity.run + "\t" + identity.started + "\t" + identity.version + "\t" + identity.revision + "\t" + account + "\t" + conversation + "\t" + view + "\n";
+      (void)!send(reply, text.data(), text.size(), MSG_NOSIGNAL); close(reply); return;
+    }
     if (action == "__inspect__")
     {
       const char* surface = getenv("CMUX_SURFACE_ID");
@@ -600,6 +613,7 @@ Harbor::PollUiControl()
     { HarborUiControl::Reply(reply, "The inspected Harbor view changed or has an active action. Its conversation and drafts were retained."); return; }
     // Keep the window and every conversation object alive, including drafts, reply/edit and reading state.
     m_DeskParked = true; m_Current.clear(); m_RestoreChat.clear(); m_Dirty = true;
+    HarborTrace::Event("ui.parked", {{"view", "picker"}, {"outcome", "success"}});
     SetTitle("Chats");
     HarborUiControl::Reply(reply);
   });
@@ -1444,7 +1458,10 @@ Harbor::OpenChat(const std::string& key)
   HarborTrace::Event("ui.chat.open");
   auto it = m_Chats.find(key);
   if (it == m_Chats.end())
+  {
+    HarborTrace::Event("ui.chat.opened", {{"outcome", "unavailable"}});
     return;
+  }
   m_ComposerFollowCursor = true;
   if (auto* previous = Current(); previous && !previous->follow &&
       previous->restoreAnchor.empty() && previous->scroll < int(m_Rows.size()))
@@ -1505,6 +1522,8 @@ Harbor::OpenChat(const std::string& key)
   m_Browse = restoreBrowse;
   m_Media->Stop();
   m_Dirty = true;
+  HarborTrace::Event("ui.chat.opened", {{"account_id", HarborTrace::Token(c.profile)},
+    {"conversation_id", HarborTrace::Token(c.id)}, {"view", "conversation"}, {"outcome", "success"}});
 }
 void
 Harbor::Text(int y, int x, int width, const std::wstring& s, int color, bool bold)
@@ -2335,7 +2354,10 @@ Harbor::Send()
   HarborTrace::Event("ui.send.attempt");
   auto* c = Current();
   if (!c || c->draft.empty())
+  {
+    HarborTrace::Event("ui.send.result", {{"outcome", "no-action"}});
     return;
+  }
   if (!c->editing.empty() && !c->messages.count(c->editing))
   {
     Notify("Loading the original message · Esc cancels editing");
@@ -3639,7 +3661,9 @@ Harbor::ReactionResults(std::shared_ptr<AvailableReactionsNotify> n)
 void
 Harbor::CopyCode(const std::wstring& content)
 {
-  Notify(m_Media->CopyText(S(content)) ? "Copied code" : "Could not copy code");
+  const bool copied = m_Media->CopyText(S(content));
+  HarborTrace::Event("ui.code.copy", {{"outcome", copied ? "success" : "failed"}});
+  Notify(copied ? "Copied code" : "Could not copy code");
 }
 void
 Harbor::CodeChooser(const std::string& key, const std::string& id)
@@ -4559,7 +4583,9 @@ Harbor::CopySelection()
   append();
   if (!copied.empty())
   {
-    if (m_Media->CopyText(S(copied)))
+    const bool success = m_Media->CopyText(S(copied));
+    HarborTrace::Event("ui.selection.copy.result", {{"outcome", success ? "success" : "failed"}});
+    if (success)
       Notify("Copied selection");
     else
       Notify("Could not copy selection");

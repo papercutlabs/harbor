@@ -22,7 +22,7 @@ namespace HarborTrace
 using Fields = std::vector<std::pair<std::string, std::string>>;
 struct State
 {
-  std::string path, run, startup, signalPrefix;
+  std::string path, run, startup, signalPrefix, version, build, revision, started, surface, launchWorkspace;
   std::terminate_handler previous = nullptr;
 };
 inline State& Get() { static State state; return state; }
@@ -73,7 +73,9 @@ inline void Event(const std::string& name, Fields fields = {}) noexcept
     {
       const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
       std::string line = "{\"schema\":1,\"ts_ms\":" + Number(ms) + ",\"component\":\"harbor\",\"pid\":" + Number(getpid()) +
-        ",\"ppid\":" + Number(getppid()) + ",\"run_id\":" + Quote(s.run) + ",\"startup_id\":" + Quote(s.startup) + ",\"event\":" + Quote(name);
+        ",\"ppid\":" + Number(getppid()) + ",\"run_id\":" + Quote(s.run) + ",\"startup_id\":" + Quote(s.startup) + ",\"event\":" + Quote(name) +
+        ",\"started_ms\":" + Quote(s.started) + ",\"loaded_version\":" + Quote(s.version) + ",\"loaded_build\":" + Quote(s.build) + ",\"loaded_revision\":" + Quote(s.revision) +
+        ",\"surface\":" + Quote(s.surface) + ",\"launch_workspace\":" + Quote(s.launchWorkspace);
       for (const auto& f : fields) line += "," + Quote(f.first) + ":" + Quote(f.second);
       line += "}\n";
       int fd = Open(s.path);
@@ -130,7 +132,7 @@ inline void EarlySignal(int sig)
   signal(sig, SIG_DFL);
   kill(getpid(), sig);
 }
-inline void Start(const std::string& executable, const std::string& version, const std::string& build) noexcept
+inline void Start(const std::string& executable, const std::string& version, const std::string& build, const std::string& revision = {}) noexcept
 {
   const int saved = errno;
   try
@@ -147,6 +149,12 @@ inline void Start(const std::string& executable, const std::string& version, con
     s.path = dir + "/operational.jsonl";
     const auto clock = std::chrono::high_resolution_clock::now().time_since_epoch().count();
     s.run = Number(getpid()) + "-" + Number(clock);
+    s.started = Number(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+    s.version = version; s.build = build; s.revision = revision;
+    const char* surface = getenv("CMUX_SURFACE_ID");
+    const char* workspace = getenv("CMUX_WORKSPACE_ID");
+    s.surface = surface && Uuid(surface) ? surface : "";
+    s.launchWorkspace = workspace && Uuid(workspace) ? workspace : "";
     const char* startup = getenv("OFFICE_DESK_STARTUP_ID");
     s.startup = startup && Uuid(startup) ? startup : "";
     if (s.startup.empty())
