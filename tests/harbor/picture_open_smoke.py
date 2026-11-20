@@ -65,6 +65,8 @@ def check(mode):
             assert 'draft stays!' in t.text and len(opens())==2
             print('PREVIEW_NATIVE_SAMPLES '+json.dumps({'mode':mode,'raw':samples}),flush=True)
             print('PASS visible largest-photo metadata path auto-downloads once; offscreen/chat scope; pending-click Preview; no auto-open/save; explicit save; fresh Focus token and focus/input return; draft preserved')
-        finally:t.close()
+        finally:
+            t.close()
+            t.wait_backend_shutdown()
 
 for mode in ("1", "legacy"):check(mode)
