@@ -76,3 +76,4 @@ with tempfile.TemporaryDirectory(prefix='hi-',dir='/tmp') as directory:
     finally:
         for view in windows:view.close()
         if windows:windows[-1].wait_backend_shutdown()
+        if windows:windows[-1].wait_backend_shutdown()
