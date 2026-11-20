@@ -7,7 +7,7 @@ import fcntl, json, os, re, shutil, subprocess, sys, tempfile, time
 from pathlib import Path
 from native_smoke import Terminal, ROOT
 
-with tempfile.TemporaryDirectory(prefix='harbor-restart-all-') as directory:
+with tempfile.TemporaryDirectory(prefix='harbor-restart-all-',dir='/tmp') as directory:
     home=Path(directory); config=home/'profile'
     (home/'.local/state').mkdir(parents=True)
     commands=home/'.office/desk/harbor-desk-commands';commands.parent.mkdir(parents=True)
