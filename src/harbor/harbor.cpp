@@ -504,6 +504,7 @@ Harbor::Init()
   printf("\033[?1003l\033[?1002h\033[?2004h\033[>1u");
   fflush(stdout);
   m_Ready = true;
+  RegisterRestart();
   if (const char* surface = getenv("CMUX_SURFACE_ID"))
     if (!m_UiControl.Start(FileUtil::GetApplicationDir(), surface))
       Notify("This window cannot receive addressed Desk commands. Return to Desk for details.");
@@ -588,6 +589,8 @@ Harbor::SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended)
 std::string
 Harbor::StatePath() const
 {
+  if (!m_RestartStateId.empty())
+    return FileUtil::GetApplicationDir() + "/harbor-state.window-" + m_RestartStateId;
   const auto stable = StableStatePath();
   return stable.empty() ? LegacyStatePath() : stable;
 }
@@ -611,6 +614,7 @@ void
 Harbor::Cleanup()
 {
   HarborTrace::Event("ui.cleanup");
+  UnregisterRestart();
   if (!m_Ready)
     return;
   FinishUiRoute("The selected Harbor UI ended before opening the requested conversation.");
@@ -638,6 +642,8 @@ Harbor::Run()
   bool deferring = false;
   while (m_Running && !AppUtil::IsTerminateRequested())
   {
+    TryRestartAll();
+    if (!m_Running) break;
     PollUiControl();
     if (!m_MouseDown)
       ProcessEvents();
@@ -750,6 +756,9 @@ Harbor::TryDeskUpdate()
 void
 Harbor::LoadState()
 {
+  const char* resume = getenv("HARBOR_RESTART_STATE_ID");
+  if (resume && strlen(resume) == 32 && std::all_of(resume, resume + 32, [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }))
+    m_RestartStateId = resume;
   std::ifstream input(StatePath());
   // AcquireSlot holds this UI's numeric slot lock until exit. Never inspect another slot.
   // Read its previous state once; all writes for an update-opted surface use the stable path.
@@ -793,6 +802,12 @@ Harbor::LoadState()
       }
       continue;
     }
+    if (line.rfind("browse ", 0) == 0)
+    {
+      std::istringstream row(line.substr(7));
+      row >> m_RestoreBrowse;
+      continue;
+    }
     if (line.rfind("active ", 0) == 0)
     {
       try
@@ -833,6 +848,30 @@ Harbor::LoadState()
       std::string anchor;
       if (row >> anchor >> c.restoreOffset)
         c.restoreAnchor = anchor == "-" ? "" : StrUtil::StrFromHex(anchor);
+      int hasBack = 0;
+      if (row >> hasBack && hasBack)
+      {
+        std::string selectedBack, anchorBack, returnKey;
+        auto& mark = c.back;
+        if (row >> mark.follow >> mark.browse >> selectedBack >> anchorBack >> returnKey >> mark.scroll >> mark.offset >> mark.landed)
+        {
+          mark.set = true;
+          mark.selected = selectedBack == "-" ? "" : StrUtil::StrFromHex(selectedBack);
+          mark.anchor = anchorBack == "-" ? "" : StrUtil::StrFromHex(anchorBack);
+          mark.returnKey = returnKey == "-" ? "" : StrUtil::StrFromHex(returnKey);
+        }
+      }
+      int unseen = 0;
+      if (row >> c.cursorAtRowEnd >> unseen)
+      {
+        c.unseen = std::max(0, unseen);
+        size_t count = 0;
+        std::string id;
+        if (row >> count)
+          for (size_t i = 0; i < count && row >> id; ++i) c.revealed.insert(StrUtil::StrFromHex(id));
+        if (row >> count)
+          for (size_t i = 0; i < count && row >> id; ++i) c.expanded.insert(StrUtil::StrFromHex(id));
+      }
       m_SavedStates[StrUtil::StrFromHex(key)] = c;
     }
     catch (...)
@@ -850,6 +889,10 @@ Harbor::SaveState(bool force)
     saved.recovery = c.second.recovery;
     saved.draft = c.second.draft;
     saved.cursor = c.second.cursor;
+    saved.cursorAtRowEnd = c.second.cursorAtRowEnd;
+    saved.unseen = c.second.unseen;
+    saved.revealed = c.second.revealed;
+    saved.expanded = c.second.expanded;
     saved.scroll = c.second.scroll;
     saved.follow = c.second.follow;
     saved.selected = c.second.selected;
@@ -860,6 +903,7 @@ Harbor::SaveState(bool force)
     saved.replyBeforeEdit = c.second.replyBeforeEdit;
     saved.restoreAnchor = c.second.restoreAnchor;
     saved.restoreOffset = c.second.restoreOffset;
+    saved.back = m_ManualRestart ? c.second.back : Conversation::Mark();
     if (c.first == m_Current && !c.second.follow && c.second.restoreAnchor.empty() &&
         c.second.scroll < int(m_Rows.size()))
     {
@@ -875,7 +919,7 @@ Harbor::SaveState(bool force)
         saved.restoreOffset = c.second.scroll - first;
       }
     }
-    if (c.second.back.set)
+    if (c.second.back.set && !m_ManualRestart)
     {
       // a visit is transient: a restart resumes the reading position the user left for it
       const auto& mark = c.second.back;
@@ -887,6 +931,7 @@ Harbor::SaveState(bool force)
     }
   }
   std::ostringstream out;
+  if (m_ManualRestart) out << "browse " << m_Browse << '\n';
   out << "active " << StrUtil::StrToHex(m_RestoreChat.empty() ? m_Current : m_RestoreChat) << '\n';
   for (const auto& item : states)
   {
@@ -900,7 +945,24 @@ Harbor::SaveState(bool force)
         << c.cursorBeforeEdit << ' '
         << (c.replyBeforeEdit.empty() ? "-" : StrUtil::StrToHex(c.replyBeforeEdit)) << ' '
         << (c.restoreAnchor.empty() ? "-" : StrUtil::StrToHex(c.restoreAnchor)) << ' '
-        << c.restoreOffset << '\n';
+        << c.restoreOffset << ' ' << (m_ManualRestart && c.back.set);
+    if (m_ManualRestart && c.back.set)
+    {
+      const auto& mark = c.back;
+      out << ' ' << mark.follow << ' ' << mark.browse << ' '
+          << (mark.selected.empty() ? "-" : StrUtil::StrToHex(mark.selected)) << ' '
+          << (mark.anchor.empty() ? "-" : StrUtil::StrToHex(mark.anchor)) << ' '
+          << (mark.returnKey.empty() ? "-" : StrUtil::StrToHex(mark.returnKey)) << ' '
+          << mark.scroll << ' ' << mark.offset << ' ' << mark.landed;
+    }
+    if (m_ManualRestart)
+    {
+      out << ' ' << c.cursorAtRowEnd << ' ' << c.unseen << ' ' << c.revealed.size();
+      for (const auto& id : c.revealed) out << ' ' << StrUtil::StrToHex(id);
+      out << ' ' << c.expanded.size();
+      for (const auto& id : c.expanded) out << ' ' << StrUtil::StrToHex(id);
+    }
+    out << '\n';
     for (const auto& message : c.recovery)
     {
       HarborWire::Writer writer;
@@ -918,6 +980,16 @@ Harbor::SaveState(bool force)
   if (file && rename((path + ".tmp").c_str(), path.c_str()) == 0)
   {
     chmod(path.c_str(), 0600);
+    if (!m_RestartStateId.empty())
+    {
+      // Also retain the ordinary slot/surface state for a later fresh launch from the shell.
+      const auto stable = StableStatePath();
+      const auto ordinary = stable.empty() ? LegacyStatePath() : stable;
+      std::ofstream copy(ordinary + ".tmp", std::ios::trunc);
+      if (!copy || chmod((ordinary + ".tmp").c_str(), 0600) != 0) return false;
+      copy << out.str(); copy.close();
+      if (!copy || rename((ordinary + ".tmp").c_str(), ordinary.c_str()) != 0) return false;
+    }
     m_LastState = out.str();
     return true;
   }
@@ -1348,6 +1420,8 @@ Harbor::OpenChat(const std::string& key)
   }
   if (m_Current != key)
     m_Search = m_Reactions = Pending();
+  const bool restoreBrowse = !m_RestoreChat.empty() && m_RestoreChat == key && m_RestoreBrowse;
+  if (m_RestoreChat == key) m_RestoreBrowse = false;
   m_Current = key;
   m_RestoreChat.clear();
   m_InitialChat.clear();
@@ -1369,7 +1443,7 @@ Harbor::OpenChat(const std::string& key)
     request->msgId = c.editing;
     Request(c.profile, request);
   }
-  m_Browse = false;
+  m_Browse = restoreBrowse;
   m_Media->Stop();
   m_Dirty = true;
 }
@@ -2416,7 +2490,8 @@ Harbor::Settings()
     { "Quoted replies", quotes[m_QuoteAppearance], [this] { AppearanceChoices("quote"); } },
     { "Messages", m_MessageAppearance ? "Plain" : "Panels", [this] { AppearanceChoices("messages"); } },
     { "Timestamps", m_TimestampPosition ? "Bottom right" : "Top right", [this] { AppearanceChoices("timestamp"); } },
-    { "Commands hint", hints[m_CommandHint], [this] { AppearanceChoices("commands"); } }
+    { "Commands hint", hints[m_CommandHint], [this] { AppearanceChoices("commands"); } },
+    { "Update all windows", "Keep chats and drafts", [this] { UpdateAll(); } }
   };
   m_Dirty = true;
 }

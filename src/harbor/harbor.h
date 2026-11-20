@@ -144,6 +144,12 @@ private:
   std::string m_Directory;
   std::string m_UpdateTarget, m_UpdateVersion;
   int64_t m_LastUpdateCheck = 0;
+  std::string m_RestartRegistration, m_RestartStateId;
+  bool m_ManualRestart = false, m_RestoreBrowse = false;
+  void RegisterRestart();
+  void UnregisterRestart();
+  void TryRestartAll();
+  void UpdateAll();
   void CheckUpdate();
   void UpdatePrompt();
   ChatMessage m_ForwardMessage;

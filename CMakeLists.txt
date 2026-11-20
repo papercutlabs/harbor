@@ -791,7 +791,7 @@ if(HAS_HARBOR)
     DEPENDS "${HARBOR_INPUT_DIR}/main.go" "${HARBOR_INPUT_DIR}/../input.h" "${HARBOR_INPUT_DIR}/go.mod" "${HARBOR_INPUT_DIR}/go.sum"
     VERBATIM)
   add_custom_target(harbor-input DEPENDS "${HARBOR_INPUT_ARCHIVE}")
-  add_executable(harbor src/main.cpp src/harbor/harbor.cpp src/harbor/media.cpp src/harbor/demoprotocol.cpp src/harbor/session.cpp)
+  add_executable(harbor src/harbor/restart.cpp src/main.cpp src/harbor/harbor.cpp src/harbor/media.cpp src/harbor/demoprotocol.cpp src/harbor/session.cpp)
   set_target_properties(harbor PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
   add_dependencies(harbor harbor-input)
   target_include_directories(harbor PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" src lib/common/src lib/ncutil/src lib/tgchat/src ${CURSES_INCLUDE_DIR})

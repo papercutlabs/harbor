@@ -17,7 +17,8 @@
     "tests/harbor/cursor_click_smoke.py",
     "tests/harbor/wheel_burst_smoke.py",
     "tests/harbor/appearance_smoke.py",
-    "tests/harbor/message_click_smoke.py"
+    "tests/harbor/message_click_smoke.py",
+    "tests/harbor/restart_all_smoke.py"
   ],
   "lanes": {
     "typing": [
@@ -139,6 +140,9 @@
     ],
     "message_click": [
       "tests/harbor/message_click_smoke.py"
+    ],
+    "restart_all": [
+      "tests/harbor/restart_all_smoke.py"
     ]
   }
 }
