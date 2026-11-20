@@ -26,7 +26,7 @@ if(JSON.stringify(process.argv.slice(2))!==JSON.stringify(['update','--restart-h
 const home=process.env.HOME,office=home+'/office';
 // Bind the global process census to the owned PTYs; targeted identity reads remain native.
 const owned=new Set(readdirSync(home+'/.office/harbor-windows').filter(n=>/^[0-9]+-[a-f0-9]{32}$/.test(n)).map(n=>Number(n.split('-')[0])));
-const run=async(file,args,cwd)=>{const result=await updateRunner(file,args,cwd);return args.includes('-A')?{...result,stdout:result.stdout.split('\n').filter(line=>owned.has(Number(line.trim().split(/\s+/)[0]))).join('\n')}:result;};
+const run=async(file,args,cwd)=>{const result=await updateRunner(file,args,cwd);return args.includes('-U')?{...result,stdout:result.stdout.split('\n').filter(line=>owned.has(Number(line.trim().split(/\s+/)[0]))).join('\n')}:result;};
 if(existsSync(home+'/fail-update'))await restartHarbors(home,office,{home,run,prepare:async()=>{throw Error('fixture preparation failed');},ready:()=>true});
 try {await restartHarbors(home,office,{home,run,prepare:async()=>{throw Error('fixture preparation failed');},ready:()=>true});throw Error('missing failure');}catch(e){if(e.message!=='fixture preparation failed')throw e;}
 const result=await restartHarbors(home,office,{home,run,prepare:async()=>null,ready:()=>true});
