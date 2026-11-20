@@ -63,7 +63,7 @@ class Terminal:
             os.execv(str(exe), [str(exe), '--demo', '-d', self.config] + list(args or []))
         os.close(slave)
         self.pump(.6)
-        try: self.expect('Ctrl+/ Commands', timeout=10)
+        try: self.expect('Ctrl+/', timeout=10)
         except Exception:
             self.close()
             raise
@@ -125,6 +125,16 @@ class Terminal:
         self.click_text('More message tools')
         self.expect('Message tools')
         self.click_text(tool)
+    def delivered(self, text):
+        # Observe the body in history, outside the composer, rather than a success toast.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            prompt = next((y for y, line in enumerate(self.screen.display) if '›' in line), self.rows)
+            if any(text in line for line in self.screen.display[:max(0, prompt - 1)]):
+                assert 'Sent' not in self.text, self.text
+                return
+            self.pump(.1)
+        raise AssertionError(f'Message not delivered: {text!r}:\n{self.text}')
     def snapshot(self, name):
         out=ROOT/'design'/name
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -190,7 +200,7 @@ if __name__=='__main__':
       t=Terminal(config_dir=config)
       try:
         t.expect('Ctrl+/ Commands');t.picker('Marina');assert 'HARBOR / TELEGRAM' not in t.text and 'connected' not in t.text;check('Native startup and chat search')
-        t.send('Hello from Harbor');t.send(b'\r');t.expect('Sent');check('Enter sends through Protocol')
+        t.send('Hello from Harbor');t.send(b'\r');t.delivered('Hello from Harbor');check('Enter sends through Protocol')
         t.send(b'\x1b');t.expect('MESSAGES');t.send(b'\r');t.expect('Message actions');check('Escape and Enter open message actions')
         t.send(b'\x1b');t.send('Draft kept');t.expect('Draft kept')
         t.picker('Studio');t.send('Studio draft');t.picker('Marina');t.expect('Draft kept');check('Drafts survive switching')
@@ -212,10 +222,10 @@ if __name__=='__main__':
         t.picker('Marina');t.send(b'\x1b');t.send('caption')
         fixture=str(ROOT/'tests/harbor/fixtures/harbor.png')
         t.send('\x1b[200~'+fixture+'\x1b[201~',wait=.4);t.expect('Preview attachments');t.expect('harbor.png');t.click_text('Cancel');t.expect('caption');check('Dropped file preview cancels without losing draft')
-        t.send('\x1b[200~'+fixture+'\x1b[201~',wait=.4);t.expect('Preview attachments');t.click_text('Send 1 attachment');t.expect('Sent');check('Attachment sends only after confirmation')
+        t.send('\x1b[200~'+fixture+'\x1b[201~',wait=.4);t.expect('Preview attachments');t.click_text('Send 1 attachment');t.delivered('harbor.png');assert 'Preview attachments' not in t.text;check('Attachment sends only after confirmation')
         t.send('Persistent final draft');t.resize(110,42);t.expect('CONVERSATIONS');t.snapshot('harbor-native-wide');check('Wide layout shows chat list')
         t.resize(50,38);assert 'CONVERSATIONS' not in t.text;t.expect('Persistent final draft');t.snapshot('harbor-native-narrow');check('50-column layout uses full conversation width')
-        t.resize(28,15);t.expect('commands');t.resize(56,38);check('Small terminal resize does not crash')
+        t.resize(28,15);t.expect('Ctrl+/');t.resize(56,38);check('Small terminal resize does not crash')
       finally:t.close()
       state=config/'harbor-state';assert state.exists();assert state.stat().st_mode & 0o077 == 0
       t=Terminal(config_dir=config)
