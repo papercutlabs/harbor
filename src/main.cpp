@@ -52,6 +52,7 @@
 #ifdef HARBOR_BUILD
 #include "harbor/demoprotocol.h"
 #include "harbor/update.h"
+#include "harbor/restart.h"
 #include "harbor/session.h"
 #include "harbor/trace.h"
 #include "harbor/launchroute.h"
@@ -1035,6 +1036,12 @@ void ShowVersion()
 static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs, const HarborRoute::Target& p_Target)
 {
   const std::string appDir = FileUtil::GetApplicationDir();
+  AppUtil::InitTerminateSignalHandler();
+  if (!HarborRestart::WaitForBackend(appDir))
+  {
+    std::cerr << "Harbor update did not complete. Your saved chat and draft are retained; run Harbor again.\n";
+    return 1;
+  }
   HarborSession::Attachment attachment = HarborSession::Attach(appDir, FileUtil::GetSelfPath(), p_BackendArgs);
   if (attachment.fd < 0)
   {

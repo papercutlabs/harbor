@@ -1,4 +1,8 @@
 #include "harbor.h"
+#include "restart.h"
+#include "session.h"
+#include "apputil.h"
+#include <iostream>
 #include "fileutil.h"
 #include "strutil.h"
 #include "update.h"
@@ -93,6 +97,12 @@ void Harbor::TryRestartAll()
   if (m_RestartStateId.empty()) m_RestartStateId = RandomId();
   if (m_RestartStateId.empty() || !SaveState(true)) { Notify("Update waiting: this window could not save its state"); return; }
   setenv("HARBOR_RESTART_STATE_ID", m_RestartStateId.c_str(), 1);
+  struct stat socket{};
+  if (lstat(HarborSession::SocketPath(FileUtil::GetApplicationDir()).c_str(), &socket) == 0 && S_ISSOCK(socket.st_mode))
+  {
+    const auto identity = std::to_string(socket.st_dev) + ":" + std::to_string(socket.st_ino);
+    setenv("HARBOR_RESTART_OLD_SOCKET", identity.c_str(), 1);
+  }
   HarborTrace::Event("ui.restart.all", {{"executable", target}});
   HarborUpdate::RestartTarget() = target;
   m_Running = false;
@@ -120,4 +130,31 @@ void Harbor::UpdateAll()
     }
   }
   Notify("Start office desk once to enable Harbor updates");
+}
+
+bool HarborRestart::WaitForBackend(const std::string& appDir)
+{
+  const char* value = getenv("HARBOR_RESTART_OLD_SOCKET");
+  if (!value || !*value) return true;
+  const std::string identity = value;
+  unsetenv("HARBOR_RESTART_OLD_SOCKET");
+  if (identity.find_first_not_of("0123456789:") != std::string::npos) return false;
+  const auto path = HarborSession::SocketPath(appDir);
+  bool said = false;
+  while (!AppUtil::IsTerminateRequested())
+  {
+    struct stat socket{};
+    if (lstat(path.c_str(), &socket) != 0) return errno == ENOENT;
+    if (!S_ISSOCK(socket.st_mode) || socket.st_uid != geteuid()) return false;
+    const auto current = std::to_string(socket.st_dev) + ":" + std::to_string(socket.st_ino);
+    if (current != identity) return true; // another updated window already started the new backend
+    if (!said)
+    {
+      std::cout << "Updating Harbor: waiting for the other windows to finish leaving the old version.\n"
+                   "A window in Desk or sign-in continues when that view returns.\n" << std::flush;
+      said = true;
+    }
+    usleep(20000);
+  }
+  return false;
 }

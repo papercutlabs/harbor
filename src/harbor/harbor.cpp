@@ -2435,7 +2435,8 @@ Harbor::Settings()
     { "Quoted replies", quotes[m_QuoteAppearance], [this] { AppearanceChoices("quote"); } },
     { "Messages", m_MessageAppearance ? "Plain" : "Panels", [this] { AppearanceChoices("messages"); } },
     { "Timestamps", m_TimestampPosition ? "Bottom right" : "Top right", [this] { AppearanceChoices("timestamp"); } },
-    { "Commands hint", hints[m_CommandHint], [this] { AppearanceChoices("commands"); } }
+    { "Commands hint", hints[m_CommandHint], [this] { AppearanceChoices("commands"); } },
+    { "Update all windows", "Keep chats, drafts and reading positions", [this] { UpdateAll(); } }
   };
   m_Dirty = true;
 }
