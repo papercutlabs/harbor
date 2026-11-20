@@ -95,5 +95,8 @@ while True:
     finally:
         if reaped:
             os.close(t.master)
-            if t.dir:t.dir.cleanup()
+            if t.dir:
+                # The UI was already reaped above, so close() cannot perform its normal wait.
+                t.wait_backend_shutdown()
+                t.dir.cleanup()
         else:t.close()
