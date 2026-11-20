@@ -9,6 +9,7 @@
 #include "forumutil.h"
 #include "richtextutil.h"
 #include "replyutil.h"
+#include "photoutil.h"
 #include "viewchats.h"
 
 #include <atomic>
@@ -3614,23 +3615,7 @@ void TgChat::Impl::TdMessageContentConvert(td::td_api::MessageContent& p_TdMessa
     p_Text = GetText(std::move(messagePhoto.caption_), p_RichText);
     if (!sizes.empty())
     {
-      auto& largestSize = sizes.back();
-      auto& photoFile = largestSize->photo_;
-      auto& localFile = photoFile->local_;
-      auto& localPath = localFile->path_;
-      FileInfo fileInfo;
-      std::string id = photoFile->remote_->id_;
-      fileInfo.fileId = id;
-      if (!localPath.empty())
-      {
-        fileInfo.filePath = localPath;
-        fileInfo.fileStatus = FileStatusDownloaded;
-      }
-      else
-      {
-        fileInfo.filePath = "[Photo]";
-        fileInfo.fileStatus = FileStatusNotDownloaded;
-      }
+      const FileInfo fileInfo = TelegramPhoto::File(*photo);
 
       p_FileInfo = ProtocolUtil::FileInfoToHex(fileInfo);
     }

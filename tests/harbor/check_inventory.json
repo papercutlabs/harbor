@@ -23,7 +23,8 @@
     "tests/harbor/composer_wheel_smoke.py",
     "tests/harbor/ui_identity_smoke.py",
     "tests/harbor/shell_copy_smoke.py",
-    "tests/harbor/restart_generation_smoke.py"
+    "tests/harbor/restart_generation_smoke.py",
+    "tests/harbor/picture_open_smoke.py"
   ],
   "lanes": {
     "typing": [
@@ -167,6 +168,9 @@
     ],
     "restart_generation": [
       "tests/harbor/restart_generation_smoke.py"
+    ],
+    "picture_open": [
+      "tests/harbor/picture_open_smoke.py"
     ]
   }
 }

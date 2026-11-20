@@ -85,6 +85,24 @@ HarborDemo::Seed()
         "self",
         "Note " + std::to_string(i + 1) + ": Make the next action obvious. Leave more space between ideas.",
         i);
+  if (getenv("HARBOR_DEMO_PICTURES"))
+  {
+    m_Messages["studio"].clear();
+    auto photo = [&](const std::string& id) {
+      add("studio", "leo", id, id == "photo-shown" ? 80 : 20);
+      auto& message = m_Messages["studio"].back();
+      message.id = id;
+      FileInfo file;
+      file.fileId = dir + "/harbor.png";
+      file.filePath = "[Photo]";
+      file.fileType = std::string(getenv("HARBOR_DEMO_PICTURES")) == "legacy" ? "" : "image/jpeg";
+      file.fileStatus = FileStatusNotDownloaded;
+      message.fileInfo = ProtocolUtil::FileInfoToHex(file);
+    };
+    photo("photo-offscreen");
+    for (int i = 0; i < 40; ++i) add("studio", "leo", "Earlier history " + std::to_string(i), 21 + i);
+    photo("photo-shown");
+  }
   if (getenv("HARBOR_DEMO_TOPICS"))
   {
     const std::string parent = getenv("HARBOR_DEMO_ROUTES") ? StrUtil::NumToHex(DemoRouteChat()) : "hive";
@@ -267,43 +285,43 @@ HarborDemo::Login()
   auto n = std::make_shared<ConnectNotify>(m_Id);
   n->success = true;
   Emit(n);
-  // Offline PTY fixture uses the same service notifications as Telegram and the shared session.
-  if (const char* mode = getenv("HARBOR_DEMO_TYPING"))
+  // Offline typing events are driven by the PTY observer after its history/draft are ready.
+  if (const char* control = getenv("HARBOR_DEMO_TYPING_CONTROL"))
   {
     const std::string chat = getenv("HARBOR_DEMO_TYPING_CHAT") ? getenv("HARBOR_DEMO_TYPING_CHAT") : "marina";
-    auto activity = [&](int delay, bool active) {
-      auto typing = std::make_shared<ReceiveTypingNotify>(m_Id);
-      typing->chatId = chat; typing->userId = "marina"; typing->isTyping = active;
-      Later(delay, typing);
-    };
-    activity(2200, true);
-    if (std::string(mode) != "expire" && std::string(mode) != "coalesced") activity(3600, true);
-    // TDLib sends state changes, not every renewed action. One active notification may remain
-    // valid for a long turn; only its eventual stop is delivered to the UI.
-    if (std::string(mode) == "coalesced") activity(11000, false);
-    // An unrenewed TDLib action times out after 5.5s and produces a stop notification.
-    if (std::string(mode) == "expire") activity(7700, false);
-    if (std::string(mode) == "delayed")
-    {
-      activity(7200, true);
-      activity(12200, true);
-      activity(13200, false);
-    }
-    if (std::string(mode) == "stop") activity(5000, false);
-    if (std::string(mode) == "disconnect")
-    {
-      auto disconnected = std::make_shared<ConnectNotify>(m_Id);
-      disconnected->success = false; Later(5000, disconnected);
-    }
-    if (std::string(mode) == "reply")
-    {
-      ChatMessage reply;
-      reply.id = "typing-complete"; reply.senderId = "marina"; reply.isOutgoing = false;
-      reply.text = "The active reply is complete."; reply.timeSent = TimeUtil::GetCurrentTimeMSec() + 5000;
-      auto incoming = std::make_shared<NewMessagesNotify>(m_Id);
-      incoming->success = true; incoming->chatId = chat; incoming->chatMessages = {reply};
-      Later(5000, incoming);
-    }
+    // The PTY observer owns this private fixture file. Activity starts only after it has
+    // loaded history and the draft; a real stop is requested after its active observations.
+    m_Delayed.emplace_back([this, chat, path = std::string(control)] {
+      size_t consumed = 0;
+      bool expiring = false;
+      std::chrono::steady_clock::time_point expiry;
+      while (!m_Stopping)
+      {
+        std::ifstream input(path);
+        std::string action;
+        size_t index = 0;
+        while (std::getline(input, action) && !m_Stopping)
+        {
+          if (++index <= consumed) continue;
+          consumed = index;
+          TypingEvent(chat, action);
+          if (action == "expire" || (action == "renew" && expiring))
+          {
+            expiring = true;
+            expiry = std::chrono::steady_clock::now() + std::chrono::milliseconds(5500);
+          }
+          else if (action != "renew") expiring = false;
+          Record("typing-control " + std::to_string(index) + " " + action + " at-ms=" + std::to_string(TimeUtil::GetCurrentTimeMSec()));
+        }
+        if (expiring && std::chrono::steady_clock::now() >= expiry)
+        {
+          TypingEvent(chat, "stop");
+          Record("typing-control expired at-ms=" + std::to_string(TimeUtil::GetCurrentTimeMSec()));
+          expiring = false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+    });
   }
   if (const char* delay = getenv("HARBOR_DEMO_INCOMING_DELAY_MS"))
   {
@@ -363,6 +381,31 @@ HarborDemo::Logout()
       thread.join();
   m_Delayed.clear();
   return true;
+}
+// Demo-only controlled service events keep fixture lifetime separate from observer scheduling.
+void
+HarborDemo::TypingEvent(const std::string& chat, const std::string& action)
+{
+  if (action == "reply")
+  {
+    ChatMessage reply;
+    reply.id = "typing-complete"; reply.senderId = "marina"; reply.isOutgoing = false;
+    reply.text = "The active reply is complete."; reply.timeSent = TimeUtil::GetCurrentTimeMSec();
+    auto incoming = std::make_shared<NewMessagesNotify>(m_Id);
+    incoming->success = true; incoming->chatId = chat; incoming->chatMessages = { reply };
+    Emit(incoming);
+  }
+  else if (action == "disconnect")
+  {
+    auto disconnected = std::make_shared<ConnectNotify>(m_Id);
+    disconnected->success = false; Emit(disconnected);
+  }
+  else
+  {
+    auto typing = std::make_shared<ReceiveTypingNotify>(m_Id);
+    typing->chatId = chat; typing->userId = "marina"; typing->isTyping = action != "stop";
+    Emit(typing);
+  }
 }
 // Offline request recorder: HARBOR_DEMO_REQUEST_LOG names a file that receives one line per request.
 void
@@ -709,17 +752,18 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
           n->chatId = r->chatId;
           n->msgId = r->msgId;
           n->fileInfo = m.fileInfo;
-          if (getenv("HARBOR_DEMO_CLICKS"))
+          if (getenv("HARBOR_DEMO_CLICKS") || getenv("HARBOR_DEMO_PICTURES"))
           {
             auto file = ProtocolUtil::FileInfoFromHex(m.fileInfo);
             file.filePath = file.fileId;
             file.fileStatus = FileStatusDownloaded;
             n->fileInfo = ProtocolUtil::FileInfoToHex(file);
             Record("attachment-download action=" + std::to_string(int(r->downloadFileAction)));
+            if (getenv("HARBOR_DEMO_PICTURES")) Record("picture-download " + r->msgId + " action=" + std::to_string(int(r->downloadFileAction)));
           }
           n->downloadFileAction = r->downloadFileAction;
           n->requestId = r->requestId;
-          Emit(n);
+          Later(DelayMs("HARBOR_DEMO_PICTURE_DELAY_MS"), n);
         }
       break;
     }

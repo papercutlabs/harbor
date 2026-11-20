@@ -22,3 +22,7 @@ Source: PCL-1302, Teren’s accepted interaction in Telegram9890 and implementat
 Source for 10 and the Option-/ change to 3: PCL-1378, Teren’s request in Telegram 10553 and approved new-message indicator A (PCL-1311).
 
 Source for 5–9: PCL-1312, Teren’s acceptance of all six proposals in Telegram 10014. They live in the existing message actions, More message tools and Commands, with transient choosers; there is no new permanent chrome.
+
+12. Recognize a picture as soon as its message appears, with the largest Telegram rendition downloaded automatically into the local cache only for visible messages. Click its thumbnail once to open that rendition in macOS Preview, including while the download is finishing. Keep saving a separate Downloads copy on the filename. When used with Desk Focus, allow this explicitly opened Preview until the user returns to Harbor.
+
+Source: PCL-1302, Teren’s automatic-download ruling in Telegram 11705 and acceptance of the Preview and Focus proposal in Telegram 11707.

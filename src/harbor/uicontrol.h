@@ -101,7 +101,7 @@ inline std::string Send(const std::string& dir, std::string surface, const std::
   }
   close(fd);
   if (response == "ok\n") return response;
-  if (action == "inspect" && response.rfind("pcl.harbor.ui.v1\t", 0) == 0 && response.back() == '\n') return response;
+  if (action == "inspect" && (response.rfind("pcl.harbor.ui.v1\t", 0) == 0 || response.rfind("pcl.harbor.ui.v2\t", 0) == 0) && response.back() == '\n') return response;
   if (action == "inspect-window" && response.rfind("pcl.harbor.window.v1\t", 0) == 0 && response.back() == '\n') return response;
   if (response.rfind("error\t", 0) == 0 && response.back() == '\n' && Field(response.substr(6, response.size() - 7)))
     throw std::runtime_error(response.substr(6, response.size() - 7));

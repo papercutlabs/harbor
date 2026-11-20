@@ -17,8 +17,8 @@ with tempfile.TemporaryDirectory(prefix='hi-',dir='/tmp') as directory:
         out,err=child.communicate();return child.returncode,out,err
     def inspect(window,surface):
         code,out,err=control(window,surface,'--inspect-ui');assert code==0,err
-        fields=out.rstrip('\n').split('\t');assert len(fields)==8,fields
-        assert fields[:3]==['pcl.harbor.ui.v1',str(window.pid),surface]
+        fields=out.rstrip('\n').split('\t');assert len(fields)==9,fields
+        assert fields[:3]==['pcl.harbor.ui.v2',str(window.pid),surface]
         return fields
     samples=[];inspection_pids=[]
     def inspect_window(window,surface):
@@ -38,7 +38,7 @@ with tempfile.TemporaryDirectory(prefix='hi-',dir='/tmp') as directory:
         first.expect('Agent');first.send('Retained unique draft');initial=inspect(first,'IDENTITY-ONE')
         window_initial=inspect_window(first,'IDENTITY-ONE');other_window=inspect_window(second,'IDENTITY-TWO')
         assert window_initial[3]!=other_window[3], 'two native windows shared one runtime identity'
-        assert initial[4].endswith('#421') and initial[6:] == ['1','1'],initial
+        assert initial[4].endswith('#421') and initial[6:8] == ['1','1'] and initial[8] == '0',initial
         first.picker('Doug');different=inspect(first,'IDENTITY-ONE');assert different[4].endswith('#550'),different
         window_different=inspect_window(first,'IDENTITY-ONE')
         assert window_initial[3:7]==window_different[3:7] and window_initial[8]!=window_different[8]

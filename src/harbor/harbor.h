@@ -127,6 +127,9 @@ private:
   std::string m_InitialChat, m_InitialProfile, m_InitialRouteStatus;
   int64_t m_InitialRouteUntil = 0;
   HarborUiControl::Server m_UiControl;
+  uint64_t m_PreviewSequence = 0;
+  bool m_PreviewActive = false;
+  std::set<std::string> m_PendingPictures;
   int m_ControlReply = -1;
   std::string m_ControlProfile, m_ControlConversation, m_ControlKey, m_ControlError;
   bool m_ControlPending = false, m_InDeskView = false, m_InColdDeskView = false;
