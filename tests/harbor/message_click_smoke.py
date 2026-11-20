@@ -105,7 +105,7 @@ for cols in (42, 110):
             t.resize(cols, 24); t.send(b'\x07')
             assert '你好' not in t.text
             t.send(b'\x1b'); t.send(b'\r'); t.expect('Message actions')
-            t.send(b'\x1b'); t.send(b'\x0f'); t.expect('Commands & shortcuts')
+            t.send(b'\x1b'); t.send(b'\x0f'); t.expect('│ Commands')
             t.send(b'\r'); t.expect('Message tools')
             t.expect('Open / play attachment'); t.send(b'\r'); t.pump(.3)
             assert opened_urls()[count:] == [str(Path(__file__).parent.resolve() / 'fixtures/new-shelf.md')]

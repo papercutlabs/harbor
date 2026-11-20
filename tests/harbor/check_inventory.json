@@ -25,7 +25,8 @@
     "tests/harbor/shell_copy_smoke.py",
     "tests/harbor/restart_generation_smoke.py",
     "tests/harbor/picture_open_smoke.py",
-    "tests/harbor/preview_guard_smoke.py"
+    "tests/harbor/preview_guard_smoke.py",
+    "tests/harbor/command_menu_smoke.py"
   ],
   "lanes": {
     "typing": [
@@ -74,7 +75,8 @@
       "tests/harbor/multiwindow_smoke.py"
     ],
     "command_keys": [
-      "tests/harbor/command_keys_smoke.py"
+      "tests/harbor/command_keys_smoke.py",
+      "tests/harbor/command_menu_smoke.py"
     ],
     "popup_hierarchy": [
       "tests/harbor/popup_hierarchy_smoke.py"

@@ -47,7 +47,7 @@ try:
     t.send(b'\x1b');t.send(b'\r');t.expect('Message actions')
     assert 'Edit message' not in t.text and 'React…' not in t.text
     # the absent labels are real actions: the full Message tools list for the same message has them
-    t.send(b'\x1b');t.click_text('/ Commands');t.click_text('More message tools');t.expect('Message tools')
+    t.send(b'\r');t.click_text('More message tools');t.expect('Message tools')
     for label in ['Edit message','React…','Delete message']:t.expect(label)
     print('PASS left click stays quiet; right-click/Enter show only the primary actions; tools keep the rest; reply/forward/copy and drafts')
 finally:

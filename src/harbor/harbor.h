@@ -235,13 +235,15 @@ private:
   void ChatPicker(bool forward = false);
   void RebuildPicker(bool preserveSelection = true);
   void Commands();
+  void Help();
+  void About();
   void Settings();
   void AppearanceChoices(const std::string&);
   void LoadAppearance();
   bool SaveAppearance();
   int m_QuoteAppearance = 1, m_MessageAppearance = 0, m_TimestampPosition = 1, m_CommandHint = 0;
   // Optional Desk entries named by HARBOR_DESK_COMMANDS, each run as an argv child on this same terminal.
-  std::vector<Option> DeskOptions();
+  std::vector<Option> DeskOptions(bool help = false);
   HarborDeskHost m_DeskHost;
   bool WarmDeskHandoff(const std::vector<std::string>& argv);
   bool DeskHandoff(const std::vector<std::string>& argv);

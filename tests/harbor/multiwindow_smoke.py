@@ -74,7 +74,7 @@ def orderly_pending_checks(root):
                 wait(lambda: ' pending=0 success=0' in trace.read_text(), 'final failure queued to UI', 15)
                 assert 'Send failed' not in a.text, a.text
             if mode == 'restart':
-                a.send(b'\x0f'); a.expect('Commands & shortcuts')
+                a.send(b'\x0f'); a.expect('│ Commands')
                 a.click_text('Update Harbor'); a.expect('Restart')
                 a.click_text('Restart')
                 wait(lambda: str(target) in subprocess.run(['ps', '-p', str(a.pid), '-o', 'args='],

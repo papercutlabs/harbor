@@ -12,6 +12,7 @@
 #include "messagecache.h"
 #include "protocolutil.h"
 #include "strutil.h"
+#include "sysutil.h"
 #include "timeutil.h"
 #include "ui.h"
 #include "update.h"
@@ -2676,8 +2677,7 @@ Harbor::Commands()
   m_Option = 0;
   m_MenuOffset = 0;
   m_Options = {
-    { "More message tools", "For the selected message", [this] { Actions(false); } },
-    { "Search or pinned messages", "Searches Telegram, not just loaded messages", [this] { SearchPrompt(); } },
+    { "Search or pinned messages", "", [this] { SearchPrompt(); } },
     { "Chats", "Ctrl+K", [this] { ChatPicker(); } },
     { "Jump to latest messages",
       "Ctrl+G",
@@ -2686,71 +2686,9 @@ Harbor::Commands()
         CloseMenu();
         Latest();
       } },
-    { "Refresh conversation",
-      "Ctrl+R",
-      [this]
-      {
-        CloseMenu();
-        auto* c = Current();
-        if (c)
-        {
-          c->fetching = false;
-          Fetch(*c);
-          Notify("Refreshing conversation…");
-        }
-      } },
-    { "Browse messages",
-      "Esc · arrows · Enter",
-      [this]
-      {
-        CloseMenu();
-        Select(0);
-      } },
-    { "Attach files", "Ctrl+T / paste paths", [this] { FilePicker(m_Directory); } },
-    { "Paste clipboard",
-      "Ctrl+V · images preview",
-      [this]
-      {
-        CloseMenu();
-        ClipboardPaste();
-      } },
-    { "Pause / resume voice",
-      "Space in playback",
-      [this]
-      {
-        CloseMenu();
-        m_Media->TogglePause();
-      } },
-    { "Stop playback",
-      "",
-      [this]
-      {
-        CloseMenu();
-        m_Media->Stop();
-      } },
-    { "Keyboard help",
-      "Enter sends · Shift+Enter newline",
-      [this]
-      {
-        m_Menu = "help";
-        m_Options = {
-          { "Compose immediately", "Type from messages to write", [this] { CloseMenu(); } },
-          { "Commands from any draft", "Ctrl+/ or Ctrl+O · / is always literal", [this] { CloseMenu(); } },
-          { "Enter sends / Shift+Enter newline", "Ctrl+J is a newline fallback", [this] { CloseMenu(); } },
-          { "Escape switches focus", "Arrows browse · Enter actions", [this] { CloseMenu(); } },
-          { "Ctrl+K opens Chats",
-            "Open or switch a conversation; draft kept",
-            [this] { CloseMenu(); } },
-          { "Paste / drop previews attachments",
-            "Ctrl+V reads clipboard image or text",
-            [this] { CloseMenu(); } },
-          { "Drag to select and copy",
-            "Release copies text; right-click opens actions",
-            [this] { CloseMenu(); } },
-          { "Quit", "Ctrl+Q", [this] { CloseMenu(); } }
-        };
-        m_Option = 0;
-      } },
+    { "Settings", "", [this] { Settings(); } },
+    { "Keyboard help", "", [this] { Help(); } },
+    { "About", "", [this] { About(); } },
     { "Recover a failed send",
       "Nothing resends automatically",
       [this]
@@ -2784,10 +2722,14 @@ Harbor::Commands()
           AttachPreview({ f.filePath });
         }
       } },
-    { "Settings", "Appearance and preferences", [this] { Settings(); } },
-    { "Update Harbor", "Restart when an installed update is ready", [this] { UpdatePrompt(); } },
     { "Quit Harbor", "Ctrl+Q", [this] { m_Running = false; } }
   };
+  if (auto* c = Current(); !c || c->recovery.empty())
+    m_Options.erase(std::remove_if(m_Options.begin(), m_Options.end(),
+      [](const Option& o) { return o.label == "Recover a failed send"; }), m_Options.end());
+  CheckUpdate();
+  if (!m_UpdateTarget.empty())
+    m_Options.insert(m_Options.end() - 1, { "Update Harbor", m_UpdateVersion, [this] { UpdatePrompt(); } });
   if (auto* c = Current(); c && c->back.set)
     m_Options.insert(m_Options.begin() + 1,
                      { "Return to previous position",
@@ -2801,8 +2743,54 @@ Harbor::Commands()
   m_Options.insert(m_Options.begin(), desk.begin(), desk.end());
   m_Dirty = true;
 }
+void
+Harbor::Help()
+{
+  m_Menu = "help"; m_Filter.clear(); m_Option = 0; m_MenuOffset = 0;
+  m_Options = {
+    { "Compose", "Enter sends · Shift+Enter / Ctrl+J newline", [this] { CloseMenu(); } },
+    { "Commands", "Ctrl+O / Ctrl+/ · / is literal text", [this] { CloseMenu(); } },
+    { "Chats / latest messages", "Ctrl+K / Ctrl+G", [this] { CloseMenu(); } },
+    { "Browse messages", "Esc · arrows · Enter for actions", [this] { CloseMenu(); } },
+    { "Attach / paste", "Ctrl+T files · Ctrl+V clipboard · paste or drop paths", [this] { CloseMenu(); } },
+    { "Copy / message tools", "Drag to copy · right-click or Enter for actions", [this] { CloseMenu(); } },
+    { "Refresh conversation", "Ctrl+R", [this] { CloseMenu(); } },
+    { "Voice playback", "Open the voice message · Space pauses / resumes", [this] { CloseMenu(); } },
+    { "Quit", "Ctrl+Q", [this] { CloseMenu(); } }
+  };
+  auto desk = DeskOptions(true);
+  m_Options.insert(m_Options.begin(), desk.begin(), desk.end());
+  m_Dirty = true;
+}
+void
+Harbor::About()
+{
+  m_Menu = "about"; m_Filter.clear(); m_Option = 0; m_MenuOffset = 0;
+  std::string revision = "unknown";
+  const char* explicitPath = getenv("HARBOR_DESK_COMMANDS");
+  const char* home = getenv("HOME");
+  const std::string path = explicitPath && *explicitPath ? explicitPath : std::string(home ? home : "") + "/.office/desk/harbor-desk-commands";
+  std::ifstream file(path); std::string line;
+  while (std::getline(file, line))
+  {
+    const std::string prefix = "# pcl.desk.owner.v1\t";
+    if (line.rfind(prefix, 0) != 0) continue;
+    std::istringstream owner(line.substr(prefix.size()));
+    long long pid = 0; std::string candidate, extra;
+    if (owner >> pid >> candidate && !(owner >> extra) && pid > 0 && pid <= INT_MAX &&
+        (candidate == "unknown" || std::regex_match(candidate, std::regex("[0-9a-f]{7,40}"))) &&
+        (kill(pid_t(pid), 0) == 0 || errno == EPERM)) revision = candidate;
+    break;
+  }
+  m_Options = {
+    { "Harbor", HarborUpdate::Version(), [this] { CloseMenu(); } },
+    { "Harbor revision", SysUtil::GetBuildGitSha(), [this] { CloseMenu(); } },
+    { "Serving Desk revision", revision, [this] { CloseMenu(); } }
+  };
+  m_Dirty = true;
+}
 std::vector<Harbor::Option>
-Harbor::DeskOptions()
+Harbor::DeskOptions(bool help)
 {
   // Discover Desk on each menu open, including when Desk started after this Harbor window.
   // An explicit host path takes precedence over the current user's installed Desk commands.
@@ -2827,8 +2815,10 @@ Harbor::DeskOptions()
     std::string field;
     while (std::getline(stream, field, '\t'))
       fields.push_back(field);
-    if (fields.size() < 3 || fields[0].empty() || fields[2].empty())
+    if (fields.size() < 3 || fields[0].empty() || fields[2].empty() || fields[0][0] == '#')
       continue;
+    if (fields[0] == "Desk controls" || fields[0] == "Desk") continue;
+    if ((fields[0] == "Desk keys…") != help) continue;
     std::vector<std::string> argv(fields.begin() + 2, fields.end());
     const std::string shortcut = fields[0] == "Everything" ? "e · " : fields[0] == "Quota" ? "q · " : fields[0] == "Focus" ? "f · " : "";
     options.push_back({ "Desk · " + fields[0], shortcut + fields[1], [this, argv, label = fields[0]]
@@ -3161,6 +3151,15 @@ Harbor::Actions(bool minimal)
                             CloseMenu();
                             OpenAttachment(m_Chats[key].profile, m_Chats[key].id, id, true);
                           } });
+  if (!message.fileInfo.empty() && m_Media->Playing())
+  {
+    const auto attachment = ProtocolUtil::FileInfoFromHex(message.fileInfo);
+    if (attachment.filePath == m_Media->PlayingPath())
+    {
+      m_Options.push_back({ "Pause / resume voice", "Space while browsing", [this] { CloseMenu(); m_Media->TogglePause(); } });
+      m_Options.push_back({ "Stop playback", "", [this] { CloseMenu(); m_Media->Stop(); } });
+    }
+  }
   if (formatted.links.size() == 1)
   {
     std::string url = S(formatted.links.front().arg);
@@ -3232,6 +3231,8 @@ Harbor::Actions(bool minimal)
                                    return minimal ? !primary : primary;
                                  }),
                   m_Options.end());
+  if (minimal)
+    m_Options.push_back({ "More message tools", "", [this] { Actions(false); } });
   if (!minimal)
     m_Menu = "message-tools";
   m_Dirty = true;
@@ -4107,7 +4108,7 @@ Harbor::OpenAttachment(const std::string& p, const std::string& chatId, const st
       m_Media->TogglePause();
     else
       m_Media->Play(f.filePath);
-    Notify("Voice playback · Ctrl+/ to pause or stop");
+    Notify("Voice playback · Space pauses / resumes");
   }
   else if (type.find("image") == 0 && preview)
   {
@@ -4217,10 +4218,11 @@ Harbor::DrawMenu()
                       : m_Menu == "actions"       ? "Message actions"
                       : m_Menu == "message-tools" ? "Message tools"
                       : m_Menu == "update"        ? "Update ready"
-                      : m_Menu == "commands"      ? "Commands & shortcuts"
+                      : m_Menu == "commands"      ? "Commands"
                       : m_Menu == "files"         ? "Attach · " + m_Directory
                       : m_Menu == "delete"        ? "Delete message?"
                       : m_Menu == "help"          ? "Keyboard help"
+                      : m_Menu == "about"         ? "About"
                       : m_Menu == "preview"       ? "Image preview"
                       : m_Menu == "search"        ? "Search this conversation"
                       : m_Menu == "results"       ? (m_Search.pinned ? "Pinned messages" : "Search results")

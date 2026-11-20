@@ -76,7 +76,7 @@ def actions(t, message):
 def tools(t, message, tool):
     visible(t, message, body=True)
     click_body(t, message, button=2); t.expect('Message actions')
-    t.send(b'\x1b'); t.click_text('/ Commands'); t.click_text('More message tools'); t.expect('Message tools')
+    t.click_text('More message tools'); t.expect('Message tools')
     t.click_text(tool)
 
 def cell(t, text):
@@ -95,7 +95,7 @@ def drag(t, a, b):
     t.expect('Copied selection')
 
 def commands(t, entry):
-    t.click_text('/ Commands'); t.expect('Commands & shortcuts'); t.click_text(entry)
+    t.click_text('/ Commands'); t.expect('│ Commands'); t.click_text(entry)
 
 def gone(t, text, wait=.4):
     t.pump(wait); assert text not in t.text, f'Unexpected {text!r}:\n{t.text}'
@@ -171,7 +171,7 @@ try:
     # an explicit failure is reported at once, well before the 12 s visit timeout
     t.expect('The original message is unavailable', timeout=3)
     # the failed visit leaves no stale mark behind: Return is not offered
-    t.click_text('/ Commands'); t.expect('Commands & shortcuts'); gone(t, 'Return to previous position'); t.send(b'\x1b')
+    t.click_text('/ Commands'); t.expect('│ Commands'); gone(t, 'Return to previous position'); t.send(b'\x1b')
     print('PASS explicit original failure is immediate and forgets the return mark')
 finally: t.close()
 
@@ -184,7 +184,7 @@ try:
     t.picker('Kleya'); t.expect('One conversation.'); t.pump(2)
     t.picker('Doug formatting'); t.expect('rich draft')
     gone(t, 'The original message is unavailable', wait=13); gone(t, 'Showing the message', wait=.1)
-    t.click_text('/ Commands'); t.expect('Commands & shortcuts'); gone(t, 'Return to previous position'); t.send(b'\x1b')
+    t.click_text('/ Commands'); t.expect('│ Commands'); gone(t, 'Return to previous position'); t.send(b'\x1b')
     print('PASS a chat switch during a pending visit clears it, its mark and its late original')
 finally: t.close()
 

@@ -29,7 +29,7 @@ public:
     return getenv("HARBOR_DESK_WARM") && std::string(getenv("HARBOR_DESK_WARM")) == "1" &&
       argv.size() == 5 && !argv[0].empty() && argv[0][0] == '/' && !argv[1].empty() && argv[1][0] == '/' &&
       argv[2] == "desk" && argv[3] == "--view" &&
-      (argv[4] == "everything" || argv[4] == "quota" || argv[4] == "now" || argv[4] == "help" || argv[4] == "focus");
+      (argv[4] == "everything" || argv[4] == "quota" || argv[4] == "now" || argv[4] == "help" || argv[4] == "focus" || argv[4] == "focus-status");
   }
   std::string Error() const
   {

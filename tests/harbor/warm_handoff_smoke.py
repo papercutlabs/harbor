@@ -37,7 +37,7 @@ while True:
   f.write(('released\\t'+ident+'\\tok\\n').encode())
 ''')
     commands=work/'commands'
-    commands.write_text('\n'.join('\t'.join([label,'Warm view',sys.executable,str(child),'desk','--view',view]) for label,view in [('Everything','everything'),('Quota','quota'),('Malformed','help'),('Death','now')])+'\n')
+    commands.write_text('\n'.join('\t'.join([label,'Warm view',sys.executable,str(child),'desk','--view',view]) for label,view in [('Everything','everything'),('Quota','quota'),('Focus status','focus-status'),('Malformed','help'),('Death','now')])+'\n')
     t=Terminal(cols=72,rows=38,extra_env={'HARBOR_DESK_COMMANDS':str(commands),'HARBOR_DESK_WARM':'1','CALLS':str(calls)})
     def state():
         t.pump(2.2)
@@ -67,6 +67,7 @@ while True:
         enter('Quota');t.expect('VISIT 6');t.send(b'\x03');t.expect('Back from Desk');assert state()==reading
         for label in ['Malformed','Death']:
             enter(label);t.expect('Desk ended unexpectedly');assert state()==reading
+        enter('Focus status');t.expect('VISIT 1');t.send(b'\x1b');t.expect('Back from Desk');assert state()==reading
         assert t.pid==pid
         t.send(b'\x1b');t.send('!');t.expect('!')
         print('PASS warm child reused; alternate screen, draft/cursor/reading, resize, Ctrl+C, late reply and exact child death')
