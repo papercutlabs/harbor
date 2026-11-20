@@ -45,18 +45,18 @@ with tempfile.TemporaryDirectory(prefix='harbor-input-latency-') as directory:
         assert 'X-end-of-burst' in t.text, f'Queued typing blocked beyond 2s: {elapsed:.3f}s'
     finally:
         t.close()
-    # This test owns the explicit config. The detached demo backend holds this
-    # lock until its final writes finish, so temp cleanup cannot race it.
-    end = time.monotonic() + 5
-    while True:
-        with (config/'session.lock').open() as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                if not (config/'session.sock').exists(): break
-            except BlockingIOError:
-                pass
-        assert time.monotonic() < end, 'Owned demo backend did not finish shutdown'
-        time.sleep(.01)
+        # This test owns the explicit config. The detached demo backend holds this
+        # lock until its final writes finish, so temp cleanup cannot race it.
+        end = time.monotonic() + 5
+        while True:
+            with (config/'session.lock').open() as lock:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    if not (config/'session.sock').exists(): break
+                except BlockingIOError:
+                    pass
+            assert time.monotonic() < end, 'Owned demo backend did not finish shutdown'
+            time.sleep(.01)
     drafts = [bytes.fromhex(line.split()[1]).decode() for line in (config/'harbor-state').read_text().splitlines()
               if line and not line.startswith('active ') and line.split()[1] != '-']
     assert drafts == [expected], repr(drafts)
