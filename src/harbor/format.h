@@ -293,6 +293,14 @@ Parse(const std::wstring& source)
   return out;
 }
 
+// Shell blocks are commands; keep their language metadata for tools without a display label.
+inline bool
+ShellLanguage(std::wstring language)
+{
+  for (auto& c : language)
+    c = std::towlower(c);
+  return language == L"shell" || language == L"sh" || language == L"bash" || language == L"zsh";
+}
 // Renders a producer's original text from its native ranges (see richtext.h). Nothing is guessed
 // from markup: a native message without ranges stays literal. Spoilers stay concealed unless
 // revealed; a collapsed expandable quote shows its first line only.
@@ -397,7 +405,7 @@ Native(const RichText::Message& message, bool revealed = false, bool expanded = 
         ++j;
       for (size_t k = i; k < j; ++k)
         span.content += (style[k] & Spoiler) && !revealed && source[k] != L'\n' ? L'▒' : source[k];
-      if (!span.arg.empty())
+      if (!span.arg.empty() && !ShellLanguage(span.arg))
         out.Add(L"‹" + span.arg + L"›\n", Quote, true);
       span.begin = span.end = out.text.size();
       out.codes.push_back(span);

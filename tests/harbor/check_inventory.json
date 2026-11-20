@@ -21,7 +21,8 @@
     "tests/harbor/restart_all_smoke.py",
     "tests/harbor/input_latency_smoke.py",
     "tests/harbor/composer_wheel_smoke.py",
-    "tests/harbor/ui_identity_smoke.py"
+    "tests/harbor/ui_identity_smoke.py",
+    "tests/harbor/shell_copy_smoke.py"
   ],
   "lanes": {
     "typing": [
@@ -47,7 +48,8 @@
       "tests/harbor/appearance_smoke.py",
       "tests/harbor/message_click_smoke.py",
       "tests/harbor/composer_wheel_smoke.py",
-      "tests/harbor/ui_identity_smoke.py"
+      "tests/harbor/ui_identity_smoke.py",
+      "tests/harbor/shell_copy_smoke.py"
     ],
     "format": [
       "tests/harbor/format_test.cpp"
@@ -157,6 +159,9 @@
     ],
     "ui_identity": [
       "tests/harbor/ui_identity_smoke.py"
+    ],
+    "shell_copy": [
+      "tests/harbor/shell_copy_smoke.py"
     ]
   }
 }

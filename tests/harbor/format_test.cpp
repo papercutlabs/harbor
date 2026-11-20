@@ -39,7 +39,7 @@ NativeTests()
                     suffix = "\n\nIt should end with Done. Paste me the output.";
   auto t = HarborFormatting::Native(
     Native(prefix + command + suffix, { { RichText::Pre, U16(prefix), U16(command), "shell" } }));
-  assert(t.text == Wide(prefix) + L"‹shell›\n" + Wide(command) + Wide(suffix));
+  assert(t.text == Wide(prefix) + Wide(command) + Wide(suffix));
   assert(t.codes.size() == 1 && t.codes[0].content == Wide(command) && t.codes[0].arg == L"shell");
   assert(t.text.substr(t.codes[0].begin, t.codes[0].end - t.codes[0].begin) == Wide(command));
   assert(t.copy == Wide(prefix + command + suffix));

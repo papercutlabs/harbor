@@ -104,6 +104,7 @@ private:
     std::vector<unsigned> styles = {};
     std::vector<size_t> sources = {};
     bool attachment = false;
+    int copyCode = -1;
   };
   struct Option
   {
@@ -115,6 +116,7 @@ private:
   {
     int y, x, w;
     std::string type, value;
+    int code = -1;
   };
   std::mutex m_Mutex;
   std::deque<std::shared_ptr<ServiceMessage>> m_Events;
@@ -266,6 +268,7 @@ private:
   void SearchResults(std::shared_ptr<SearchMessagesNotify>);
   void ReactionChooser(const std::string& key, const std::string& id);
   void ReactionResults(std::shared_ptr<AvailableReactionsNotify>);
+  void CopyCode(const std::wstring&);
   void CodeChooser(const std::string& key, const std::string& id);
   void LinkChooser(const std::string& key, const std::string& id);
   void Timeouts(int64_t now);
