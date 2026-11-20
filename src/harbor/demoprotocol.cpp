@@ -153,7 +153,7 @@ HarborDemo::SeedRich(const std::function<void(const std::string&, const std::str
     rich("doug", 1, shortPrefix + shortCode + "\nAfter short command.",
          { { RichText::Pre, U16(shortPrefix), U16(shortCode), "shell" } });
     const std::string prefix = "Multiline command:\n",
-      command = "printf '%s\\n' 'first line deliberately crosses a narrow pane'\n\tprintf '你好 é'\nprintf 'tail'\n";
+      command = "./a_very_long_script_name_that_requires_wrapping --keep-newlines\n\tprintf '你好 é'\nprintf 'tail'\n";
     rich("doug", 2, prefix + command + "After multiline command.",
          { { RichText::Pre, U16(prefix), U16(command), "bash" } });
     const std::string first = "echo first\n", second = "echo second", lead = "Two code blocks:\n", between = "Between blocks.\n";

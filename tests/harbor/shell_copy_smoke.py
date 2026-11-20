@@ -14,7 +14,7 @@ opener = work/'opener.sh'
 opener.write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "'+str(opened)+'"\n')
 opener.chmod(0o755)
 short = "printf 'right edge!'"
-multiline = "printf '%s\\n' 'first line deliberately crosses a narrow pane'\n\tprintf '你好 é'\nprintf 'tail'\n"
+multiline = "./a_very_long_script_name_that_requires_wrapping --keep-newlines\n\tprintf '你好 é'\nprintf 'tail'\n"
 
 def point(t, text):
     for y in range(t.rows):
@@ -80,7 +80,7 @@ for cols in (32,56,110):
         assert 'draft stays' in t.text
         # The icon never covers the first source glyph, even when the first line wraps.
         _,label_y=point(t,'Multiline command:')
-        first_y=next(y for y in range(label_y+1,t.rows) if "printf '%s" in t.screen.display[y])
+        first_y=next(y for y in range(label_y+1,t.rows) if "./a_very_long" in t.screen.display[y])
         if cols==32: assert p[1]==first_y-1,t.text
         p=icon(t,'Two code blocks:');copy(t,p,'echo first\n')
         p=icon(t,'Two code blocks:',1);copy(t,p,'echo second')
