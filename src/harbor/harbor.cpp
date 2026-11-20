@@ -17,6 +17,7 @@
 #include "update.h"
 #include <algorithm>
 #include <clocale>
+#include <chrono>
 #include <cmath>
 #include <cwctype>
 #include <dirent.h>
@@ -4132,7 +4133,15 @@ Harbor::TryOpenPictures()
   if (guard.busy) return; // queue only this open; input and inspection keep running
   const auto path = m_PreviewOpens.front(); m_PreviewOpens.pop_front();
   if (guard.fd < 0) { Notify(guard.error); return; }
-  if (m_Media->Open(path, true)) { ++m_PreviewSequence; m_PreviewActive = true; }
+  if (m_Media->Open(path, true))
+  {
+    // A successful open is a new event even after exec preserves PID and surface.
+    // Microseconds from the boot clock remain exact in the Office numeric decoder.
+    const auto tick = uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count());
+    m_PreviewSequence = std::max(m_PreviewSequence + 1, tick);
+    m_PreviewActive = true;
+  }
   m_Dirty = true;
 }
 void

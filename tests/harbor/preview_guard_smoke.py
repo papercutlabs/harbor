@@ -123,6 +123,44 @@ with open(os.environ['HARBOR_TEST_OPENED'],'a') as f:f.write(sys.argv[1]+'\\n')
             native=json.loads(Path(str(result)+'.native.json').read_text())
             print('PASSIVE_RETURN_EVIDENCE '+json.dumps({'branch':json.loads(result.read_text()),'native':native}),flush=True)
             print('PASS actual Office stale grant1 effect activates neither app after native deliberate return0',flush=True)
+        # Settings' normal update exec keeps the PID/surface while replacing native state.
+        # A surviving Office allowance must distinguish the next explicit open.
+        y=next(y for y,line in enumerate(t.screen.display) if 'harbor.png' in line)
+        t.send(f'\x1b[<0;9;{y+2}M',wait=.03);t.send(f'\x1b[<0;9;{y+2}m',wait=.1)
+        pre_exec=inspect();assert int(pre_exec[8])>0
+        restart_holder=None
+        if office_driver:
+            restart_effect=root/'restart-effect';restart_effect.mkdir();(restart_effect/'release').touch()
+            restart_result=root/'restart-result.json'
+            restart_holder,first=start({'HARBOR_TEST_OFFICE_GUARD_MODE':'restart-event',
+                'HARBOR_TEST_OFFICE_NATIVE_PID':str(t.pid),'HARBOR_TEST_OFFICE_NATIVE_SURFACE':'GUARD-UI',
+                'HARBOR_TEST_OFFICE_NATIVE_PROFILE':str(root/'config'),'HARBOR_TEST_OFFICE_RESTART_RESULT':str(restart_result),
+                'HARBOR_TEST_EFFECT_DIR':str(restart_effect)},office=True)
+            assert first==b'READY\n'
+        registry=home/'.office/harbor-windows'
+        original=set(registry.iterdir());assert len(original)==1,original
+        registration=next(iter(original))
+        restart=Path(str(registration)+'.restart')
+        restart.write_text('pcl.harbor.restart.v1\t'+str(Path(exe).resolve())+'\n');restart.chmod(0o600)
+        until(lambda:bool(set(registry.iterdir())) and not set(registry.iterdir()).intersection(original),
+              'same-PID exec did not replace its native registration',seconds=12,pump=t.pump)
+        restored=[]
+        def resumed():
+            restored[:]=inspect()
+            return restored[1:5]==pre_exec[1:5]
+        until(resumed,'same-PID exec did not restore the original conversation',seconds=12,pump=t.pump)
+        post_reset=list(restored);assert post_reset[8]=='0',post_reset
+        t.expect('harbor.png')
+        y=next(y for y,line in enumerate(t.screen.display) if 'harbor.png' in line)
+        t.send(f'\x1b[<0;9;{y+2}M',wait=.03);t.send(f'\x1b[<0;9;{y+2}m',wait=.1)
+        post_exec=inspect();assert int(post_exec[8])>int(pre_exec[8]),(pre_exec,post_exec)
+        print('PREVIEW_RESTART_SAMPLES '+json.dumps({'before': '\t'.join(pre_exec)+'\n',
+            'reset':'\t'.join(post_reset)+'\n','after':'\t'.join(post_exec)+'\n'}),flush=True)
+        if restart_holder:
+            request(restart_holder);out,err=restart_holder.communicate(timeout=8)
+            assert restart_holder.returncode==0 and b'OFFICE_RESTART_EVENT_FRESH\n' in out,(restart_holder.returncode,out,err)
+            print('PREVIEW_RESTART_OFFICE '+restart_result.read_text(),flush=True)
+        print('PASS same-PID exec resets active allowance and next explicit open has a greater event ID',flush=True)
         # EOF before a request is harmless and releases without an effect.
         holder,first=start();assert first==b'READY\n';holder.stdin.close();holder.stdin=None
         out,err=holder.communicate(timeout=3);assert holder.returncode==0 and out==b'' and err==b''
