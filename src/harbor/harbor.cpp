@@ -504,6 +504,7 @@ Harbor::Init()
   printf("\033[?1003l\033[?1002h\033[?2004h\033[>1u");
   fflush(stdout);
   m_Ready = true;
+  RegisterRestart();
   if (const char* surface = getenv("CMUX_SURFACE_ID"))
     if (!m_UiControl.Start(FileUtil::GetApplicationDir(), surface))
       Notify("This window cannot receive addressed Desk commands. Return to Desk for details.");
@@ -588,6 +589,8 @@ Harbor::SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended)
 std::string
 Harbor::StatePath() const
 {
+  if (!m_RestartStateId.empty())
+    return FileUtil::GetApplicationDir() + "/harbor-state.window-" + m_RestartStateId;
   const auto stable = StableStatePath();
   return stable.empty() ? LegacyStatePath() : stable;
 }
@@ -611,6 +614,7 @@ void
 Harbor::Cleanup()
 {
   HarborTrace::Event("ui.cleanup");
+  UnregisterRestart();
   if (!m_Ready)
     return;
   FinishUiRoute("The selected Harbor UI ended before opening the requested conversation.");
@@ -638,6 +642,8 @@ Harbor::Run()
   bool deferring = false;
   while (m_Running && !AppUtil::IsTerminateRequested())
   {
+    TryRestartAll();
+    if (!m_Running) break;
     PollUiControl();
     if (!m_MouseDown)
       ProcessEvents();
@@ -750,6 +756,9 @@ Harbor::TryDeskUpdate()
 void
 Harbor::LoadState()
 {
+  const char* resume = getenv("HARBOR_RESTART_STATE_ID");
+  if (resume && strlen(resume) == 32 && std::all_of(resume, resume + 32, [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }))
+    m_RestartStateId = resume;
   std::ifstream input(StatePath());
   // AcquireSlot holds this UI's numeric slot lock until exit. Never inspect another slot.
   // Read its previous state once; all writes for an update-opted surface use the stable path.
@@ -918,6 +927,16 @@ Harbor::SaveState(bool force)
   if (file && rename((path + ".tmp").c_str(), path.c_str()) == 0)
   {
     chmod(path.c_str(), 0600);
+    if (!m_RestartStateId.empty())
+    {
+      // Also retain the ordinary slot/surface state for a later fresh launch from the shell.
+      const auto stable = StableStatePath();
+      const auto ordinary = stable.empty() ? LegacyStatePath() : stable;
+      std::ofstream copy(ordinary + ".tmp", std::ios::trunc);
+      if (!copy || chmod((ordinary + ".tmp").c_str(), 0600) != 0) return false;
+      copy << out.str(); copy.close();
+      if (!copy || rename((ordinary + ".tmp").c_str(), ordinary.c_str()) != 0) return false;
+    }
     m_LastState = out.str();
     return true;
   }
