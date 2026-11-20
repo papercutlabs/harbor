@@ -202,7 +202,7 @@ for record in (home/'.office/harbor-windows').iterdir():
         if trace.exists():
             events=[json.loads(line) for line in trace.read_text().splitlines()]
             keep=('ui.restart.all','ui.restart.deferred','ui.restart.waiting-backend','backend.spawned','backend.shutdown','handshake.ready')
-            snapshot['events']=[{key:value for key,value in e.items() if key in ('event','pid','child_pid','reason','old_socket','current_socket','peer_version','ts_ms')} for e in events if e.get('event') in keep][-30:]
+            snapshot['events']=[{key:value for key,value in e.items() if key in ('event','pid','child_pid','reason','old_socket','current_socket','old_generation','current_generation','peer_version','ts_ms')} for e in events if e.get('event') in keep][-30:]
         print('RESTART_FAILURE_EVIDENCE '+json.dumps(snapshot),flush=True)
         raise
     finally:
@@ -213,3 +213,10 @@ for record in (home/'.office/harbor-windows').iterdir():
         while (config/'session.sock').exists() and time.monotonic()<until:time.sleep(.01)
         assert not (config/'session.sock').exists(),'owned demo backend did not stop'
         with (config/'session.lock').open('a') as lock:fcntl.flock(lock,fcntl.LOCK_EX)
+        evidence=os.environ.get('HARBOR_RESTART_EVIDENCE_DIR')
+        if evidence:
+            destination=Path(evidence);destination.mkdir(parents=True,exist_ok=True)
+            for state in config.glob('harbor-state*'):
+                if state.is_file():shutil.copyfile(state,destination/state.name)
+            trace=home/'.local/state/harbor/operational.jsonl'
+            if trace.exists():shutil.copyfile(trace,destination/'operational.jsonl')
