@@ -67,6 +67,10 @@ for record in (home/'.office/harbor-windows').iterdir():
         note=re.search(r'Note \d+:',a.text).group()
         a.click_text(note,button=2);a.click_text('Reply');a.send('anchored draft')
         a.send(b'\x1b[D'*3)
+        def history(t):
+            reply=next(i for i,line in enumerate(t.screen.display) if 'Replying' in line)
+            return [line.rstrip() for line in t.screen.display[4:reply]]
+        before_history=history(a)
         before=[row.strip() for row in a.screen.display if 'Note ' in row]
         assert before and 'Note 35:' not in '\n'.join(before),a.text
         b.picker('Studio'); b.send('live draft')
@@ -102,8 +106,8 @@ for record in (home/'.office/harbor-windows').iterdir():
         while time.monotonic()<end:
             a.pump(.05);b.pump(.05)
             after=[row.strip() for row in a.screen.display if 'Note ' in row]
-            if after==before:break
-        else:raise AssertionError((before,after,a.text))
+            if after==before and history(a)==before_history:break
+        else:raise AssertionError((before_history,history(a),a.text))
         assert a.screen.title=='Saved Messages' and b.screen.title=='Studio'
         a.send('!');a.expect('anchored dr!aft');b.send('!');b.expect('edited draft!')
         b.send(b'\x1b');b.expect('live draft')
