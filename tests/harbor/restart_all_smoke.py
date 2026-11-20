@@ -80,9 +80,14 @@ for record in (home/'.office/harbor-windows').iterdir():
         old_socket=(config/'session.sock').stat().st_ino
         failure=home/'fail-update';failure.touch()
         update_from_settings(a);a.expect('fixture preparation failed',timeout=5)
+        a.expect('press any key to return to Harbor',timeout=5)
         assert set((home/'.office/harbor-windows').iterdir())==old_names
         assert (config/'session.sock').stat().st_ino==old_socket
-        a.send(b' ');a.expect('anchored draft');b.expect('edited draft')
+        resumed=len(a.raw);a.send(b' ')
+        end=time.monotonic()+5
+        while b'\x1b]2;Saved Messages\x07' not in a.raw[resumed:] and time.monotonic()<end:a.pump(.05)
+        assert b'\x1b]2;Saved Messages\x07' in a.raw[resumed:],'failed update did not return terminal ownership'
+        a.expect('anchored draft');b.expect('edited draft')
         failure.unlink()
         a_start,b_start=len(a.raw),len(b.raw)
         update_from_settings(a)
