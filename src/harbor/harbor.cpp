@@ -4984,7 +4984,13 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown, int wheelTicks)
       OpenChat(hit.value);
     else if (hit.type == "option")
       Choose(std::stoi(hit.value));
-    else if ((hit.type == "message" || hit.type == "attachment" || hit.type == "code-copy" || hit.type == "picture" || hit.type == "reply-quote") && c)
+    else if (hit.type == "reply-quote" && c)
+    {
+      m_Browse = false;
+      c->selected.clear();
+      MessageClick(e.x, e.y);
+    }
+    else if ((hit.type == "message" || hit.type == "attachment" || hit.type == "code-copy" || hit.type == "picture") && c)
     {
       MessageClick(e.x, e.y);
       m_Browse = false;

@@ -62,7 +62,8 @@ def quote(t,text,style='Plain'):
     _,y=body(t,text)
     line=t.screen.display[y-1]
     assert ':' in line or 'original' in line.lower(),line
-    x=next(x for x,c in enumerate(line) if not c.isspace())
+    main=25 if t.cols>=100 else 0
+    x=main+next(x for x,c in enumerate(line[main:]) if not c.isspace())
     if style=='Shaded':
         # The right part of the shaded quote row belongs to the quote too.
         x=t.cols-6
@@ -94,9 +95,15 @@ def jump(t,source,target,draft,state,style='Plain'):
     count=visits(t,state)
     mouse(t,p,'down');assert visits(t,state)==count,'Jump must wait for release'
     mouse(t,p,'up');t.expect('Showing the message')
-    tx,ty=body(t,target)
     if previous_target_bg is not None:
-        assert t.screen.buffer[ty][tx].bg != previous_target_bg,'Original must be selected'
+        # The target can already be visible; wait for its actual selected render,
+        # rather than a toast left by the preceding visit.
+        def selected():
+            return any(line[main:].strip()==target and
+                       t.screen.buffer[y][main+next(x for x,c in enumerate(line[main:]) if not c.isspace())].bg!=previous_target_bg
+                       for y,line in enumerate(t.screen.display))
+        wait(t,selected,'Original must be selected')
+    body(t,target)
     assert visits(t,state)>count
     t.expect(draft)
     return_back(t);body(t,source);t.expect(draft)
