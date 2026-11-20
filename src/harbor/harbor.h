@@ -128,6 +128,8 @@ private:
   int m_ControlReply = -1;
   std::string m_ControlProfile, m_ControlConversation, m_ControlKey, m_ControlError;
   bool m_ControlPending = false, m_InDeskView = false, m_InColdDeskView = false;
+  bool m_DeskParked = false;
+  std::string UiSnapshot() const;
   void PollUiControl();
   void BeginUiRoute();
   void FinishUiRoute(const std::string& error = {});
@@ -144,7 +146,7 @@ private:
   std::string m_Directory;
   std::string m_UpdateTarget, m_UpdateVersion;
   int64_t m_LastUpdateCheck = 0;
-  std::string m_RestartRegistration, m_RestartStateId;
+  std::string m_RestartRegistration, m_RestartStateId, m_RestartDeferred;
   bool m_ManualRestart = false, m_RestoreBrowse = false;
   void RegisterRestart();
   void UnregisterRestart();

@@ -74,11 +74,23 @@ void Harbor::UnregisterRestart()
 }
 void Harbor::TryRestartAll()
 {
-  if (m_RestartRegistration.empty() || m_InDeskView || m_InColdDeskView || m_AuthSuspended || !m_AuthOwner.empty() ||
-      m_ControlPending || m_ControlReply >= 0 || m_InitialRouteUntil || !m_RestoreChat.empty() || m_MouseDown ||
-      (!m_Attachments.empty() && (m_Menu == "attachments" || m_Menu == "preview")) ||
-      (Current() && !Current()->visit.empty())) return;
+  if (m_RestartRegistration.empty()) return;
   const auto path = m_RestartRegistration + ".restart";
+  const char* blocked = m_InDeskView || m_InColdDeskView ? "desk-view" : m_AuthSuspended || !m_AuthOwner.empty() ? "authentication" :
+    m_ControlPending || m_ControlReply >= 0 ? "addressed-route" : m_InitialRouteUntil || !m_RestoreChat.empty() ? "chat-restore" :
+    m_MouseDown ? "mouse-gesture" : !m_Attachments.empty() && (m_Menu == "attachments" || m_Menu == "preview") ? "attachments" :
+    Current() && !Current()->visit.empty() ? "message-visit" : nullptr;
+  if (blocked)
+  {
+    if (access(path.c_str(), F_OK) == 0)
+    {
+      if (m_RestartDeferred != blocked) HarborTrace::Event("ui.restart.deferred", {{"reason", blocked}});
+      m_RestartDeferred = blocked;
+    }
+    else m_RestartDeferred.clear();
+    return;
+  }
+  m_RestartDeferred.clear();
   const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK | O_NOFOLLOW);
   if (fd < 0) return;
   struct stat info{};
@@ -158,6 +170,7 @@ bool HarborRestart::WaitForBackend(const std::string& appDir)
     if (current != identity) return true; // another updated window already started the new backend
     if (!said)
     {
+      HarborTrace::Event("ui.restart.waiting-backend", {{"old_socket", identity}, {"current_socket", current}});
       std::cout << "Updating Harbor: waiting for the other windows to finish leaving the old version.\n"
                    "Finish any pending Desk, sign-in or attachment action to continue.\n" << std::flush;
       said = true;
