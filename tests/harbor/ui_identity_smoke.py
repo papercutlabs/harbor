@@ -41,3 +41,4 @@ with tempfile.TemporaryDirectory(prefix='hi-',dir='/tmp') as directory:
         print('PASS actual CLI current identity differs from launch argv; conditional parking rejects draft races; all draft state and other UI preserved',flush=True)
     finally:
         for view in windows:view.close()
+        if windows:windows[-1].wait_backend_shutdown()
