@@ -2249,7 +2249,7 @@ void TgChat::Impl::ProcessUpdate(td::td_api::object_ptr<td::td_api::Object> upda
 
       std::shared_ptr<ReceiveTypingNotify> receiveTypingNotify =
         std::make_shared<ReceiveTypingNotify>(m_ProfileId);
-      receiveTypingNotify->chatId = StrUtil::NumToHex(chatId);
+      receiveTypingNotify->chatId = TelegramForum::ActionConversation(user_chat_action, m_IncludeForumTopics);
       receiveTypingNotify->userId = StrUtil::NumToHex(userId);
       receiveTypingNotify->isTyping = isTyping;
       CallMessageHandler(receiveTypingNotify);

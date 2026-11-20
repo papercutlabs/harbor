@@ -217,6 +217,28 @@ HarborDemo::Login()
   auto n = std::make_shared<ConnectNotify>(m_Id);
   n->success = true;
   Emit(n);
+  // Offline PTY fixture uses the same service notifications as Telegram and the shared session.
+  if (const char* mode = getenv("HARBOR_DEMO_TYPING"))
+  {
+    const std::string chat = getenv("HARBOR_DEMO_TYPING_CHAT") ? getenv("HARBOR_DEMO_TYPING_CHAT") : "marina";
+    auto activity = [&](int delay, bool active) {
+      auto typing = std::make_shared<ReceiveTypingNotify>(m_Id);
+      typing->chatId = chat; typing->userId = "marina"; typing->isTyping = active;
+      Later(delay, typing);
+    };
+    activity(2200, true);
+    if (std::string(mode) != "expire") activity(3600, true);
+    if (std::string(mode) == "stop") activity(5000, false);
+    if (std::string(mode) == "reply")
+    {
+      ChatMessage reply;
+      reply.id = "typing-complete"; reply.senderId = "marina";
+      reply.text = "The active reply is complete."; reply.timeSent = TimeUtil::GetCurrentTimeMSec() + 5000;
+      auto incoming = std::make_shared<NewMessagesNotify>(m_Id);
+      incoming->success = true; incoming->chatId = chat; incoming->chatMessages = {reply};
+      Later(5000, incoming);
+    }
+  }
   if (const char* delay = getenv("HARBOR_DEMO_INCOMING_DELAY_MS"))
   {
     const int milliseconds = std::max(0, std::min(10000, atoi(delay)));
