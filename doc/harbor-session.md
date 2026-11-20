@@ -55,3 +55,5 @@ For the 0.1.25 upgrade, the pinned 0.1.24 revision `3cc477f6` and pre-allowlist 
 For the 0.1.26 upgrade, the pinned 0.1.25 revision `885ebd85` and pre-allowlist 0.1.26 revision `63453e4b` have byte-identical `session.cpp`, `session.h`, `wire.h` and `lib/common/src/protocol.h`. Only the new-client to previous-backend pair is added; no transitive version range is accepted.
 
 For the 0.1.27 copy upgrade, the pinned 0.1.26 revision `750136da` and pre-allowlist 0.1.27 revision `dd0541b2` have byte-identical `session.cpp`, `session.h`, `wire.h` and `lib/common/src/protocol.h`. Only the new-client to previous-backend pair is added.
+
+The final 0.1.27 also adds local backend-generation publication and Attachment generation metadata in `session.cpp` and `session.h`; welcome and request formats do not change. Bootstrap is qualified specifically from released 0.1.26, which has no generation publisher and cannot attach to a 0.1.27 backend before restarting. Same-version 0.1.27 restarts use the attached backend generation to distinguish a replacement when socket device/inode values are reused.
