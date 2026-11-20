@@ -709,7 +709,10 @@ Harbor::Run()
     if (m_Dirty && now - m_LastDraw >= 16)
     {
       Draw();
-      m_LastDraw = now;
+      // Measure the frame gap after rendering. A history frame can itself take
+      // longer than the gap; starting the clock before Draw redraws after every
+      // queued key or mouse report and prevents the input queue from draining.
+      m_LastDraw = TimeUtil::GetCurrentTimeMSec();
       m_Dirty = false;
     }
     ReadInput();

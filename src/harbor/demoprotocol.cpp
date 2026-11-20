@@ -93,6 +93,16 @@ HarborDemo::Seed()
     add(topic(421), "leo", "Topic-specific history for the Desk conversation.", 100);
     add(topic(550), "asha", "A different topic with separate history.", 90);
   }
+  // Load a substantial offline conversation without synthesizing terminal sends.
+  // Input-latency checks use the normal history response and native renderer.
+  if (getenv("HARBOR_DEMO_LONG_HISTORY"))
+  {
+    std::string body;
+    for (int i = 0; i < 80; ++i)
+      body += "A long conversation keeps the full history while the reader selects text and writes a reply.\n\n";
+    for (int i = 0; i < 50; ++i)
+      add("studio", "leo", body + "selection-sentinel", 100 + i);
+  }
   add("kleya", "kleya", "One conversation. A clear place to write. Everything else within reach.", 1);
   if (getenv("HARBOR_DEMO_RICH"))
     SeedRich(add);
