@@ -42,6 +42,7 @@ private:
                                          const std::string&, const std::string&)>& add);
   void Record(const std::string&);
   void Later(int milliseconds, std::shared_ptr<ServiceMessage>);
+  void TypingEvent(const std::string& chat, const std::string& action);
   std::vector<std::thread> m_Delayed;
   std::mutex m_RecordMutex;
   void Emit(std::shared_ptr<ServiceMessage> message)
