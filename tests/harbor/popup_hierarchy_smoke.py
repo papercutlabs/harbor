@@ -1,6 +1,7 @@
 """Offline PTY proof that popup option titles, descriptions and the selected row are visually distinct."""
 import os
 import sys
+import time
 from pathlib import Path
 
 MARKER = '›'
@@ -68,6 +69,20 @@ def pyte_cells(screen):
              for x in range(screen.columns)] for y in range(screen.lines)]
 
 
+def expect_options(terminal, options, selected, **kwargs):
+    # Navigation and redraw are asynchronous. A fixed send() pump may still
+    # contain the previous selection on a loaded runner. Keep the same visual
+    # assertions and wait for their actual rendered result, with a deadline.
+    deadline = time.monotonic() + 3
+    while True:
+        try:
+            return check_options(pyte_cells(terminal.screen), options, selected, **kwargs)
+        except AssertionError:
+            if time.monotonic() >= deadline:
+                raise
+            terminal.pump(.02)
+
+
 if __name__ == '__main__':
     from native_smoke import Terminal
     commands = Path(os.environ.get('TMPDIR', '/tmp')) / f'harbor-popup-{os.getpid()}'
@@ -81,10 +96,10 @@ if __name__ == '__main__':
             t = Terminal(cols=cols, rows=rows, extra_env={'HARBOR_DESK_COMMANDS': str(commands)})
             try:
                 t.send(b'\x0f'); t.expect('Commands & shortcuts')
-                title, hint = check_options(pyte_cells(t.screen), options, 'Desk · Everything')
+                title, hint = expect_options(t, options, 'Desk · Everything')
                 assert title != hint, f'{cols}x{rows}: description colour equals title colour'
                 t.send(b'\x1b[B'); t.send(b'\x1b[B')
-                check_options(pyte_cells(t.screen), options, 'More message tools')
+                expect_options(t, options, 'More message tools')
                 t.send(b'\x1b')
                 print(f'PASS {cols}x{rows} bold titles, muted indented descriptions, marked selected surface')
             finally:
@@ -94,9 +109,9 @@ if __name__ == '__main__':
         t = Terminal(cols=48, rows=38, extra_env={'TERM': 'xterm', 'HARBOR_DESK_COMMANDS': str(commands)})
         try:
             t.send(b'\x0f'); t.expect('Commands & shortcuts')
-            check_options(pyte_cells(t.screen), options, 'Desk · Everything', surfaces=False)
+            expect_options(t, options, 'Desk · Everything', surfaces=False)
             t.send(b'\x1b[B'); t.send(b'\x1b[B')
-            check_options(pyte_cells(t.screen), options, 'More message tools', surfaces=False)
+            expect_options(t, options, 'More message tools', surfaces=False)
             print('PASS xterm 8-colour fallback retains title/hint weights, indent and title-only selection marker')
         finally:
             t.close()
@@ -109,9 +124,9 @@ if __name__ == '__main__':
             cells = pyte_cells(t.screen)
             top, left, width = find_dialog(cells)
             labels = [('Edit message', ''), ('React…', ''), ('Delete message', '')]
-            check_options(cells, labels, 'Edit message', compact=True)
+            expect_options(t, labels, 'Edit message', compact=True)
             t.send(b'\x1b[B')
-            check_options(pyte_cells(t.screen), labels, 'React…', compact=True)
+            expect_options(t, labels, 'React…', compact=True)
             t.send(b'\x1b'); t.send(b'\x0b'); t.expect('Find a conversation')
             cells = pyte_cells(t.screen)
             top, left, width = find_dialog(cells)
@@ -128,11 +143,18 @@ if __name__ == '__main__':
             selected_bg = cells[row][left + 2][2]
             assert selected_bg != cells[row + 1][left + 2][2]
             t.send(b'\x1b[B')
+            deadline = time.monotonic() + 3
+            while t.screen.buffer[row + 1][left + 2].data != MARKER and time.monotonic() < deadline:
+                t.pump(.02)
             moved = pyte_cells(t.screen)
             assert moved[row + 1][left + 2][0] == MARKER
             assert moved[row][left + 2][0] == ' '
             t.send(b'\x1b'); t.send(b'\x0b'); t.send('Marina'); t.expect('Marina')
-            t.click_text('Marina'); assert 'Find a conversation' not in t.text
+            t.click_text('Marina')
+            deadline = time.monotonic() + 3
+            while 'Find a conversation' in t.text and time.monotonic() < deadline:
+                t.pump(.02)
+            assert 'Find a conversation' not in t.text
             print('PASS real menu title hit target, compact navigation, retained picker arrow/navigation and picker click')
         finally:
             t.close()
