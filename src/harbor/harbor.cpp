@@ -1971,6 +1971,8 @@ Harbor::Draw()
         }
       }
       m_Hits.push_back({ y, x, w, "message", row.id });
+      if (row.quote)
+        m_Hits.push_back({ y, x, w, "reply-quote", row.id });
       if (row.copyCode >= 0)
       {
         const int copyX = x + w - 3;
@@ -3390,7 +3392,6 @@ Harbor::Remember(Conversation& c)
 {
   if (c.back.set)
     return;
-  c.back.set = true;
   c.back.follow = c.follow;
   c.back.browse = m_Browse;
   c.back.selected = c.selected;
@@ -3412,6 +3413,8 @@ Harbor::Remember(Conversation& c)
       c.back.offset = c.scroll - first;
     }
   }
+  // Capture the visible row list before visit mode reveals retained detached originals.
+  c.back.set = true;
 }
 void
 Harbor::Visit(std::string key, std::string id)
@@ -3947,6 +3950,18 @@ Harbor::MessageClick(int x, int y)
   auto* c = Current();
   if (!c)
     return;
+  for (const auto& hit : m_Hits)
+    if (hit.type == "reply-quote" && hit.y == y && x >= hit.x && x < hit.x + hit.w)
+    {
+      auto message = c->messages.find(hit.value);
+      if (message != c->messages.end())
+      {
+        const auto reply = message->second;
+        const auto source = m_Current;
+        VisitReply(source, reply);
+      }
+      return;
+    }
   for (const auto& hit : m_Hits)
     if (hit.type == "code-copy" && hit.y == y && x >= hit.x && x < hit.x + hit.w)
     {
@@ -4969,7 +4984,7 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown, int wheelTicks)
       OpenChat(hit.value);
     else if (hit.type == "option")
       Choose(std::stoi(hit.value));
-    else if ((hit.type == "message" || hit.type == "attachment" || hit.type == "code-copy" || hit.type == "picture") && c)
+    else if ((hit.type == "message" || hit.type == "attachment" || hit.type == "code-copy" || hit.type == "picture" || hit.type == "reply-quote") && c)
     {
       MessageClick(e.x, e.y);
       m_Browse = false;

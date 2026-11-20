@@ -19,6 +19,7 @@ Harbor is the native Telegram TUI in this nchat fork. It shares nchat's Telegram
 | Newline | Shift+Enter; Ctrl+J fallback |
 | Delete previous word | Option+Backspace; Ctrl+W fallback |
 | Browse messages | Esc; Up/Down select |
+| Visit a reply’s original | Click its quoted reply row; Commands → Return to previous position goes back with the draft kept |
 | Selected message actions | Right-click a message; or Esc, arrows, Enter |
 | Copy a code block | Click its top-right ⧉ icon; copies text only, without running it |
 | Open a message link | Click any word or space in its label; dragging still selects |
