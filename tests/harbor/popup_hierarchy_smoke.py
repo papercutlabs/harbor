@@ -89,17 +89,17 @@ if __name__ == '__main__':
     commands.write_text('\n'.join('\t'.join([label, 'Existing Desk view', sys.executable, '-c', 'pass'])
                                   for label in ['Everything', 'Quota']) + '\n')
     options = [('Desk · Everything', 'e · Existing Desk view'), ('Desk · Quota', 'q · Existing Desk view'),
-               ('More message tools', 'For the selected message'), ('Chats', 'Ctrl+K'),
+               ('Search or pinned messages', ''), ('Chats', 'Ctrl+K'),
                ('Jump to latest messages', 'Ctrl+G')]
     try:
         for cols, rows in [(36, 38), (48, 38), (100, 38), (48, 16)]:
             t = Terminal(cols=cols, rows=rows, extra_env={'HARBOR_DESK_COMMANDS': str(commands)})
             try:
-                t.send(b'\x0f'); t.expect('Commands & shortcuts')
+                t.send(b'\x0f'); t.expect('│ Commands')
                 title, hint = expect_options(t, options, 'Desk · Everything')
                 assert title != hint, f'{cols}x{rows}: description colour equals title colour'
                 t.send(b'\x1b[B'); t.send(b'\x1b[B')
-                expect_options(t, options, 'More message tools')
+                expect_options(t, options, 'Search or pinned messages')
                 t.send(b'\x1b')
                 print(f'PASS {cols}x{rows} bold titles, muted indented descriptions, marked selected surface')
             finally:
@@ -108,10 +108,10 @@ if __name__ == '__main__':
         # without distinct selected/background surfaces or a muted colour pair.
         t = Terminal(cols=48, rows=38, extra_env={'TERM': 'xterm', 'HARBOR_DESK_COMMANDS': str(commands)})
         try:
-            t.send(b'\x0f'); t.expect('Commands & shortcuts')
+            t.send(b'\x0f'); t.expect('│ Commands')
             expect_options(t, options, 'Desk · Everything', surfaces=False)
             t.send(b'\x1b[B'); t.send(b'\x1b[B')
-            expect_options(t, options, 'More message tools', surfaces=False)
+            expect_options(t, options, 'Search or pinned messages', surfaces=False)
             print('PASS xterm 8-colour fallback retains title/hint weights, indent and title-only selection marker')
         finally:
             t.close()
@@ -119,7 +119,7 @@ if __name__ == '__main__':
         t = Terminal(cols=48, rows=38, extra_env={'HARBOR_DESK_COMMANDS': str(commands)})
         try:
             t.picker('Marina')
-            t.send(b'\x0f'); t.click_text('More message tools'); t.expect('Message tools')
+            t.click_text('Keeping this one', button=2); t.click_text('More message tools'); t.expect('Message tools')
             # Compact options still have bold titles and a single full-width selected surface.
             cells = pyte_cells(t.screen)
             top, left, width = find_dialog(cells)

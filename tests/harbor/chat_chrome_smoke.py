@@ -61,8 +61,8 @@ try:
     t.expect('typing does not retitle')
     print('PASS title follows switching back')
     # Plain slash stays text in an empty or nonempty draft; Option-/ in a picker inserts nothing.
-    t.send(b'\x15'); t.send('/'); t.expect('› /'); assert 'Commands & shortcuts' not in t.text
-    t.send(b'\x1b/'); t.expect('Commands & shortcuts'); t.send(b'\x1b'); t.expect('› /')
+    t.send(b'\x15'); t.send('/'); t.expect('› /'); assert '│ Commands' not in t.text
+    t.send(b'\x1b/'); t.expect('│ Commands'); t.send(b'\x1b'); t.expect('› /')
     t.send(b'\x1b/'); capture(t, 'commands-56'); t.send(b'\x1b')
     t.send(b'\x0b'); t.expect('Find a conversation'); t.send(b'\x1b/'); t.send(b'\x1b[47;3u')
     assert '/' not in t.screen.display[row_of(t, 'Find a conversation') + 2], t.text

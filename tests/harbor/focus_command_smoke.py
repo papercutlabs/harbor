@@ -37,7 +37,7 @@ with tempfile.TemporaryDirectory(prefix='harbor-focus-') as directory:
         saved = (Path(t.config)/'harbor-state').read_text()
         pid = t.pid
         for opener, on in [(b'\x0f', True), (b'\x1b[111;9u', False)]:
-            t.send(opener); t.expect('Commands & shortcuts'); t.expect('f · Focus '+('off' if on else 'on'))
+            t.send(opener); t.expect('│ Commands'); t.expect('f · Focus '+('off' if on else 'on'))
             t.send('f'); t.expect('f · Focus '+('on' if on else 'off')); t.expect('draft f e q')
             actual = json.loads(state.read_text())
             assert actual == {**initial, 'focus': on}, actual

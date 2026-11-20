@@ -33,13 +33,13 @@ with tempfile.TemporaryDirectory(prefix='harbor-command-keys-') as directory:
         t.expect('Ctrl+/ Commands')
         # Actual C0 US and enhanced key wires enter the same menu from an existing draft.
         for wire in [b'\x1f', b'\x1b[47;5u', b'\x1b[95;5u', b'\x1b[27;5;47~', b'\x0f', b'\x1b[111;5u']:
-            t.send(wire); t.expect('Commands & shortcuts'); t.expect('Ctrl+K'); t.expect('Chats')
+            t.send(wire); t.expect('│ Commands'); t.expect('Ctrl+K'); t.expect('Chats')
             t.send(b'\x1b'); t.expect('literal e q')
         for wire in [b'\x0b', b'\x1b[107;5u']:
             t.send(wire); t.expect('Find a conversation'); t.send(b'\x1b'); t.expect('literal e q')
         # Plain slash/underscore are literal. Ctrl+Alt+/ stays unbound and never inserts either character.
         t.send('/_'); t.expect('literal e q/_'); t.send(b'\x1b[47;7u')
-        assert 'Commands & shortcuts' not in t.text
+        assert '│ Commands' not in t.text
         t.send(b'\x7f\x7f'); t.expect('literal e q')
         print('PASS hidden header Chats; Ctrl+/ C0/CSI-u/modifyOtherKeys, Ctrl+K and Ctrl+O preserve a nonempty draft; plain slash/underscore literal')
         before = state(t)
@@ -47,16 +47,16 @@ with tempfile.TemporaryDirectory(prefix='harbor-command-keys-') as directory:
         # Ctrl-containing combinations retain the existing generic Ctrl-key dispatch.
         for wire in [b'\x1b[111;10u', b'\x1b[111;11u', b'\x1b[111;33u']:
             t.send(wire)
-            assert 'Commands & shortcuts' not in t.text
+            assert '│ Commands' not in t.text
         assert state(t) == before
-        t.send(b'\x1b[111;9u'); t.expect('Commands & shortcuts')
+        t.send(b'\x1b[111;9u'); t.expect('│ Commands')
         t.expect('e · Existing Desk view'); t.expect('q · Existing Desk view')
         t.send(b'\x1b'); t.expect('literal e q')
         assert state(t) == before
         for opener, key, label in [(b'\x0f', b'e', 'Everything'), (b'\x0f', b'q', 'Quota'),
                                     (b'\x1b[111;9u', b'e', 'Everything'), (b'\x1b[111;9u', b'q', 'Quota')]:
             old = recorded()
-            t.send(opener); t.expect('Commands & shortcuts'); t.send(key); t.expect('COMMAND CHILD')
+            t.send(opener); t.expect('│ Commands'); t.send(key); t.expect('COMMAND CHILD')
             assert recorded() == old + [[label, literal]], recorded()
             t.send(b'\r'); t.expect('Back from Desk'); t.expect('literal e q')
             assert t.pid == pid and state(t) == before
@@ -84,8 +84,8 @@ with tempfile.TemporaryDirectory(prefix='harbor-command-keys-') as directory:
     t = Terminal(cols=72, rows=38, extra_env={'HARBOR_DESK_COMMANDS': ''})
     try:
         old = recorded()
-        t.send(b'\x0f'); t.expect('Commands & shortcuts'); t.send('eq')
-        assert 'Commands & shortcuts' in t.text and 'Desk ·' not in t.text
+        t.send(b'\x0f'); t.expect('│ Commands'); t.send('eq')
+        assert '│ Commands' in t.text and 'Desk ·' not in t.text
         assert recorded() == old
         t.send(b'\x1b')
         print('PASS standalone missing Desk entries are harmless')

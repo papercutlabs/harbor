@@ -24,11 +24,14 @@ Harbor is the native Telegram TUI in this nchat fork. It shares nchat's Telegram
 | Copy a code block | Click its top-right ⧉ icon; copies text only, without running it |
 | Open a message link | Click any word or space in its label; dragging still selects |
 | Download an attachment | Click its file row; saves to Downloads without opening it |
-| Open or play an attachment | More message tools → Open / play attachment |
+| Open or play an attachment | Message actions → More message tools → Open / play attachment |
 | Copy selected text | Drag across message text; release copies automatically |
 | Return to composing | Start typing or press Esc again |
 | Find a conversation | Option+K; Ctrl+K fallback |
 | Commands | Option+/; Ctrl+O fallback; footer button. A plain `/` is always draft text. |
+| Keyboard help | Commands → Keyboard help; Desk keys is inside this view |
+| Running versions | Commands → About; Harbor build and live serving Desk revision |
+| Voice pause / stop | Space while browsing pauses or resumes; Message actions → More message tools → Stop playback |
 | Attach | Ctrl+T; paste/drop file paths; clipboard image via Ctrl+V |
 | Attach caption | Type in the attachment preview; Shift+Enter for newline |
 | Confirm attachment | Enter on Send, or click Send |
@@ -40,7 +43,7 @@ Harbor is the native Telegram TUI in this nchat fork. It shares nchat's Telegram
 | Visit the replied-to message | Message actions → Go to replied message; Commands → Return to previous position |
 | Search this conversation or topic | Commands → Search or pinned messages; type, then Enter (searches Telegram) |
 | Visit pinned messages | Commands → Search or pinned messages → Pinned messages (opening never pins or unpins) |
-| React, open links, spoilers, quotes | More message tools → React…, Open a link…, Reveal spoiler, Expand quote |
+| React, open links, spoilers, quotes | Message actions → More message tools → React…, Open a link…, Reveal spoiler, Expand quote |
 
 ## Formatting
 

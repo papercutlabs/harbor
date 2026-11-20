@@ -7,7 +7,10 @@ with tempfile.TemporaryDirectory(prefix='harbor-owned-view-') as tmp:
     host = work/'host.py'
     host.write_text('''import os, socket, sys, time, signal
 from pathlib import Path
-Path(os.environ['PID_FILE']).write_text(str(os.getpid()))
+pidfile = Path(os.environ['PID_FILE'])
+pending = pidfile.with_suffix('.pending')
+pending.write_text(str(os.getpid()))
+pending.replace(pidfile)
 s = socket.socket(fileno=int(os.environ['HARBOR_DESK_HOST_FD']))
 f = s.makefile('rwb', buffering=0)
 mode = os.environ['MODE']
