@@ -104,6 +104,25 @@ with open(os.environ['HARBOR_TEST_OPENED'],'a') as f:f.write(sys.argv[1]+'\\n')
         t.send(b'\x1b[I');assert inspect()[8]==first_open[8],'late programmatic focus-in revoked a fresh explicit open'
         t.send(b'\x05');assert inspect()[8]=='0','deliberate return did not revoke Preview'
         print('PASS real EX/SH ordering, BUSY, effect survives holder death, responsive draft/menu/inspection, late-I negative, deliberate input',flush=True)
+        if office_driver:
+            # A stale positive packet cannot force activation after deliberate input revoked it.
+            y=next(y for y,line in enumerate(t.screen.display) if 'harbor.png' in line)
+            t.send(f'\x1b[<0;9;{y+2}M',wait=.03);t.send(f'\x1b[<0;9;{y+2}m',wait=.1)
+            granted=inspect();assert int(granted[8])>0
+            passive=root/'passive-effect';passive.mkdir();(passive/'release').touch()
+            result=root/'passive-result.json'
+            holder,first=start({'HARBOR_TEST_OFFICE_GUARD_MODE':'passive-return',
+                'HARBOR_TEST_OFFICE_NATIVE_PID':str(t.pid),'HARBOR_TEST_OFFICE_NATIVE_SURFACE':'GUARD-UI',
+                'HARBOR_TEST_OFFICE_NATIVE_PROFILE':str(root/'config'),'HARBOR_TEST_OFFICE_PASSIVE_RESULT':str(result),
+                'HARBOR_TEST_EFFECT_DIR':str(passive)},office=True)
+            assert first==b'READY\n'
+            t.send(b'\x05');assert inspect()[8]=='0'
+            request(holder);out,err=holder.communicate(timeout=6)
+            assert holder.returncode==0 and b'OFFICE_PASSIVE_NO_ACTIVATION\n' in out,(holder.returncode,out,err)
+            assert inspect()[8]=='0'
+            native=json.loads(Path(str(result)+'.native.json').read_text())
+            print('PASSIVE_RETURN_EVIDENCE '+json.dumps({'branch':json.loads(result.read_text()),'native':native}),flush=True)
+            print('PASS actual Office stale grant1 effect activates neither app after native deliberate return0',flush=True)
         # EOF before a request is harmless and releases without an effect.
         holder,first=start();assert first==b'READY\n';holder.stdin.close();holder.stdin=None
         out,err=holder.communicate(timeout=3);assert holder.returncode==0 and out==b'' and err==b''
