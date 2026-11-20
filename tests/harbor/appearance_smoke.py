@@ -46,7 +46,9 @@ with tempfile.TemporaryDirectory(prefix='harbor-appearance-') as directory:
         choose(t, 'Timestamps', 'Top right')
         choose(t, 'Commands hint', 'Prompt key only')
         assert 'Ctrl+/ Commands' not in t.text and 'Ctrl+/' in t.text
-    finally: t.close()
+    finally:
+        t.close()
+        t.wait_backend_shutdown()
     assert (config/'harbor-appearance').stat().st_mode & 0o077 == 0
     t = Terminal(cols=70, rows=46, config_dir=config)
     try:
@@ -54,7 +56,9 @@ with tempfile.TemporaryDirectory(prefix='harbor-appearance-') as directory:
         assert 'Ctrl+/ Commands' not in t.text
         t.send(b'\x0f'); t.click_text('Settings')
         for value in ['Shaded', 'Plain', 'Top right', 'Prompt key only']: t.expect(value)
-    finally: t.close()
+    finally:
+        t.close()
+        t.wait_backend_shutdown()
 print('PASS all saved appearance choices, key binding, draft preservation and reload')
 
 # Same preference reaches both incoming metadata and an actual outgoing reply.
