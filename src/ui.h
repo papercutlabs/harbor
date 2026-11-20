@@ -34,7 +34,7 @@ public:
 
   static void RunKeyDump();
   // Harbor shared-session window only (defined in src/harbor/harbor.cpp).
-  void SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended);
+  void SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended, const std::string& p_Generation);
   void SetInitialChat(const std::string& p_Profile, const std::string& p_Conversation);
 
 private:

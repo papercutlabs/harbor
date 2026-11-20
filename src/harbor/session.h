@@ -51,6 +51,7 @@ struct Attachment
   std::vector<Profile> profiles;
   std::string error; // backend start failure, shown to the user
   std::string pending; // bytes read after the welcome (for example replayed events)
+  std::string generation; // local lifetime record; empty for a legacy backend, no wire field
 };
 
 // Connect to the running backend, or spawn one with an inherited connection. Serialised by an

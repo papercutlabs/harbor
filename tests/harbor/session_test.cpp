@@ -1,6 +1,7 @@
 // Shared-session checks: wire codec round trips, frame faults, per-view chat subscriptions and
 // backend routing of request-scoped replies over real sockets with a throwaway directory.
 #include "session.h"
+#include "sessiongeneration.h"
 #include "viewchats.h"
 #include "wire.h"
 #include <cassert>
@@ -795,6 +796,50 @@ SocketPathTests()
 }
 
 static void
+GenerationTests()
+{
+  char directory[] = "/tmp/harbor-generation-XXXXXX";
+  assert(mkdtemp(directory));
+  const std::string appDir = directory, path = HarborSession::SocketPath(appDir);
+  const int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  assert(fd >= 0);
+  sockaddr_un address{};
+  address.sun_family = AF_UNIX;
+  strcpy(address.sun_path, path.c_str());
+  assert(bind(fd, (sockaddr*)&address, sizeof(address)) == 0);
+  struct stat socket{};
+  assert(lstat(path.c_str(), &socket) == 0);
+  std::string token;
+  assert(HarborSessionGeneration::Read(appDir, socket, token) && token.empty());
+  {
+    HarborSessionGeneration::Publisher owner;
+    assert(owner.Publish(appDir, path));
+    assert(HarborSessionGeneration::Read(appDir, socket, token) && HarborSessionGeneration::Valid(token));
+    HarborSessionGeneration::Publisher competing;
+    assert(!competing.Publish(appDir, path));
+    auto other = socket;other.st_ino++;
+    assert(HarborSessionGeneration::Read(appDir, other, token) && token.empty());
+    assert(chmod(HarborSessionGeneration::Path(appDir).c_str(), 0644) == 0);
+    assert(!HarborSessionGeneration::Read(appDir, socket, token));
+    assert(chmod(HarborSessionGeneration::Path(appDir).c_str(), 0600) == 0);
+  }
+  // A crash can leave valid bytes, but it cannot retain the backend's lifetime lock.
+  const auto record = HarborSessionGeneration::Path(appDir);
+  int stale = open(record.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+  assert(stale >= 0);
+  const std::string data = "pcl.harbor.session-generation.v1\t" + std::string(32, 'a') + "\t" + HarborSessionGeneration::SocketIdentity(socket) + "\n";
+  assert(write(stale, data.data(), data.size()) == ssize_t(data.size()));close(stale);
+  assert(HarborSessionGeneration::Read(appDir, socket, token) && token.empty());
+  unlink(record.c_str());
+  assert(symlink(path.c_str(), record.c_str()) == 0);
+  assert(!HarborSessionGeneration::Read(appDir, socket, token));
+  HarborSessionGeneration::Publisher unsafe;
+  assert(!unsafe.Publish(appDir, path));
+  unlink(record.c_str());close(fd);unlink(path.c_str());assert(rmdir(directory) == 0);
+  std::cout << "session generation: live lock, exact socket, stale bytes, private permissions and symlink refusal\n";
+}
+
+static void
 VersionTests()
 {
   // Preserve exact-version semantics, even for a future build's own identical peer.
@@ -825,6 +870,7 @@ main()
   CodecTests();
   ViewChatTests();
   SocketPathTests();
+  GenerationTests();
   VersionTests();
   RoutingTests();
   UnknownSendTests(false);

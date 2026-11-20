@@ -613,11 +613,12 @@ Harbor::SetInitialChat(const std::string& profile, const std::string& conversati
   m_InitialRouteStatus = "Opening requested conversation…";
 }
 void
-Harbor::SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended)
+Harbor::SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended, const std::string& p_Generation)
 {
   m_Remote = true;
   m_Slot = p_Slot;
   m_OnAuthSuspended = p_OnAuthSuspended;
+  m_BackendGeneration = p_Generation;
 }
 std::string
 Harbor::StatePath() const
@@ -4936,9 +4937,9 @@ Ui::MessageHandler(std::shared_ptr<ServiceMessage> e)
   m_Harbor->Receive(e);
 }
 void
-Ui::SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended)
+Ui::SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended, const std::string& p_Generation)
 {
-  m_Harbor->SetSession(p_Slot, p_OnAuthSuspended);
+  m_Harbor->SetSession(p_Slot, p_OnAuthSuspended, p_Generation);
 }
 void
 Ui::SetInitialChat(const std::string& profile, const std::string& conversation)

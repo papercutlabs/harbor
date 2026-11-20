@@ -1088,7 +1088,7 @@ static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs, const 
   HarborTrace::Event("window.ready", {{"slot", std::to_string(slot)}, {"profiles", std::to_string(attachment.profiles.size())}});
   auto connection = std::make_shared<HarborSession::Connection>(attachment.fd, attachment.pending, attachment.connectionId);
   std::shared_ptr<Ui> ui = std::make_shared<Ui>();
-  ui->SetSession(slot, [connection] { connection->Lent(); });
+  ui->SetSession(slot, [connection] { connection->Lent(); }, attachment.generation);
   if (p_Target.Present()) ui->SetInitialChat(initialProfile, p_Target.conversation);
   std::function<void(std::shared_ptr<ServiceMessage>)> messageHandler =
     std::bind(&Ui::MessageHandler, std::ref(*ui), std::placeholders::_1);
