@@ -164,6 +164,7 @@ HarborDemo::SeedRich(const std::function<void(const std::string&, const std::str
     rich("doug", 4, hiddenPrefix + hidden,
          { { RichText::Pre, U16(hiddenPrefix), U16(hidden), "shell" },
            { RichText::Spoiler, U16(hiddenPrefix + "printf '"), 6, "" } });
+    add("rich", "doug", "Legacy cached code:\n```shell\nprintf 'cached'\n\tprintf 'second'\n\n```\nAfter cached code.", 5, "", "");
     return;
   }
   if (getenv("HARBOR_DEMO_REPLIES"))

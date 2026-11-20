@@ -86,8 +86,9 @@ for cols in (32,56,110):
         p=icon(t,'Two code blocks:',1);copy(t,p,'echo second')
         p=icon(t,'Concealed code:');copy(t,p,"printf '▒▒▒▒▒▒'")
         assert 'secret' not in clipboard.read_text()
+        p=icon(t,'Legacy cached code:');copy(t,p,"printf 'cached'\n\tprintf 'second'\n\n")
         assert 'draft stays' in t.text
         t.snapshot(f'harbor-shell-copy-{cols}')
     finally:
         t.close()
-print('PASS shell copy at32/56/110cols: exact block, multiline/trailing newline/tab/Unicode, independent blocks, release-only click, drag, draft, concealed spoiler, no opener')
+print('PASS shell copy at32/56/110cols: native+legacy exact block, multiline/trailing newline/tab/Unicode, independent blocks, release-only click, drag, draft, concealed spoiler, no opener')

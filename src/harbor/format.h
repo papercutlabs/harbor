@@ -250,8 +250,9 @@ Parse(const std::wstring& source)
       {
         size_t stop = close > header + 1 && source[close - 1] == L'\n' ? close - 1 : close;
         auto literal = source.substr(header + 1, stop - header - 1);
+        const auto original = source.substr(header + 1, close - header - 1);
         out.codes.push_back(
-          { out.text.size(), out.text.size() + literal.size(), source.substr(start + 3, header - start - 3), literal, true });
+          { out.text.size(), out.text.size() + literal.size(), source.substr(start + 3, header - start - 3), original, true });
         out.Add(literal, Code);
         start = close + 3;
         if (start < source.size())
