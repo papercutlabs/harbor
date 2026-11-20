@@ -49,7 +49,7 @@ public:
   const std::string& PlayingPath() const { return m_PlayingPath; }
   double Position() const;
   std::string Error() const { return m_Error; }
-  void Open(const std::string& path);
+  bool Open(const std::string& path, bool image = false);
   std::string PasteboardImage();
   bool CopyText(const std::string&);
 

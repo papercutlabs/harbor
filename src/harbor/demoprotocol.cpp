@@ -85,6 +85,24 @@ HarborDemo::Seed()
         "self",
         "Note " + std::to_string(i + 1) + ": Make the next action obvious. Leave more space between ideas.",
         i);
+  if (getenv("HARBOR_DEMO_PICTURES"))
+  {
+    m_Messages["studio"].clear();
+    auto photo = [&](const std::string& id) {
+      add("studio", "leo", id, id == "photo-shown" ? 80 : 20);
+      auto& message = m_Messages["studio"].back();
+      message.id = id;
+      FileInfo file;
+      file.fileId = dir + "/harbor.png";
+      file.filePath = "[Photo]";
+      file.fileType = std::string(getenv("HARBOR_DEMO_PICTURES")) == "legacy" ? "" : "image/jpeg";
+      file.fileStatus = FileStatusNotDownloaded;
+      message.fileInfo = ProtocolUtil::FileInfoToHex(file);
+    };
+    photo("photo-offscreen");
+    for (int i = 0; i < 40; ++i) add("studio", "leo", "Earlier history " + std::to_string(i), 21 + i);
+    photo("photo-shown");
+  }
   if (getenv("HARBOR_DEMO_TOPICS"))
   {
     const std::string parent = getenv("HARBOR_DEMO_ROUTES") ? StrUtil::NumToHex(DemoRouteChat()) : "hive";
@@ -709,17 +727,18 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
           n->chatId = r->chatId;
           n->msgId = r->msgId;
           n->fileInfo = m.fileInfo;
-          if (getenv("HARBOR_DEMO_CLICKS"))
+          if (getenv("HARBOR_DEMO_CLICKS") || getenv("HARBOR_DEMO_PICTURES"))
           {
             auto file = ProtocolUtil::FileInfoFromHex(m.fileInfo);
             file.filePath = file.fileId;
             file.fileStatus = FileStatusDownloaded;
             n->fileInfo = ProtocolUtil::FileInfoToHex(file);
             Record("attachment-download action=" + std::to_string(int(r->downloadFileAction)));
+            if (getenv("HARBOR_DEMO_PICTURES")) Record("picture-download " + r->msgId + " action=" + std::to_string(int(r->downloadFileAction)));
           }
           n->downloadFileAction = r->downloadFileAction;
           n->requestId = r->requestId;
-          Emit(n);
+          Later(DelayMs("HARBOR_DEMO_PICTURE_DELAY_MS"), n);
         }
       break;
     }

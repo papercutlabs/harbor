@@ -16,8 +16,8 @@ with tempfile.TemporaryDirectory(prefix='hi-',dir='/tmp') as directory:
         out,err=child.communicate();return child.returncode,out,err
     def inspect(window,surface):
         code,out,err=control(window,surface,'--inspect-ui');assert code==0,err
-        fields=out.rstrip('\n').split('\t');assert len(fields)==8,fields
-        assert fields[:3]==['pcl.harbor.ui.v1',str(window.pid),surface]
+        fields=out.rstrip('\n').split('\t');assert len(fields)==9,fields
+        assert fields[:3]==['pcl.harbor.ui.v2',str(window.pid),surface]
         return fields
     try:
         backend_window=Terminal(cols=110,config_dir=config,extra_env=dict(env,CMUX_SURFACE_ID='IDENTITY-BACKEND'));windows.append(backend_window)
@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory(prefix='hi-',dir='/tmp') as directory:
         first=Terminal(cols=110,config_dir=config,extra_env=dict(env,CMUX_SURFACE_ID='IDENTITY-ONE'),args=['--open-telegram-chat','12345','--open-telegram-topic','421']);windows.append(first)
         second=Terminal(cols=110,config_dir=config,extra_env=dict(env,CMUX_SURFACE_ID='IDENTITY-TWO'));windows.append(second)
         first.expect('Agent');first.send('Retained unique draft');initial=inspect(first,'IDENTITY-ONE')
-        assert initial[4].endswith('#421') and initial[6:] == ['1','1'],initial
+        assert initial[4].endswith('#421') and initial[6:8] == ['1','1'] and initial[8] == '0',initial
         first.picker('Doug');different=inspect(first,'IDENTITY-ONE');assert different[4].endswith('#550'),different
         assert different[4]!=initial[4], 'query reused original launch argv'
         first.picker('Agent');current=inspect(first,'IDENTITY-ONE');first.send(' changed')

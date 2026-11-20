@@ -68,6 +68,8 @@ func translate(e uv.Event) (out C.HarborInputEvent) {
 			out.kind = 2
 			out.text = C.CString(k.Text)
 		}
+	case uv.FocusEvent:
+		out.kind = 5
 	case uv.PasteEvent:
 		out.kind = 3
 		out.text = C.CString(e.Content)

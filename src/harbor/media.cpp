@@ -521,18 +521,19 @@ HarborMedia::Position() const
     return 0;
   return ((m_Paused ? m_PauseStart : TimeUtil::GetCurrentTimeMSec()) - m_PlayStart - m_PauseTotal) / 1000.0;
 }
-void
-HarborMedia::Open(const std::string& path)
+bool
+HarborMedia::Open(const std::string& path, bool image)
 {
   // Offline tests exercise the actual spawn boundary without opening a user's player.
   const char* testOpener = getenv("HARBOR_TEST_OPENER");
   pid_t pid = -1;
   if (testOpener && getenv("HARBOR_DEMO_FIXTURES"))
-    pid = HarborSpawn({ testOpener, path });
+    pid = HarborSpawn({ testOpener, path, image ? "preview" : "default" });
   else
   {
 #ifdef __APPLE__
-    pid = HarborSpawn({ "/usr/bin/open", path });
+    pid = image ? HarborSpawn({ "/usr/bin/open", "-a", "Preview", path })
+                : HarborSpawn({ "/usr/bin/open", path });
 #else
     pid = HarborSpawn({ "xdg-open", path });
 #endif
@@ -541,6 +542,7 @@ HarborMedia::Open(const std::string& path)
     m_Children.push_back(pid);
   else
     m_Error = "Could not launch the default viewer";
+  return pid > 0;
 }
 bool
 HarborMedia::CopyText(const std::string& text)
