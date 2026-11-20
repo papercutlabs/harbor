@@ -20,6 +20,9 @@ Harbor is the native Telegram TUI in this nchat fork. It shares nchat's Telegram
 | Delete previous word | Option+Backspace; Ctrl+W fallback |
 | Browse messages | Esc; Up/Down select |
 | Selected message actions | Right-click a message; or Esc, arrows, Enter |
+| Open a message link | Click any word or space in its label; dragging still selects |
+| Download an attachment | Click its file row; saves to Downloads without opening it |
+| Open or play an attachment | More message tools → Open / play attachment |
 | Copy selected text | Drag across message text; release copies automatically |
 | Return to composing | Start typing or press Esc again |
 | Find a conversation | Option+K; Ctrl+K fallback |
@@ -53,7 +56,7 @@ At fewer than 100 terminal columns, Harbor gives the conversation the full width
 
 ## Media and terminal support
 
-Images and video thumbnails use Kitty graphics in supported terminals (including the user's cmux/Ghostty setup), with a half-block color fallback elsewhere. Previews are letterboxed to the terminal cell proportions; partial scrolling clips the source image. Selecting an attachment offers an external opener; voice messages play in-app through FFmpeg decoding and the system audio player. Space pauses/resumes active playback. Switching conversations stops playback.
+Images and video thumbnails use Kitty graphics in supported terminals (including the user's cmux/Ghostty setup), with a half-block color fallback elsewhere. Previews are letterboxed to the terminal cell proportions; partial scrolling clips the source image. File-row clicks save a copy in the configured Downloads directory, adding a numbered suffix when the name already exists. The status shows the saved path. Saving never opens or executes the downloaded file. The explicit Open / play attachment action offers an external opener; voice messages play in-app through FFmpeg decoding and the system audio player. Space pauses/resumes active playback. Switching conversations stops playback.
 
 `HARBOR_GRAPHICS=blocks` forces the fallback; `HARBOR_GRAPHICS=kitty` forces graphics. In tmux the fallback is the default. `HARBOR_REDUCED_MOTION=1` disables the short menu transition. Nerd Font receipts use one integrated double-check glyph; `HARBOR_ICONS=plain` selects portable text receipts.
 

@@ -1214,6 +1214,13 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
         it->second.fileInfo = n->fileInfo;
         if (n->downloadFileAction == DownloadFileActionOpen)
           OpenAttachment(p, n->chatId, n->msgId);
+        else if (n->downloadFileAction == DownloadFileActionSave)
+        {
+          if (File(ProtocolUtil::FileInfoFromHex(n->fileInfo).filePath))
+            SaveAttachment(p, n->chatId, n->msgId);
+          else
+            Notify("Could not download the attachment");
+        }
       }
       break;
     }
@@ -1467,8 +1474,12 @@ Harbor::BuildRows()
       if (f.fileStatus == FileStatusDownloading)
         label += " · downloading";
       else if (f.fileStatus != FileStatusDownloaded)
-        label += " · Enter to download";
-      m_Rows.push_back({ W(label), id, m.isOutgoing, false });
+        label += " · click to download";
+      if (f.fileStatus == FileStatusDownloaded)
+        label += " · click to save";
+      Row attachment{ W(label), id, m.isOutgoing, false };
+      attachment.attachment = true;
+      m_Rows.push_back(std::move(attachment));
       if (File(f.filePath) && (type.find("image") == 0 || type.find("video") == 0))
       {
         int imageRows = 7;
@@ -1761,6 +1772,8 @@ Harbor::Draw()
         }
       }
       m_Hits.push_back({ y, x, w, "message", row.id });
+      if (row.attachment)
+        m_Hits.push_back({ y, x, w, "attachment", row.id });
       if (row.text.size() && row.text[0] == 1)
       {
         const auto path = S(row.text.substr(1));
@@ -2933,7 +2946,7 @@ Harbor::Actions(bool minimal)
                           [this, url]
                           {
                             CloseMenu();
-                            m_Media->Open(url);
+                            OpenLink(url);
                           } });
   }
   else if (formatted.links.size() > 1)
@@ -3495,7 +3508,7 @@ Harbor::LinkChooser(const std::string& key, const std::string& id)
                           [this, url]
                           {
                             CloseMenu();
-                            m_Media->Open(url);
+                            OpenLink(url);
                           } });
   }
 }
@@ -3681,6 +3694,137 @@ Harbor::SendAttachments()
   m_Attachments.clear();
   CloseMenu();
   Notify("Sending attachments…");
+}
+void
+Harbor::OpenLink(const std::string& url)
+{
+  // Message destinations are data, never local paths or arbitrary opener schemes.
+  std::string lower = url;
+  std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+  const bool allowed = lower.rfind("https://", 0) == 0 || lower.rfind("http://", 0) == 0 ||
+                       lower.rfind("tg://", 0) == 0 || lower.rfind("mailto:", 0) == 0;
+  if (!allowed || std::any_of(url.begin(), url.end(), [](unsigned char c) { return c <= 32 || c == 127; }))
+  {
+    Notify("This link cannot be opened safely");
+    return;
+  }
+  HarborTrace::Event("ui.link.open");
+  m_Media->Open(url);
+}
+void
+Harbor::MessageClick(int x, int y)
+{
+  auto* c = Current();
+  if (!c)
+    return;
+  for (const auto& hit : m_Hits)
+    if (hit.type == "attachment" && hit.y == y && x >= hit.x && x < hit.x + hit.w)
+    {
+      SaveAttachment(c->profile, c->id, hit.value);
+      return;
+    }
+  // Copy cells map terminal columns (including wide glyphs and soft wraps) to the
+  // formatted source. Spaces inside named links have source positions too.
+  for (const auto& cell : m_CopyCells)
+    if (cell.y == y && x >= cell.x && x < cell.x + cell.width)
+    {
+      const auto formatted = Format(*c, c->messages[cell.id]);
+      if (cell.start < formatted.styles.size() &&
+          (formatted.styles[cell.start] & HarborFormatting::Spoiler) && !c->revealed.count(cell.id))
+        return;
+      for (const auto& link : formatted.links)
+        if (cell.start >= link.begin && cell.start < link.end)
+        {
+          OpenLink(S(link.arg));
+          return;
+        }
+      return;
+    }
+}
+void
+Harbor::SaveAttachment(const std::string& p, const std::string& chatId, const std::string& id)
+{
+  auto& c = Ensure(p, chatId);
+  auto it = c.messages.find(id);
+  if (it == c.messages.end() || it->second.fileInfo.empty())
+    return;
+  auto f = ProtocolUtil::FileInfoFromHex(it->second.fileInfo);
+  if (!File(f.filePath))
+  {
+    if (f.fileStatus == FileStatusDownloading)
+    {
+      Notify("Attachment is downloading…");
+      return;
+    }
+    auto request = std::make_shared<DownloadFileRequest>();
+    request->chatId = chatId;
+    request->msgId = id;
+    request->fileId = f.fileId;
+    request->downloadFileAction = DownloadFileActionSave;
+    f.fileStatus = FileStatusDownloading;
+    it->second.fileInfo = ProtocolUtil::FileInfoToHex(f);
+    Request(p, request);
+    Notify("Downloading attachment to Downloads…");
+    return;
+  }
+  // The UI is a separate process from the backend. Read this one preference
+  // without initializing or saving the backend-owned AppConfig (or its credentials).
+  std::ifstream config(FileUtil::GetApplicationDir() + "/app.conf");
+  std::string line, downloads;
+  while (std::getline(config, line))
+  {
+    const auto separator = line.find('=');
+    if (separator == std::string::npos)
+      continue;
+    auto key = line.substr(0, separator);
+    StrUtil::Trim(key);
+    if (key == "downloads_dir")
+    {
+      downloads = line.substr(separator + 1);
+      StrUtil::Trim(downloads);
+    }
+  }
+  FileUtil::SetDownloadsDir(downloads);
+  const auto directory = FileUtil::GetDownloadsDir();
+  const auto name = FileUtil::BaseName(f.filePath);
+  std::string destination;
+  int output = -1;
+  for (int suffix = 0; suffix < 10000; ++suffix)
+  {
+    destination = directory + "/" + (suffix ? FileUtil::RemoveFileExt(name) + "_" +
+                       std::to_string(suffix) + FileUtil::GetFileExt(name) : name);
+    output = open(destination.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (output >= 0 || errno != EEXIST)
+      break;
+  }
+  std::ifstream input(f.filePath, std::ios::binary);
+  bool ok = output >= 0 && input.good();
+  char buffer[65536];
+  while (ok && input)
+  {
+    input.read(buffer, sizeof(buffer));
+    auto count = input.gcount();
+    for (std::streamsize offset = 0; ok && offset < count;)
+    {
+      auto written = write(output, buffer + offset, size_t(count - offset));
+      if (written < 0 && errno == EINTR)
+        continue;
+      if (written <= 0)
+        ok = false;
+      else
+        offset += written;
+    }
+  }
+  ok = ok && !input.bad();
+  if (output >= 0)
+  {
+    if (close(output) != 0)
+      ok = false;
+    if (!ok)
+      unlink(destination.c_str());
+  }
+  HarborTrace::Event(ok ? "ui.attachment.saved" : "ui.attachment.save_failed");
+  Notify(ok ? "Saved to " + destination : "Could not save attachment to " + directory);
 }
 void
 Harbor::OpenAttachment(const std::string& p, const std::string& chatId, const std::string& id, bool preview)
@@ -4425,7 +4569,7 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown, int wheelTicks)
           m_MouseDragging = false;
           return;
         }
-        // A stationary left-click has no message-level action.
+        MessageClick(e.x, e.y);
         return;
       }
       else
@@ -4523,8 +4667,9 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown, int wheelTicks)
       OpenChat(hit.value);
     else if (hit.type == "option")
       Choose(std::stoi(hit.value));
-    else if (hit.type == "message" && c)
+    else if ((hit.type == "message" || hit.type == "attachment") && c)
     {
+      MessageClick(e.x, e.y);
       m_Browse = false;
       c->selected.clear();
     }

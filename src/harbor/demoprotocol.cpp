@@ -117,6 +117,26 @@ HarborDemo::SeedRich(const std::function<void(const std::string&, const std::str
     m.isPinned = pinned;
     return m.id;
   };
+  if (getenv("HARBOR_DEMO_CLICKS"))
+  {
+    const std::string label = "PcL shelf rewrite draft with wrapped words";
+    rich("doug", 1, "Read " + label + " now.",
+         { { RichText::TextUrl, 5, U16(label), "https://example.com/shelf?view=full" } });
+    rich("doug", 2, "Wide 你好 café é link end.",
+         { { RichText::TextUrl, 5, U16("你好 café é link"), "https://example.com/wide" } });
+    rich("doug", 3, "Hidden secret link.",
+         { { RichText::TextUrl, 7, 11, "https://example.com/secret" }, { RichText::Spoiler, 7, 11, "" } });
+    rich("doug", 4, "Unsafe local link.", { { RichText::TextUrl, 7, 10, "file:///tmp/do-not-open.sh" } });
+    rich("doug", 5, "Normal underlined text.", { { RichText::Underline, 0, 22, "" } });
+    rich("doug", 6, "Download this file.", {});
+    FileInfo file;
+    file.fileId = std::string(getenv("HARBOR_DEMO_FIXTURES")) + "/new-shelf.md";
+    file.filePath = "/not-downloaded/new-shelf.md";
+    file.fileType = "text/markdown";
+    file.fileStatus = FileStatusNotDownloaded;
+    m_Messages["rich"].back().fileInfo = ProtocolUtil::FileInfoToHex(file);
+    return;
+  }
   if (getenv("HARBOR_DEMO_REPLIES"))
   {
     const auto parent = rich("doug", 1, "Older parent outside the loaded page.", {});
@@ -643,6 +663,14 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
           n->chatId = r->chatId;
           n->msgId = r->msgId;
           n->fileInfo = m.fileInfo;
+          if (getenv("HARBOR_DEMO_CLICKS"))
+          {
+            auto file = ProtocolUtil::FileInfoFromHex(m.fileInfo);
+            file.filePath = file.fileId;
+            file.fileStatus = FileStatusDownloaded;
+            n->fileInfo = ProtocolUtil::FileInfoToHex(file);
+            Record("attachment-download action=" + std::to_string(int(r->downloadFileAction)));
+          }
           n->downloadFileAction = r->downloadFileAction;
           n->requestId = r->requestId;
           Emit(n);
