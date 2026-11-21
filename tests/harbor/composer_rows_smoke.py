@@ -31,6 +31,49 @@ def expect(t, text):
     locate(t, text)
 
 
+def check_newline_backspace():
+    # Exercise actual paste decoding and enhanced Shift+Enter, rendering and saved source.
+    # A hard newline is a separate edit unit, even though wcwidth gives it no cells.
+    for text, typed in (('lorry crane deliveries inside', False),
+                        ('different draft café', True),
+                        ('combining e\u0301', False),
+                        ('two blank rows\n', False)):
+        for presses in (1, 2):
+            with tempfile.TemporaryDirectory(prefix='harbor-newline-backspace-') as directory:
+                t = Terminal(cols=112, rows=38, config_dir=directory)
+                try:
+                    t.picker('Studio')
+                    t.send('\x1b[200~' + text + ('' if typed else '\n') + '\x1b[201~')
+                    if typed:
+                        t.send(NEWLINE)
+                    x, y = t.screen.cursor.x, t.screen.cursor.y
+                    assert not t.screen.display[y][x:].strip(), ('blank caret row', t.text)
+                    if not text.endswith('\n'):
+                        assert unicodedata.normalize('NFC', text.split('\n')[-1]) in unicodedata.normalize('NFC', t.screen.display[y-1]), ('previous row', t.text)
+                    t.send(b'\x7f')
+                    if not text.endswith('\n'):
+                        shown = unicodedata.normalize('NFC', t.screen.display[t.screen.cursor.y])
+                        last = unicodedata.normalize('NFC', text.split('\n')[-1])
+                        assert last in shown and t.screen.cursor.x == shown.index(last) + len(last), ('caret beside last letter', t.text)
+                    if presses == 2:
+                        t.send(b'\x7f')
+                    expected = text
+                    if presses == 2:
+                        expected = text[:-2] if text.endswith('e\u0301') else text[:-1]
+                finally:
+                    t.close()
+                    t.wait_backend_shutdown()
+                records = Path(directory, 'harbor-state').read_text().splitlines()
+                active = next(row.split()[1] for row in records if row.startswith('active '))
+                fields = next(row.split() for row in records if row.split()[0] == active)
+                actual = bytes.fromhex(fields[1]).decode() if fields[1] != '-' else ''
+                assert actual == expected, (text, typed, presses, actual, expected)
+                assert int(fields[2]) == len(expected), (text, fields[2], len(expected))
+    print('PASS native blank-row Backspace: pasted/typed newline; combining cluster; consecutive blank rows; next deletion')
+
+
+check_newline_backspace()
+
 for cols in (34, 50, 112):
     t = Terminal(cols=cols, rows=38)
     try:
