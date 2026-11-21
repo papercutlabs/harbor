@@ -60,14 +60,18 @@ def body(t,text):
 
 def quote(t,text,style='Plain'):
     _,y=body(t,text)
-    line=t.screen.display[y-1]
-    assert ':' in line or 'original' in line.lower(),line
+    assert not t.screen.display[y-1].strip(), t.text
+    line=t.screen.display[y-2]
+    assert line.strip(), line
+    first=y-2
+    while first>0 and t.screen.display[first-1].strip(): first-=1
+    assert not t.screen.display[first-1].strip(), t.text
     main=25 if t.cols>=100 else 0
     x=main+next(x for x,c in enumerate(line[main:]) if not c.isspace())
     if style=='Shaded':
         # The right part of the shaded quote row belongs to the quote too.
         x=t.cols-6
-    return x,y-1
+    return x,y-2
 
 def mouse(t,p,action):
     x,y=p

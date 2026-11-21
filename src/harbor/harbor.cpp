@@ -1595,13 +1595,17 @@ Harbor::BuildRows()
     m_Rows.push_back({ Pad(left, room) + L" " + right, id, m.isOutgoing, true });
     if (!m.quotedId.empty())
     {
+      m_Rows.push_back({ L"", id, m.isOutgoing, false });
       std::wstring excerpt = ReplyExcerpt(*c, m);
-      int room = std::max(4, width - 2);
-      if (Width(excerpt) > room)
-        excerpt = Pad(excerpt, room - 1) + L"…";
-      Row quote{ (m_QuoteAppearance == 1 ? L"│ " : L"") + excerpt, id, m.isOutgoing, false };
-      quote.quote = true;
-      m_Rows.push_back(std::move(quote));
+      const std::wstring prefix = m_QuoteAppearance == 1 ? L"│ " : L"";
+      const auto quoteLines = Layout(excerpt, std::max(1, width - Width(prefix))).lines;
+      for (const auto& line : quoteLines)
+      {
+        Row quote{ prefix + line, id, m.isOutgoing, false };
+        quote.quote = true; // every continuation row uses the existing original/Return click route
+        m_Rows.push_back(std::move(quote));
+      }
+      m_Rows.push_back({ L"", id, m.isOutgoing, false });
     }
     if (!m.text.empty() || !m.richText.empty())
     {

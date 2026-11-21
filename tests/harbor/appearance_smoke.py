@@ -73,14 +73,14 @@ for appearance in ['Plain', 'Left rule', 'Shaded']:
         assert ('│ Doug:' in line) == (appearance == 'Left rule'), line
         pos = line.index('Doug:')
         bg = t.screen.buffer[incoming][pos].bg
-        adjacent = t.screen.buffer[incoming+1][pos].bg
+        adjacent = t.screen.buffer[incoming+2][pos].bg
         assert (bg != adjacent) == (appearance == 'Shaded'), (appearance, bg, adjacent)
         t.click_text('Cross-chat received reply.', button=2); t.click_text('Reply')
         t.send('Outgoing appearance reply'); t.send(b'\r'); t.delivered('Outgoing appearance reply')
         outgoing = row(t, 'Outgoing appearance reply')
-        quote = t.screen.display[outgoing-1]
+        quote = t.screen.display[outgoing-2]
         assert 'Doug:' in quote and ('│ Doug:' in quote) == (appearance == 'Left rule'), quote
-        bg = t.screen.buffer[outgoing-1][quote.index('Doug:')].bg
+        bg = t.screen.buffer[outgoing-2][quote.index('Doug:')].bg
         body = t.screen.buffer[outgoing][t.screen.display[outgoing].index('Outgoing')].bg
         assert (bg != body) == (appearance == 'Shaded'), (appearance, bg, body)
         stamp_rows = [y for y in range(outgoing+1, min(outgoing+4,t.rows))
