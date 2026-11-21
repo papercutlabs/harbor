@@ -2,10 +2,7 @@
 from pathlib import Path
 import tempfile
 from native_smoke import Terminal
-
-def choose(t, setting, value):
-    t.send(b'\x0f'); t.click_text('Settings'); t.click_text(setting); t.click_text(value)
-    assert 'Appearance' not in t.text
+from popup_fixture import choose,click,closed,settings,wait,frame
 
 def row(t, text):
     return next(i for i, line in enumerate(t.screen.display) if text in line)
@@ -21,9 +18,10 @@ with tempfile.TemporaryDirectory(prefix='harbor-appearance-') as directory:
         for label in ['Plain', 'Left rule', 'Shaded']:
             choose(t, 'Quoted replies', label)
             assert 'kept appearance draft' in t.text
-            t.send(b'\x0f'); t.click_text('Settings'); t.click_text('Quoted replies')
+            settings(t);click(t,'Settings','Quoted replies')
+            wait(t,lambda:frame(t) is not None and frame(t)[4]=='Appearance','Appearance rendered')
             assert 'Selected' in t.screen.display[row(t, label)+1]
-            t.send(b'\x1b')
+            t.send(b'\x1b');closed(t)
         for label in ['Top right', 'Bottom right']:
             choose(t, 'Timestamps', label)
             assert 'kept appearance draft' in t.text
@@ -54,7 +52,7 @@ with tempfile.TemporaryDirectory(prefix='harbor-appearance-') as directory:
     try:
         t.expect('kept appearance draft')
         assert 'Ctrl+/ Commands' not in t.text
-        t.send(b'\x0f'); t.click_text('Settings')
+        settings(t)
         for value in ['Shaded', 'Plain', 'Top right', 'Prompt key only']: t.expect(value)
     finally:
         t.close()
@@ -75,7 +73,7 @@ for appearance in ['Plain', 'Left rule', 'Shaded']:
         bg = t.screen.buffer[incoming][pos].bg
         adjacent = t.screen.buffer[incoming+2][pos].bg
         assert (bg != adjacent) == (appearance == 'Shaded'), (appearance, bg, adjacent)
-        t.click_text('Cross-chat received reply.', button=2); t.click_text('Reply')
+        t.click_text('Cross-chat received reply.', button=2);click(t,'Message actions','Reply');closed(t)
         t.send('Outgoing appearance reply'); t.send(b'\r'); t.delivered('Outgoing appearance reply')
         outgoing = row(t, 'Outgoing appearance reply')
         quote = t.screen.display[outgoing-2]
