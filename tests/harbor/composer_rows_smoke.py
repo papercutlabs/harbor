@@ -21,11 +21,16 @@ def reset(t, text):
 
 def locate(t, text):
     text = unicodedata.normalize('NFC', text)
-    for y, row in enumerate(t.screen.display):
-        row = unicodedata.normalize('NFC', row)
-        if text in row:
-            return row.index(text), y
-    raise AssertionError((text, t.text))
+    deadline = time.monotonic() + 3
+    while True:
+        for y, row in enumerate(t.screen.display):
+            row = unicodedata.normalize('NFC', row)
+            if text in row:
+                return row.index(text), y
+        if time.monotonic() >= deadline:
+            raise AssertionError((text, t.text))
+        # A completed input write does not mean its rendered frame was read.
+        t.pump(.02)
 
 
 def expect(t, text):
