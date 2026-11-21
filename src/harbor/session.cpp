@@ -247,7 +247,8 @@ CompatibleVersions(const std::string& p_Client, const std::string& p_Backend)
          (p_Client == "0.1.26" && p_Backend == "0.1.25") ||
          (p_Client == "0.1.27" && p_Backend == "0.1.26") ||
          (p_Client == "0.1.28" && p_Backend == "0.1.27") ||
-         (p_Client == "0.1.29" && p_Backend == "0.1.28");
+         (p_Client == "0.1.29" && p_Backend == "0.1.28") ||
+         (p_Client == "0.1.30" && p_Backend == "0.1.29");
 }
 
 // Window side ---------------------------------------------------------------------------------
