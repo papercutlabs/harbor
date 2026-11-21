@@ -60,6 +60,12 @@ def body(t,text):
 
 def quote(t,text,style='Plain'):
     _,y=body(t,text)
+    # Extra quote rows can put its body at the viewport edge. Reveal the whole
+    # quote before clicking it, rather than targeting an unrelated header row.
+    for _ in range(8):
+        if y>=8:break
+        t.send(b'\x1b[<64;20;20M');_,y=body(t,text)
+    assert y>=8,t.text
     assert not t.screen.display[y-1].strip(), t.text
     line=t.screen.display[y-2]
     assert line.strip(), line
