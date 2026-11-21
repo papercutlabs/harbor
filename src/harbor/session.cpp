@@ -240,7 +240,9 @@ CompatibleVersions(const std::string& p_Client, const std::string& p_Backend)
   // sources match pre-allowlist 0.1.27 (dd0541b2). Released 0.1.27 (c9935c28)
   // matches pre-allowlist 0.1.28 (09db5368). Released 0.1.28 (a300f3c5)
   // session/wire/protocol sources match pre-allowlist 0.1.29 (97c03b41). Released 0.1.29
-  // (36f89029) matches pre-allowlist 0.1.30 (bf110fc0). No general semver range.
+  // (36f89029) matches pre-allowlist 0.1.30 (bf110fc0). Released 0.1.30
+  // (8b853b57) differs from 0.1.29 only in these upgrade exceptions, and 0.1.31
+  // keeps that wire contract. No general semver range.
   return p_Client == p_Backend ||
          (p_Client == "0.1.23" && p_Backend == "0.1.22") ||
          (p_Client == "0.1.24" && (p_Backend == "0.1.22" || p_Backend == "0.1.23")) ||
@@ -249,7 +251,8 @@ CompatibleVersions(const std::string& p_Client, const std::string& p_Backend)
          (p_Client == "0.1.27" && p_Backend == "0.1.26") ||
          (p_Client == "0.1.28" && p_Backend == "0.1.27") ||
          (p_Client == "0.1.29" && p_Backend == "0.1.28") ||
-         (p_Client == "0.1.30" && p_Backend == "0.1.29");
+         (p_Client == "0.1.30" && p_Backend == "0.1.29") ||
+         (p_Client == "0.1.31" && (p_Backend == "0.1.29" || p_Backend == "0.1.30"));
 }
 
 // Window side ---------------------------------------------------------------------------------

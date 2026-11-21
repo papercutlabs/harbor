@@ -2286,7 +2286,9 @@ Harbor::EditKey(wint_t k)
     if (c->cursor)
     {
       size_t start = c->cursor - 1;
-      while (start && Width(c->draft[start]) == 0)
+      // Only combining characters join the preceding glyph. Newlines and tabs
+      // have wcwidth -1, although Width clamps them to zero for drawing.
+      while (start && wcwidth(c->draft[start]) == 0)
         start--;
       c->draft.erase(start, c->cursor - start);
       c->cursor = start;
