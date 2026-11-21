@@ -224,6 +224,11 @@ Pad(std::wstring value, int width)
   }
   return out + std::wstring(std::max(0, width - n), ' ');
 }
+std::wstring
+Ellipsis(const std::wstring& value, int width)
+{
+  return Width(value) > width ? Pad(value, std::max(0, width - 1)) + L"…" : value;
+}
 std::string
 Time(int64_t value)
 {
@@ -1597,7 +1602,9 @@ Harbor::BuildRows()
     {
       std::wstring excerpt = ReplyExcerpt(*c, m);
       const std::wstring prefix = m_QuoteAppearance == 1 ? L"│ " : L"";
-      const auto quoteLines = Layout(excerpt, std::max(1, width - Width(prefix))).lines;
+      const int quoteWidth = std::max(1, width - Width(prefix));
+      const auto quoteLines = m_QuoteLength ? Layout(excerpt, quoteWidth).lines
+                                           : std::vector<std::wstring>{ Ellipsis(excerpt, quoteWidth) };
       for (const auto& line : quoteLines)
       {
         Row quote{ prefix + line, id, m.isOutgoing, false };
@@ -2037,7 +2044,8 @@ Harbor::Draw()
       Text(m_ComposerY - 1,
            m_MainX + 2,
            m_MainW - 4,
-           W(!c->editing.empty() ? "Editing your message · Esc cancels" : "Replying · " + c->reply),
+           !c->editing.empty() ? L"Editing your message · Esc cancels"
+                               : Ellipsis(ReplyContext(*c), std::max(1, m_MainW - 4)),
            Accent);
     for (int row = 0; row < m_ComposerRows + 2; ++row)
       Fill(m_ComposerY + row, m_MainX + 2, m_MainW - 4, Surface);
@@ -2613,6 +2621,7 @@ Harbor::LoadAppearance()
   while (in >> key >> value)
   {
     if (key == "quote" && value >= 0 && value < 3) m_QuoteAppearance = value;
+    if (key == "quote_length" && value >= 0 && value < 2) m_QuoteLength = value;
     if (key == "messages" && value >= 0 && value < 2) m_MessageAppearance = value;
     if (key == "timestamp" && value >= 0 && value < 2) m_TimestampPosition = value;
     if (key == "commands" && value >= 0 && value < 9) m_CommandHint = value;
@@ -2624,7 +2633,7 @@ Harbor::SaveAppearance()
   const auto path = FileUtil::GetApplicationDir() + "/harbor-appearance";
   const auto temporary = path + "." + std::to_string(getpid());
   std::ofstream out(temporary, std::ios::trunc);
-  out << "quote " << m_QuoteAppearance << "\nmessages " << m_MessageAppearance
+  out << "quote " << m_QuoteAppearance << "\nquote_length " << m_QuoteLength << "\nmessages " << m_MessageAppearance
       << "\ntimestamp " << m_TimestampPosition << "\ncommands " << m_CommandHint << "\n";
   out.close();
   if (!out || rename(temporary.c_str(), path.c_str()) != 0)
@@ -2643,6 +2652,7 @@ Harbor::Settings()
     "Empty prompt", "Footer keycap", "Contracts while typing", "Prompt key only", "Between quota and chat" };
   m_Options = {
     { "Quoted replies", quotes[m_QuoteAppearance], [this] { AppearanceChoices("quote"); } },
+    { "Quote length", m_QuoteLength ? "Full quote" : "Single line", [this] { AppearanceChoices("quote_length"); } },
     { "Messages", m_MessageAppearance ? "Plain" : "Panels", [this] { AppearanceChoices("messages"); } },
     { "Timestamps", m_TimestampPosition ? "Bottom right" : "Top right", [this] { AppearanceChoices("timestamp"); } },
     { "Commands hint", hints[m_CommandHint], [this] { AppearanceChoices("commands"); } },
@@ -2657,6 +2667,7 @@ Harbor::AppearanceChoices(const std::string& field)
   std::vector<std::string> labels;
   int selected = 0;
   if (field == "quote") { labels = { "Plain", "Left rule", "Shaded" }; selected = m_QuoteAppearance; }
+  if (field == "quote_length") { labels = { "Single line", "Full quote" }; selected = m_QuoteLength; }
   if (field == "messages") { labels = { "Panels", "Plain" }; selected = m_MessageAppearance; }
   if (field == "timestamp") { labels = { "Top right", "Bottom right" }; selected = m_TimestampPosition; }
   if (field == "commands")
@@ -2668,6 +2679,7 @@ Harbor::AppearanceChoices(const std::string& field)
   for (size_t i = 0; i < labels.size(); ++i)
     m_Options.push_back({ labels[i], int(i) == selected ? "Selected" : "", [this, field, i] {
       if (field == "quote") m_QuoteAppearance = i;
+      if (field == "quote_length") m_QuoteLength = i;
       if (field == "messages") m_MessageAppearance = i;
       if (field == "timestamp") m_TimestampPosition = i;
       if (field == "commands") m_CommandHint = i;
@@ -3329,10 +3341,23 @@ Harbor::ReplyExcerpt(Conversation& c, const ChatMessage& m)
     text = pending != m_ReplyOriginals.end() && pending->second.pending
              ? L"Loading original message…" : L"Original message unavailable";
   }
+  const std::string sender = !m.quotedSender.empty() ? m.quotedSender
+                              : original && !original->isDeleted ? original->senderId : "";
   std::string name = !m.quotedSenderName.empty() ? m.quotedSenderName
-                     : !m.quotedSender.empty() ? Name(c.profile, m.quotedSender)
-                     : original && !original->isDeleted ? Name(c.profile, original->senderId) : "";
+                     : original && original->isOutgoing && m.quotedSender.empty() ? "You"
+                     : !sender.empty() ? Name(c.profile, sender) : "";
+  // Name() deliberately falls back to IDs elsewhere; reply context must stay recognizable.
+  if (m.quotedSenderName.empty() && !sender.empty() && name == sender)
+    name = "Unknown sender";
   return name.empty() ? text : Safe(W(name)) + L": " + text;
+}
+std::wstring
+Harbor::ReplyContext(Conversation& c)
+{
+  ChatMessage reference;
+  reference.quotedChatId = c.id;
+  reference.quotedId = c.reply;
+  return L"Replying · " + ReplyExcerpt(c, reference);
 }
 void
 Harbor::VisitReply(const std::string& key, const ChatMessage& m)

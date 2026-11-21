@@ -216,6 +216,8 @@ HarborDemo::SeedRich(const std::function<void(const std::string&, const std::str
     rich("doug", 77, "Reply to deleted original.", {}, "deleted");
     if (getenv("HARBOR_DEMO_LONG_REPLY"))
       rich("self", 78, "Outgoing wrapped reply.", {}, parent);
+    if (getenv("HARBOR_DEMO_REPLY_CONTEXT"))
+      rich("32363035373131333630", 79, "Unresolved sender keeps this source recognizable.", {});
     auto deleted = collision;
     deleted.id = "deleted";
     deleted.isDeleted = true;
