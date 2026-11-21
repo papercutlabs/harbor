@@ -1595,7 +1595,6 @@ Harbor::BuildRows()
     m_Rows.push_back({ Pad(left, room) + L" " + right, id, m.isOutgoing, true });
     if (!m.quotedId.empty())
     {
-      m_Rows.push_back({ L"", id, m.isOutgoing, false });
       std::wstring excerpt = ReplyExcerpt(*c, m);
       const std::wstring prefix = m_QuoteAppearance == 1 ? L"│ " : L"";
       const auto quoteLines = Layout(excerpt, std::max(1, width - Width(prefix))).lines;
