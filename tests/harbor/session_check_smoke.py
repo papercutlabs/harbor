@@ -64,7 +64,8 @@ def main():
                     "0.1.28": ("0.1.27", "0.1.28"),
                     "0.1.29": ("0.1.28", "0.1.29"),
                     "0.1.30": ("0.1.29", "0.1.30"),
-                    "0.1.31": ("0.1.29", "0.1.30", "0.1.31")}[version]
+                    "0.1.31": ("0.1.29", "0.1.30", "0.1.31"),
+                    "0.1.32": ("0.1.31", "0.1.32")}[version]
 
         def probe(args, error=None, check_first=False):
             before = snapshot(root)
@@ -142,7 +143,7 @@ def main():
 
         for backend in accepted:
             peer(welcome(backend))
-        for backend in ("0.1.21", "0.1.24", "0.1.25", "0.1.26", "0.1.27", "0.1.28", "0.1.29", "0.1.30", "0.1.31", "0.1.32", "unknown", "0.1.22.1"):
+        for backend in ("0.1.21", "0.1.24", "0.1.25", "0.1.26", "0.1.27", "0.1.28", "0.1.29", "0.1.30", "0.1.31", "0.1.32", "0.1.33", "unknown", "0.1.22.1"):
             if backend not in accepted:
                 peer(welcome(backend), f"Harbor {backend} is still running in other windows; this is Harbor {version}.")
         peer(frame(b"W", struct.pack("<I", len(version)) + version.encode()), "malformed welcome")
