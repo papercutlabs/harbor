@@ -1,6 +1,7 @@
 """Rendered-row editing through native input: clicks, wraps, deletion and Unicode."""
 import unicodedata
 import tempfile
+import time
 from pathlib import Path
 from native_smoke import Terminal, ROOT
 
@@ -29,6 +30,19 @@ def locate(t, text):
 
 def expect(t, text):
     locate(t, text)
+
+
+def expect_cursor(t, expected, context, hidden=False):
+    # Input acceptance and the next painted frame are separate events. Harbor
+    # draws at most once per 16 ms; observe the frame instead of assuming a delay.
+    def matches():
+        return t.screen.cursor.hidden == hidden and (hidden or
+            (t.screen.cursor.x, t.screen.cursor.y) == expected)
+    deadline = time.monotonic() + 3
+    while not matches() and time.monotonic() < deadline:
+        t.pump(.02)
+    assert matches(), (context, expected, (t.screen.cursor.x, t.screen.cursor.y),
+                       t.screen.cursor.hidden, t.text)
 
 
 def check_newline_backspace():
@@ -84,13 +98,17 @@ def check_newline_navigation():
             try:
                 t.picker('Studio')
                 t.send('\x1b[200~' + source + '\x1b[201~')
-                base_x = t.screen.cursor.x
-                base_y = t.screen.cursor.y - source.count('\n')
+                first = unicodedata.normalize('NFC', source.split('\n', 1)[0].rstrip())
+                deadline = time.monotonic() + 3
+                while first not in unicodedata.normalize('NFC', t.text) and time.monotonic() < deadline:
+                    t.pump(.02)
+                base_x, base_y = locate(t, first)
                 def position(offset):
                     before = source[:offset]
                     line = before.rsplit('\n', 1)[-1]
                     cells = sum(1 if ch == '\t' else max(0, wcwidth(ch)) for ch in line)
-                    assert (t.screen.cursor.x, t.screen.cursor.y) == (base_x + cells, base_y + before.count('\n')), (source, offset, t.text)
+                    expect_cursor(t, (base_x + cells, base_y + before.count('\n')), (source, offset))
+                position(len(source))
                 for key, offset in ((b'\x1bOD', len(prefix)),
                                     (b'\x1bOC', len(source)),
                                     (b'\x1bOD', len(prefix)),
@@ -101,6 +119,7 @@ def check_newline_navigation():
                 if '\n' not in prefix:
                     # Reach the same edge from the beginning, one grapheme at a time.
                     t.send(b'\x01')
+                    position(0)
                     stops = [i for i in range(1, len(prefix) + 1)
                              if i == len(prefix) or wcwidth(prefix[i]) != 0]
                     for offset in stops:
@@ -118,7 +137,6 @@ def check_newline_navigation():
 
 
 def check_integrated_cursor():
-    import time
     for strip_enabled in (True, False):
         with tempfile.TemporaryDirectory(prefix='harbor-cursor-frame-') as directory:
             strip = Path(directory, 'strip')
@@ -132,13 +150,12 @@ def check_integrated_cursor():
                 t.send('caret_frame_sentinel')
                 t.send(b'\x0b'); t.send('St')
                 x, y = locate(t, '› St')
-                assert not t.screen.cursor.hidden
-                assert (t.screen.cursor.x, t.screen.cursor.y) == (x + len('› St'), y), ('filter caret', strip_enabled, t.text)
+                expect_cursor(t, (x + len('› St'), y), ('filter caret', strip_enabled))
                 t.send(b'\x1b')
                 x, y = locate(t, 'caret_frame_sentinel')
-                assert (t.screen.cursor.x, t.screen.cursor.y) == (x + len('caret_frame_sentinel'), y), ('composer caret', strip_enabled, t.text)
+                expect_cursor(t, (x + len('caret_frame_sentinel'), y), ('composer caret', strip_enabled))
                 t.send(b'\x0f'); t.expect('│ Commands')
-                assert t.screen.cursor.hidden, ('noneditable menu caret', strip_enabled, t.text)
+                expect_cursor(t, None, ('noneditable menu caret', strip_enabled), hidden=True)
                 t.send(b'\x1b')
                 t.clear_draft()
                 t.send('caption_frame')
@@ -146,8 +163,7 @@ def check_integrated_cursor():
                 t.send('\x1b[200~' + fixture + '\x1b[201~', wait=.4)
                 t.expect('Caption · type to add'); t.send('X')
                 x, y = locate(t, 'caption_frameX')
-                assert not t.screen.cursor.hidden
-                assert (t.screen.cursor.x, t.screen.cursor.y) == (x + len('caption_frameX'), y), ('caption caret', strip_enabled, t.text)
+                expect_cursor(t, (x + len('caption_frameX'), y), ('caption caret', strip_enabled))
             finally:
                 t.close()
     print('PASS actual frame cursor with strip on/off and Kitty graphics: composer, filter, caption, noneditable menu')
