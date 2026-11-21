@@ -72,6 +72,91 @@ def check_newline_backspace():
     print('PASS native blank-row Backspace: pasted/typed newline; combining cluster; consecutive blank rows; next deletion')
 
 
+def check_newline_navigation():
+    # Hard newlines are insertion stops. They must not join a preceding glyph,
+    # including a combining cluster or a tab, when moving in either direction.
+    from wcwidth import wcwidth
+    for prefix, last_unit in (('lorry crane deliveries inside', 1),
+                              ('wide 界 e\u0301', 2), ('tab\t', 1), ('two blanks\n', 1)):
+        with tempfile.TemporaryDirectory(prefix='harbor-newline-navigation-') as directory:
+            t = Terminal(cols=112, rows=38, config_dir=directory)
+            source = prefix + '\n'
+            try:
+                t.picker('Studio')
+                t.send('\x1b[200~' + source + '\x1b[201~')
+                base_x = t.screen.cursor.x
+                base_y = t.screen.cursor.y - source.count('\n')
+                def position(offset):
+                    before = source[:offset]
+                    line = before.rsplit('\n', 1)[-1]
+                    cells = sum(1 if ch == '\t' else max(0, wcwidth(ch)) for ch in line)
+                    assert (t.screen.cursor.x, t.screen.cursor.y) == (base_x + cells, base_y + before.count('\n')), (source, offset, t.text)
+                for key, offset in ((b'\x1bOD', len(prefix)),
+                                    (b'\x1bOC', len(source)),
+                                    (b'\x1bOD', len(prefix)),
+                                    (b'\x1bOD', len(prefix) - last_unit),
+                                    (b'\x1bOC', len(prefix))):
+                    t.send(key, wait=.03)
+                    position(offset)
+                if '\n' not in prefix:
+                    # Reach the same edge from the beginning, one grapheme at a time.
+                    t.send(b'\x01')
+                    stops = [i for i in range(1, len(prefix) + 1)
+                             if i == len(prefix) or wcwidth(prefix[i]) != 0]
+                    for offset in stops:
+                        t.send(b'\x1bOC', wait=.01)
+                        position(offset)
+            finally:
+                t.close()
+                t.wait_backend_shutdown()
+            records = Path(directory, 'harbor-state').read_text().splitlines()
+            active = next(row.split()[1] for row in records if row.startswith('active '))
+            fields = next(row.split() for row in records if row.split()[0] == active)
+            assert bytes.fromhex(fields[1]).decode() == source, (source, fields)
+            assert int(fields[2]) == len(prefix), (source, fields[2], len(prefix))
+    print('PASS native newline cursor stops: both arrows, line edge, combining cluster, tab, blank rows; exact draft preserved')
+
+
+def check_integrated_cursor():
+    import time
+    for strip_enabled in (True, False):
+        with tempfile.TemporaryDirectory(prefix='harbor-cursor-frame-') as directory:
+            strip = Path(directory, 'strip')
+            strip.write_text('pcl.desk.strip.v1\t' + str(int(time.time() * 1000)) +
+                             '\nDesk fixture\nCODEX fixture\nCLAUDE fixture\nGROK fixture\n')
+            env = {'HARBOR_DESK_STRIP_FILE': str(strip) if strip_enabled else '',
+                   'HARBOR_GRAPHICS': 'kitty'}
+            t = Terminal(cols=112, rows=38, extra_env=env)
+            try:
+                t.picker('Studio')
+                t.send('caret_frame_sentinel')
+                t.send(b'\x0b'); t.send('St')
+                x, y = locate(t, '› St')
+                assert not t.screen.cursor.hidden
+                assert (t.screen.cursor.x, t.screen.cursor.y) == (x + len('› St'), y), ('filter caret', strip_enabled, t.text)
+                t.send(b'\x1b')
+                x, y = locate(t, 'caret_frame_sentinel')
+                assert (t.screen.cursor.x, t.screen.cursor.y) == (x + len('caret_frame_sentinel'), y), ('composer caret', strip_enabled, t.text)
+                t.send(b'\x0f'); t.expect('│ Commands')
+                assert t.screen.cursor.hidden, ('noneditable menu caret', strip_enabled, t.text)
+                t.send(b'\x1b')
+                t.clear_draft()
+                t.send('caption_frame')
+                fixture = str(ROOT / 'tests/harbor/fixtures/harbor.png')
+                t.send('\x1b[200~' + fixture + '\x1b[201~', wait=.4)
+                t.expect('Caption · type to add'); t.send('X')
+                x, y = locate(t, 'caption_frameX')
+                assert not t.screen.cursor.hidden
+                assert (t.screen.cursor.x, t.screen.cursor.y) == (x + len('caption_frameX'), y), ('caption caret', strip_enabled, t.text)
+            finally:
+                t.close()
+    print('PASS actual frame cursor with strip on/off and Kitty graphics: composer, filter, caption, noneditable menu')
+
+
+check_integrated_cursor()
+
+check_newline_navigation()
+
 check_newline_backspace()
 
 for cols in (34, 50, 112):

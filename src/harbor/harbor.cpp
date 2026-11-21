@@ -2125,10 +2125,11 @@ Harbor::Draw()
     Text(m_H - 1, m_MainX + 2, m_MainW - 4, W(m_ControlError), Warning);
   else if (m_ControlReply >= 0)
     Text(m_H - 1, m_MainX + 2, m_MainW - 4, L"Opening requested conversation…", Accent);
-  if (!m_Menu.empty())
-    DrawMenu();
+  // Paint fixed chrome before the active input positions its terminal cursor.
   for (int row = 0; row < stripHeight; ++row)
     Text(row, 0, m_W, m_DeskStrip.Rows()[row], Muted);
+  if (!m_Menu.empty())
+    DrawMenu();
   if (c && m_Menu.empty() && !m_Browse)
   {
     auto point = CursorPoint(draftLayout, std::min(c->cursor, c->draft.size()), c->cursorAtRowEnd);
@@ -2248,14 +2249,15 @@ Harbor::EditKey(wint_t k)
   {
     if (c->cursor)
       c->cursor--;
-    while (c->cursor && Width(c->draft[c->cursor]) == 0)
+    // A hard newline/tab is a cursor stop, not a combining character.
+    while (c->cursor && wcwidth(c->draft[c->cursor]) == 0)
       c->cursor--;
   }
   else if (k == KEY_RIGHT)
   {
     if (c->cursor < c->draft.size())
       c->cursor++;
-    while (c->cursor < c->draft.size() && Width(c->draft[c->cursor]) == 0)
+    while (c->cursor < c->draft.size() && wcwidth(c->draft[c->cursor]) == 0)
       c->cursor++;
   }
   else if (k == BackwardWordKey)
@@ -4375,6 +4377,8 @@ Harbor::DrawMenu()
     curs_set(1);
     move(y + (picker ? 3 : 2), std::min(x + width - 3, x + 4 + Width(m_Filter)));
   }
+  else
+    curs_set(0);
 }
 void
 Harbor::KeyPress(wint_t k)
