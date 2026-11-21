@@ -37,8 +37,7 @@ def quote_rows(t,body):
     b=row(t,body);assert not t.screen.display[b-1].strip(),t.text
     end=b-2;start=end
     while start and t.screen.display[start-1].strip():start-=1
-    assert start>1 and not t.screen.display[start-1].strip(),t.text
-    assert t.screen.display[start-2].strip() in ('Doug','You'),t.text
+    assert start>0 and t.screen.display[start-1].strip() in ('Doug','You'),t.text
     return start,end
 
 for cols in (48,76):
@@ -67,5 +66,5 @@ for cols in (48,76):
                 assert (t.screen.cursor.x,t.screen.cursor.y)==cursor
                 t.expect('Retained cursor draft')
         t.snapshot(f'harbor-approved-reply-spacing-{cols}')
-        print(f'PASS {cols}cols: complete wrapped incoming/outgoing quote, exact1row before/after, all appearances, continuation click/Return preserves history/cursor/draft',flush=True)
+        print(f'PASS {cols}cols: complete wrapped incoming/outgoing quote, zero rows before/exactly1after, all appearances, continuation click/Return preserves history/cursor/draft',flush=True)
     finally:t.close()
