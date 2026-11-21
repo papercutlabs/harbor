@@ -59,6 +59,7 @@ def body(t,text):
     raise AssertionError(f'No body for {text!r}:\n{t.text}')
 
 def quote(t,text,style='Plain'):
+    if not any(line.strip()==text for line in t.screen.display):t.send(b'\x07')
     _,y=body(t,text)
     # Extra quote rows can put its body at the viewport edge. Reveal the whole
     # quote before clicking it, rather than targeting an unrelated header row.
@@ -154,14 +155,14 @@ for cols in (52,110):
                 jump(t,'First received reply.','Older parent outside the loaded page.',draft,state,quote_style)
                 jump(t,'Outgoing clickable reply.','Cross-chat received reply.',draft,state,quote_style)
         # Cross-chat metadata must select the original, not a same-id local collision.
-        before=history(t);p=quote(t,'Cross-chat received reply.')
+        p=quote(t,'Cross-chat received reply.');before=history(t)
         mouse(t,p,'down');mouse(t,p,'up');t.expect('Showing the message')
         body(t,'Correct cross-chat original.');t.expect('Studio draft retained')
         return_back(t);body(t,'Cross-chat received reply.');t.expect(draft)
         assert history(t)==before
         # Unknown/deleted/inaccessible originals give feedback without a jump or Return mark.
         for text in ('Legacy reply with lost chat metadata.','Reply to inaccessible original.','Reply to deleted original.'):
-            before=history(t);p=quote(t,text)
+            p=quote(t,text);before=history(t)
             mouse(t,p,'down');mouse(t,p,'up');t.expect('original message is unavailable')
             assert history(t)==before and draft in t.text
             t.send(b'\x0f');assert 'Return to previous position' not in t.text;t.send(b'\x1b')
