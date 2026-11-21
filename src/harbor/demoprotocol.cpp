@@ -187,7 +187,10 @@ HarborDemo::SeedRich(const std::function<void(const std::string&, const std::str
   }
   if (getenv("HARBOR_DEMO_REPLIES"))
   {
-    const auto parent = rich("doug", 1, "Older parent outside the loaded page.", {});
+    const std::string parentText = getenv("HARBOR_DEMO_LONG_REPLY")
+      ? "Before we retire Diode, we need to be able to recover the approval records, even if an interrupted payment must be checked later. End of the complete original."
+      : "Older parent outside the loaded page.";
+    const auto parent = rich("doug", 1, parentText, {});
     for (int i = 0; i < 60; ++i)
       add("rich", "doug", "Older filler " + std::to_string(i), 2 + i, "", "");
     rich("doug", 70, "First received reply.", {}, parent);
@@ -211,6 +214,8 @@ HarborDemo::SeedRich(const std::function<void(const std::string&, const std::str
     supplied.quotedRichText = RichText::Encode({ supplied.quotedText, { { RichText::Spoiler, 0, 12, "" } } });
     rich("doug", 76, "Reply to inaccessible original.", {}, "missing");
     rich("doug", 77, "Reply to deleted original.", {}, "deleted");
+    if (getenv("HARBOR_DEMO_LONG_REPLY"))
+      rich("self", 78, "Outgoing wrapped reply.", {}, parent);
     auto deleted = collision;
     deleted.id = "deleted";
     deleted.isDeleted = true;

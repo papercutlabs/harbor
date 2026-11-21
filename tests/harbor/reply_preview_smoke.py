@@ -20,10 +20,10 @@ with tempfile.TemporaryDirectory(prefix='harbor-reply-proof-') as directory:
         # Unknown legacy target must not quote the same-id local message.
         lines = t.screen.display
         legacy = next(i for i,line in enumerate(lines) if 'Legacy reply with lost' in line)
-        assert 'Original message unavailable' in lines[legacy-1], t.text
+        assert 'Original message unavailable' in lines[legacy-2], t.text
         for body in ['Reply to inaccessible original.', 'Reply to deleted original.']:
             row = next(i for i,line in enumerate(lines) if body in line)
-            assert 'Original message unavailable' in lines[row-1], t.text
+            assert 'Original message unavailable' in lines[row-2], t.text
         # The original was fetched only for the preview: no visible historical insertion or jump.
         assert not any('Older parent outside' in line and '│' not in line for line in lines), t.text
         assert 'Showing the message' not in t.text

@@ -59,15 +59,29 @@ def body(t,text):
     raise AssertionError(f'No body for {text!r}:\n{t.text}')
 
 def quote(t,text,style='Plain'):
-    _,y=body(t,text)
-    line=t.screen.display[y-1]
-    assert ':' in line or 'original' in line.lower(),line
     main=25 if t.cols>=100 else 0
+    if not any(line[main:].strip()==text for line in t.screen.display):t.send(b'\x07')
+    for _ in range(20):
+        if any(line[main:].strip()==text for line in t.screen.display):break
+        t.send(b'\x1b[<64;20;20M')
+    _,y=body(t,text)
+    # Extra quote rows can put its body at the viewport edge. Reveal the whole
+    # quote before clicking it, rather than targeting an unrelated header row.
+    for _ in range(8):
+        if y>=8:break
+        t.send(b'\x1b[<64;20;20M');_,y=body(t,text)
+    assert y>=8,t.text
+    assert not t.screen.display[y-1][main:].strip(), t.text
+    line=t.screen.display[y-2]
+    assert line[main:].strip(), line
+    first=y-2
+    while first>0 and t.screen.display[first-1][main:].strip(): first-=1
+    assert first>0 and not t.screen.display[first-1][main:].strip(), t.text
     x=main+next(x for x,c in enumerate(line[main:]) if not c.isspace())
     if style=='Shaded':
         # The right part of the shaded quote row belongs to the quote too.
         x=t.cols-6
-    return x,y-1
+    return x,y-2
 
 def mouse(t,p,action):
     x,y=p
@@ -144,14 +158,14 @@ for cols in (52,110):
                 jump(t,'First received reply.','Older parent outside the loaded page.',draft,state,quote_style)
                 jump(t,'Outgoing clickable reply.','Cross-chat received reply.',draft,state,quote_style)
         # Cross-chat metadata must select the original, not a same-id local collision.
-        before=history(t);p=quote(t,'Cross-chat received reply.')
+        p=quote(t,'Cross-chat received reply.');before=history(t)
         mouse(t,p,'down');mouse(t,p,'up');t.expect('Showing the message')
         body(t,'Correct cross-chat original.');t.expect('Studio draft retained')
         return_back(t);body(t,'Cross-chat received reply.');t.expect(draft)
         assert history(t)==before
         # Unknown/deleted/inaccessible originals give feedback without a jump or Return mark.
         for text in ('Legacy reply with lost chat metadata.','Reply to inaccessible original.','Reply to deleted original.'):
-            before=history(t);p=quote(t,text)
+            p=quote(t,text);before=history(t)
             mouse(t,p,'down');mouse(t,p,'up');t.expect('original message is unavailable')
             assert history(t)==before and draft in t.text
             t.send(b'\x0f');assert 'Return to previous position' not in t.text;t.send(b'\x1b')

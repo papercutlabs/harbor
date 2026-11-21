@@ -165,11 +165,14 @@ for record in (home/'.office/harbor-windows').iterdir():
         # A reply/search/pin visit has a separate Return mark. Manual update keeps the visible
         # original and that mark; ordinary quit retains its existing return-before-visit policy.
         a.picker('Doug formatting');a.send('visit draft')
-        def find_body(t,text):
+        def find_body(t,text,context=None):
             t.send(b'\x07')
             for _ in range(40):
-                if any(line.strip().startswith(text) for line in t.screen.display):return
-                t.send(b'\x1b[5~',wait=.05)
+                visible=any(line.strip().startswith(text) for line in t.screen.display)
+                if visible and (context is None or context in t.text):return
+                # A taller following reply can leave only this message's final
+                # body row at the viewport top. Reveal the context before testing it.
+                t.send(b'\x1b[<64;20;20M' if visible else b'\x1b[5~',wait=.05)
             raise AssertionError(('message body unavailable',text,t.text))
         find_body(a,'The code word');a.message_tool('The code word','Reveal spoiler')
         a.expect('The code word is harbor-42, keep it.')
@@ -217,7 +220,7 @@ for record in (home/'.office/harbor-windows').iterdir():
         else:raise AssertionError(('Return position changed',return_view,draft_history(a)))
         a.expect('visit draft')
         find_body(a,'The code word');a.expect('The code word is harbor-42, keep it.')
-        find_body(a,'That was the quote');a.expect('second quoted line')
+        find_body(a,'That was the quote',context='second quoted line');a.expect('second quoted line')
         print('PASS manual restart keeps a visited message at its line and Return action; quote expansion and spoiler reveal survive; pending attachment preview defers until cancelled without losing its draft',flush=True)
     except BaseException:
         snapshot={'old_backend_pid':locals().get('old_backend'),'old_socket_inode':locals().get('old_socket'),

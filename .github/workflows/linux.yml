@@ -44,7 +44,7 @@ jobs:
         python3 -m venv "$RUNNER_TEMP/harbor-smoke-venv"
         py="$RUNNER_TEMP/harbor-smoke-venv/bin/python"
         "$py" -m pip install -r tests/harbor/requirements.txt
-        scripts="appearance_smoke wheel_burst_smoke popup_hierarchy_smoke command_keys_smoke warm_host_protocol warm_handoff_smoke word_navigation_smoke session_check_smoke composer_rows_smoke cursor_click_smoke restart_all_smoke"
+        scripts="reply_spacing_smoke appearance_smoke wheel_burst_smoke popup_hierarchy_smoke command_keys_smoke warm_host_protocol warm_handoff_smoke word_navigation_smoke session_check_smoke composer_rows_smoke cursor_click_smoke restart_all_smoke"
         scripts="$scripts typing_smoke message_click_smoke picture_open_smoke preview_guard_smoke input_latency_smoke ui_identity_smoke"
         scripts="$scripts shell_copy_smoke restart_generation_smoke command_menu_smoke"
         scripts="$scripts reply_click_smoke"
