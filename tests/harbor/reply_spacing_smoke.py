@@ -66,5 +66,6 @@ for cols in (48,76):
                 assert t.screen.display[:110]==before.split('\n')[:110],t.text
                 assert (t.screen.cursor.x,t.screen.cursor.y)==cursor
                 t.expect('Retained cursor draft')
+        t.snapshot(f'harbor-approved-reply-spacing-{cols}')
         print(f'PASS {cols}cols: complete wrapped incoming/outgoing quote, exact1row before/after, all appearances, continuation click/Return preserves history/cursor/draft',flush=True)
     finally:t.close()

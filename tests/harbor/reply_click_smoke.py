@@ -59,7 +59,11 @@ def body(t,text):
     raise AssertionError(f'No body for {text!r}:\n{t.text}')
 
 def quote(t,text,style='Plain'):
-    if not any(line.strip()==text for line in t.screen.display):t.send(b'\x07')
+    main=25 if t.cols>=100 else 0
+    if not any(line[main:].strip()==text for line in t.screen.display):t.send(b'\x07')
+    for _ in range(20):
+        if any(line[main:].strip()==text for line in t.screen.display):break
+        t.send(b'\x1b[<64;20;20M')
     _,y=body(t,text)
     # Extra quote rows can put its body at the viewport edge. Reveal the whole
     # quote before clicking it, rather than targeting an unrelated header row.
@@ -67,13 +71,12 @@ def quote(t,text,style='Plain'):
         if y>=8:break
         t.send(b'\x1b[<64;20;20M');_,y=body(t,text)
     assert y>=8,t.text
-    assert not t.screen.display[y-1].strip(), t.text
+    assert not t.screen.display[y-1][main:].strip(), t.text
     line=t.screen.display[y-2]
-    assert line.strip(), line
+    assert line[main:].strip(), line
     first=y-2
-    while first>0 and t.screen.display[first-1].strip(): first-=1
-    assert not t.screen.display[first-1].strip(), t.text
-    main=25 if t.cols>=100 else 0
+    while first>0 and t.screen.display[first-1][main:].strip(): first-=1
+    assert first>0 and not t.screen.display[first-1][main:].strip(), t.text
     x=main+next(x for x,c in enumerate(line[main:]) if not c.isspace())
     if style=='Shaded':
         # The right part of the shaded quote row belongs to the quote too.
