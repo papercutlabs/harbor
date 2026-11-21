@@ -29,7 +29,8 @@
     "tests/harbor/command_menu_smoke.py",
     "tests/harbor/reply_click_smoke.py",
     "tests/harbor/reply_spacing_smoke.py",
-    "tests/harbor/reply_display_smoke.py"
+    "tests/harbor/reply_display_smoke.py",
+    "tests/harbor/popup_fixture.py"
   ],
   "lanes": {
     "typing": [
@@ -60,7 +61,8 @@
       "tests/harbor/restart_generation_smoke.py",
       "tests/harbor/reply_click_smoke.py",
       "tests/harbor/reply_spacing_smoke.py",
-      "tests/harbor/reply_display_smoke.py"
+      "tests/harbor/reply_display_smoke.py",
+      "tests/harbor/popup_fixture.py"
     ],
     "format": [
       "tests/harbor/format_test.cpp"

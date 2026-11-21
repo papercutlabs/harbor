@@ -2,6 +2,7 @@
 from pathlib import Path
 import sys,tempfile,time
 from native_smoke import Terminal
+from popup_fixture import choose,click,closed,settings
 
 env={'HARBOR_DEMO_RICH':'1','HARBOR_DEMO_REPLIES':'1','HARBOR_DEMO_LONG_REPLY':'1',
      'HARBOR_DEMO_REPLY_CONTEXT':'1'}
@@ -11,10 +12,6 @@ def wait(t,predicate,label):
     end=time.monotonic()+4
     while not predicate() and time.monotonic()<end:t.pump(.05)
     assert predicate(),label+'\n'+t.text
-
-def choose(t,field,value):
-    t.send(b'\x0f');t.click_text('Settings');t.click_text(field);t.click_text(value)
-    wait(t,lambda:not any('╭' in s and '╮' in s for s in t.screen.display),'Closed setting')
 
 def quote_rows(t,body):
     b=next(y for y,line in enumerate(t.screen.display) if line.strip()==body)
@@ -26,6 +23,14 @@ def quote_rows(t,body):
 
 def banner(t):
     return next((s.strip() for s in t.screen.display if s.strip().startswith('Replying · ')),'')
+
+def draft_caret(t,text,offset):
+    y=next((y for y,line in enumerate(t.screen.display) if '›' in line and text in line),None)
+    return None if y is None else (t.screen.display[y].index(text)+offset,y)
+
+def ready_caret(t,text,offset):
+    wait(t,lambda:draft_caret(t,text,offset)==(t.screen.cursor.x,t.screen.cursor.y),'Native draft caret rendered')
+    return draft_caret(t,text,offset)
 
 if '--context-only' not in sys.argv:
   for cols in (48,76):
@@ -42,7 +47,7 @@ if '--context-only' not in sys.argv:
             start,end=quote_rows(t,body)
             assert start==end and t.screen.display[start].rstrip().endswith('…'),t.text
         t.send('kept compact draft');t.send(b'\x1b[D'*2)
-        cursor=(t.screen.cursor.x,t.screen.cursor.y)
+        cursor=ready_caret(t,'kept compact draft',len('kept compact draft')-2)
         for appearance in ('Plain','Left rule','Shaded'):
             choose(t,'Quoted replies',appearance)
             for length in ('Full quote','Single line'):
@@ -58,14 +63,16 @@ if '--context-only' not in sys.argv:
                     if length=='Full quote':assert 'the complete original.' in lines[-1],lines
                     assert ('│ ' in lines[0])==(appearance=='Left rule'),lines
                     if length=='Single line':
-                        before=t.screen.display[:110];point=(t.screen.cursor.x,t.screen.cursor.y)
+                        point=ready_caret(t,'kept compact draft',len('kept compact draft')-2)
+                        before=t.screen.display[:110]
                         x=cols-6 if appearance=='Shaded' else next(i for i,ch in enumerate(lines[0]) if not ch.isspace())+2
                         t.send(f'\x1b[<0;{x+1};{end+1}M',wait=.05);t.send(f'\x1b[<0;{x+1};{end+1}m')
-                        t.expect('Showing the message');t.send(b'\x0f');t.click_text('Return to previous position')
+                        t.expect('Showing the message');t.send(b'\x0f');click(t,'Commands','Return to previous position');closed(t)
                         wait(t,lambda:body in t.text and not any('╭' in s and '╮' in s for s in t.screen.display),'Return')
                         assert t.screen.display[:110]==before,t.text
-                        assert (t.screen.cursor.x,t.screen.cursor.y)==point
-        assert (t.screen.cursor.x,t.screen.cursor.y)==cursor
+                        wait(t,lambda:(t.screen.cursor.x,t.screen.cursor.y)==point,'Returned native draft caret')
+        wait(t,lambda:(t.screen.cursor.x,t.screen.cursor.y)==cursor,'Draft caret after settings')
+        t.send('X');t.expect('kept compact draXft');t.send(b'\x7f');t.expect('kept compact draft')
         t.expect('kept compact draft');t.snapshot(f'harbor-single-line-quotes-{cols}')
         choose(t,'Quote length','Full quote')
       finally:t.close();t.wait_backend_shutdown()
@@ -73,7 +80,7 @@ if '--context-only' not in sys.argv:
         t=Terminal(cols=cols,rows=120,config_dir=config,extra_env=env)
         try:
             t.expect('kept compact draft')
-            t.send(b'\x0f');t.click_text('Settings');t.expect(length);t.expect('Shaded');t.send(b'\x1b')
+            settings(t);t.expect(length);t.expect('Shaded');t.send(b'\x1b');closed(t)
             start,end=quote_rows(t,'Outgoing wrapped reply.')
             assert (end>start)==(length=='Full quote'),t.text
             choose(t,'Quote length','Single line')
@@ -86,19 +93,20 @@ if '--length-only' not in sys.argv:
     t=Terminal(cols=60,rows=120,config_dir=config,extra_env=env)
     try:
         t.picker('Doug formatting');t.send('recognizable draft');t.send(b'\x1b[D'*2)
-        point=(t.screen.cursor.x,t.screen.cursor.y)
+        point=ready_caret(t,'recognizable draft',len('recognizable draft')-2)
         for body,expected in [('First received reply.','Doug: First received reply.'),
                               ('Outgoing wrapped reply.','You: Outgoing wrapped reply.'),
                               ('Unresolved sender keeps this source recognizable.','Unknown sender: Unresolved')]:
-            t.click_text(body,button=2);t.click_text('Reply')
+            t.click_text(body,button=2);click(t,'Message actions','Reply');closed(t)
             wait(t,lambda:expected in banner(t),'Recognizable reply context')
             assert opaque not in banner(t),banner(t)
-            assert (t.screen.cursor.x,t.screen.cursor.y)==point
+            wait(t,lambda:(t.screen.cursor.x,t.screen.cursor.y)==point,'Reply source keeps native draft caret')
             t.expect('recognizable draft');t.send(b'\x1b')
+            wait(t,lambda:not banner(t),'Reply cancelled before the next source')
         # The original-message resolver also supplies a concise, ellipsized long source.
         start,end=quote_rows(t,'First received reply.')
         t.click_text(t.screen.display[start].strip());t.expect('Showing the message')
-        t.click_text('Before we retire Diode',button=2);t.click_text('Reply')
+        t.click_text('Before we retire Diode',button=2);click(t,'Message actions','Reply');closed(t)
         wait(t,lambda:'Doug: Before we retire' in banner(t),'Resolved original context')
         assert banner(t).endswith('…'),banner(t)
         t.snapshot('harbor-recognizable-reply-context')
