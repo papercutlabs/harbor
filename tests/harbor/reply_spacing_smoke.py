@@ -45,7 +45,8 @@ for cols in (48,76):
     try:
         t.picker('Doug formatting');t.expect('First received reply.')
         t.expect('Outgoing wrapped reply.')
-        t.send('Retained cursor draft');t.send(b'\x02\x02')
+        setting(t,'Quote length','Full quote')
+        t.send('Retained cursor draft');t.send(b'\x1b[D'*2)
         for appearance in ('Plain','Left rule','Shaded'):
             setting(t,'Quoted replies',appearance)
             for body,expected in [('First received reply.',full),('Outgoing wrapped reply.',full)]:

@@ -173,6 +173,7 @@ private:
   std::string ReplyKey(const Conversation&, const ChatMessage&) const;
   const ChatMessage* LoadedReply(const Conversation&, const ChatMessage&) const;
   std::wstring ReplyExcerpt(Conversation&, const ChatMessage&);
+  std::wstring ReplyContext(Conversation&);
   void VisitReply(const std::string&, const ChatMessage&);
   std::vector<Row> m_Rows;
   std::vector<Hit> m_Hits;
@@ -241,7 +242,7 @@ private:
   void AppearanceChoices(const std::string&);
   void LoadAppearance();
   bool SaveAppearance();
-  int m_QuoteAppearance = 1, m_MessageAppearance = 0, m_TimestampPosition = 1, m_CommandHint = 0;
+  int m_QuoteAppearance = 1, m_QuoteLength = 0, m_MessageAppearance = 0, m_TimestampPosition = 1, m_CommandHint = 0;
   // Optional Desk entries named by HARBOR_DESK_COMMANDS, each run as an argv child on this same terminal.
   std::vector<Option> DeskOptions(bool help = false);
   HarborDeskHost m_DeskHost;
