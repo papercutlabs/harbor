@@ -36,7 +36,7 @@ def row(t,text):
 def quote_rows(t,body):
     b=row(t,body);assert not t.screen.display[b-1].strip(),t.text
     end=b-2;start=end
-    while start and t.screen.display[start-1].strip():start-=1
+    while start and t.screen.display[start-1].strip() not in ('Doug','You'):start-=1
     assert start>0 and t.screen.display[start-1].strip() in ('Doug','You'),t.text
     return start,end
 
