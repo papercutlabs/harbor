@@ -88,7 +88,7 @@ if __name__ == '__main__':
     commands = Path(os.environ.get('TMPDIR', '/tmp')) / f'harbor-popup-{os.getpid()}'
     commands.write_text('\n'.join('\t'.join([label, 'Existing Desk view', sys.executable, '-c', 'pass'])
                                   for label in ['Everything', 'Quota']) + '\n')
-    options = [('Desk · Everything', 'e · Existing Desk view'), ('Desk · Quota', 'q · Existing Desk view'),
+    options = [('Desk · Everything', 'Ctrl+X · e · Existing Desk view'), ('Desk · Quota', 'Ctrl+B · q · Existing Desk view'),
                ('Search or pinned messages', ''), ('Chats', 'Ctrl+K'),
                ('Jump to latest messages', 'Ctrl+G')]
     try:
