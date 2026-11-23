@@ -48,7 +48,7 @@ while True:
         pid=t.pid;t.picker('Marina');t.send('draft / e q');t.send(b'\x1b[D');before=state()
         raw_at=len(t.raw)
         for n,label in enumerate(['Everything','Quota','Everything'],1):
-            t.send(b'\x0f');t.expect('Desk · '+label);t.send('e' if label=='Everything' else 'q');t.expect('VISIT '+str(n));assert 'draft / e q' not in t.text
+            t.send(b'\x18' if label=='Everything' else b'\x02');t.expect('VISIT '+str(n));assert 'draft / e q' not in t.text
             t.resize(60+n,25+n);t.send(b'only-desk\x1b');t.expect('Back from Desk');t.resize(72,38)
             assert state()==before
         records=calls.read_text().splitlines();hosts={row.split()[0] for row in records if not row.startswith('KEYS')}
@@ -70,7 +70,7 @@ while True:
         enter('Focus status');t.expect('VISIT 1');t.send(b'\x1b');t.expect('Back from Desk');assert state()==reading
         assert t.pid==pid
         t.send(b'\x1b');t.send('!');t.expect('!')
-        print('PASS warm child reused; alternate screen, draft/cursor/reading, resize, Ctrl+C, late reply and exact child death')
+        print('PASS direct Ctrl+X/B warm child reused; alternate screen, draft/cursor/reading, resize, Ctrl+C, late reply and exact child death')
     finally:t.close()
 
     # An explicit signal to Harbor while the child owns input unwinds through ordinary cleanup.
