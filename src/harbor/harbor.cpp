@@ -2770,6 +2770,7 @@ Harbor::Help()
   m_Menu = "help"; m_Filter.clear(); m_Option = 0; m_MenuOffset = 0;
   m_Options = {
     { "Compose", "Enter sends · Shift+Enter / Ctrl+J newline", [this] { CloseMenu(); } },
+    { "Clear chat draft", "Ctrl+C", [this] { CloseMenu(); } },
     { "Commands", "Ctrl+O / Ctrl+/ · / is literal text", [this] { CloseMenu(); } },
     { "Chats / latest messages", "Ctrl+K / Ctrl+G", [this] { CloseMenu(); } },
     { "Browse messages", "Esc · arrows · Enter for actions", [this] { CloseMenu(); } },
@@ -4561,6 +4562,14 @@ Harbor::KeyPress(wint_t k)
   auto* c = Current();
   if (!c)
     return;
+  if (k == 3 && !m_Browse && !c->draft.empty())
+  {
+    c->draft.clear();
+    c->cursor = 0;
+    c->cursorAtRowEnd = false;
+    m_ComposerFollowCursor = true;
+    return;
+  }
   if (k == 27)
   {
     if (!c->editing.empty())

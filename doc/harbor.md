@@ -18,6 +18,7 @@ Harbor is the native Telegram TUI in this nchat fork. It shares nchat's Telegram
 | Send | Enter |
 | Newline | Shift+Enter; Ctrl+J fallback |
 | Delete previous word | Option+Backspace; Ctrl+W fallback |
+| Clear the focused chat draft | Ctrl+C |
 | Browse messages | Esc; Up/Down select |
 | Visit a reply’s original | Click its quoted reply row; Commands → Return to previous position goes back with the draft kept |
 | Selected message actions | Right-click a message; or Esc, arrows, Enter |
