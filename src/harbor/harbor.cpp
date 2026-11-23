@@ -512,7 +512,8 @@ Harbor::Init()
   printf("\033[?1003l\033[?1002h\033[?1004h\033[?2004h\033[>1u");
   fflush(stdout);
   m_Ready = true;
-  RegisterRestart();
+  // The separately configured Duet trial has its own update and state directory.
+  if (!getenv("DUET_HARBOR_CATALOGUE")) RegisterRestart();
   if (const char* surface = getenv("CMUX_SURFACE_ID"))
     if (!m_UiControl.Start(FileUtil::GetApplicationDir(), surface))
       Notify("This window cannot receive addressed Desk commands. Return to Desk for details.");
@@ -1064,6 +1065,58 @@ Harbor::ProcessEvents()
   }
   for (auto& e : events)
     Event(e);
+  if (m_ConversationCatalogueDirty)
+  {
+    m_ConversationCatalogueDirty = false;
+    PublishConversationCatalogue();
+  }
+}
+void
+Harbor::PublishConversationCatalogue()
+{
+  const char* configured = getenv("DUET_HARBOR_CATALOGUE");
+  if (!configured || configured[0] != '/' || m_CatalogueReadyProfiles.empty()) return;
+  const std::string path(configured);
+  const auto parent = FileUtil::DirName(path);
+  struct stat directory{};
+  if (lstat(parent.c_str(), &directory) || !S_ISDIR(directory.st_mode) || directory.st_uid != geteuid() || (directory.st_mode & 077)) return;
+  const auto supported = [](const std::string& profile) {
+    return profile.rfind("Telegram_", 0) == 0 || profile.rfind("HarborDemo_", 0) == 0;
+  };
+  for (const auto& profile : m_Protocols)
+    if (supported(profile.first) && !m_CatalogueReadyProfiles.count(profile.first)) return;
+
+  std::string body = "pcl.harbor.conversations.v1\n";
+  for (const auto& entry : m_Chats)
+  {
+    const auto& c = entry.second;
+    if (!supported(c.profile) || c.name.empty() || c.name == c.id || c.name.size() > 2048) continue;
+    const auto chat = TelegramForum::ChatNumber(c.id);
+    const auto topic = TelegramForum::TopicNumber(c.id);
+    if (!chat || c.id != (topic ? TelegramForum::ConversationId(chat, topic) : StrUtil::NumToHex(chat))) continue;
+    const auto base = StrUtil::NumToHex(chat);
+    auto room = topic ? Name(c.profile, base) : std::string();
+    if (room == base || room.size() > 2048) room.clear();
+    body += StrUtil::StrToHex(HarborRoute::DuetProfile(c.profile)) + '\t' + std::to_string(chat) + '\t' + std::to_string(topic) + '\t' +
+      std::to_string(c.actualLast) + '\t' + StrUtil::StrToHex(c.name) + '\t' + StrUtil::StrToHex(room) + '\n';
+    if (body.size() > 8 * 1024 * 1024) return;
+  }
+  if (body == m_LastConversationCatalogue) return;
+  std::string temporary = path + ".XXXXXX";
+  const int fd = mkstemp(&temporary[0]);
+  if (fd < 0) return;
+  size_t offset = 0;
+  while (offset < body.size())
+  {
+    const auto n = write(fd, body.data() + offset, body.size() - offset);
+    if (n < 0 && errno == EINTR) continue;
+    if (n <= 0) break;
+    offset += size_t(n);
+  }
+  const bool closed = close(fd) == 0;
+  if (closed && offset == body.size() && rename(temporary.c_str(), path.c_str()) == 0)
+    m_LastConversationCatalogue = std::move(body);
+  else unlink(temporary.c_str());
 }
 void
 Harbor::SortChats()
@@ -1125,6 +1178,7 @@ Harbor::Merge(Conversation& c, const std::vector<ChatMessage>& messages, bool ou
     c.last = std::max(c.last, m.timeSent);
     if (m.timeSent >= c.actualLast)
     {
+      if (m.timeSent > c.actualLast && getenv("DUET_HARBOR_CATALOGUE")) m_ConversationCatalogueDirty = true;
       c.actualLast = m.timeSent;
       const bool attachment = m.text.empty() && !m.fileInfo.empty();
       RichText::Message decoded;
@@ -1183,6 +1237,7 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
       for (auto& c : m_Chats)
         c.second.name = Name(c.second.profile, c.second.id);
       SortChats();
+      if (getenv("DUET_HARBOR_CATALOGUE")) m_ConversationCatalogueDirty = true;
       break;
     }
     case NewChatsNotifyType:
@@ -1211,6 +1266,11 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
           Fetch(c);
       }
       SortChats();
+      if (n->success && getenv("DUET_HARBOR_CATALOGUE"))
+      {
+        m_CatalogueReadyProfiles.insert(p);
+        m_ConversationCatalogueDirty = true;
+      }
       if (!m_InitialChat.empty())
       {
         if (m_InitialRouteUntil && m_Chats.count(m_InitialChat))

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdint>
 #include "forumid.h"
+#include "trace.h"
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -39,6 +40,10 @@ inline void Validate(Target& target)
     target.conversation = TelegramForum::ConversationId(chat, int32_t(topic));
   }
 }
+inline std::string DuetProfile(const std::string& profile)
+{
+  return "duet-" + HarborTrace::Token(profile);
+}
 inline std::string SelectProfile(const Target& target, const std::vector<std::string>& profiles, bool demo)
 {
   std::vector<std::string> eligible;
@@ -46,6 +51,16 @@ inline std::string SelectProfile(const Target& target, const std::vector<std::st
     if (profile.rfind("Telegram_", 0) == 0 || (demo && profile.rfind("HarborDemo_", 0) == 0)) eligible.push_back(profile);
   if (!target.profile.empty())
   {
+    if (getenv("DUET_HARBOR_CATALOGUE") && target.profile.rfind("duet-", 0) == 0)
+    {
+      std::vector<std::string> matches;
+      std::copy_if(eligible.begin(), eligible.end(), std::back_inserter(matches), [&](const std::string& profile) {
+        return DuetProfile(profile) == target.profile;
+      });
+      if (matches.size() != 1)
+        throw std::invalid_argument("Requested Telegram profile is unavailable. No other conversation was opened.");
+      return matches.front();
+    }
     if (std::find(eligible.begin(), eligible.end(), target.profile) == eligible.end())
       throw std::invalid_argument("Requested Telegram profile is unavailable. No other conversation was opened.");
     return target.profile;

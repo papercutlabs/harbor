@@ -110,6 +110,12 @@ HarborDemo::Seed()
     add(parent, "leo", "Parent group history.", 10);
     add(topic(421), "leo", "Topic-specific history for the Desk conversation.", 100);
     add(topic(550), "asha", "A different topic with separate history.", 90);
+    if (getenv("DUET_HARBOR_CATALOGUE"))
+    {
+      add(topic(1), "leo", "General workspace conversation for the offline trial.", 95);
+      add(topic(2), "leo", "Lead A conversation for the offline trial.", 97);
+      add(topic(3), "asha", "Lead B conversation for the offline trial.", 98);
+    }
   }
   // Load a substantial offline conversation without synthesizing terminal sends.
   // Input-latency checks use the normal history response and native renderer.
@@ -507,6 +513,15 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
           topic.name = pair.second;
           n->contactInfos.push_back(topic);
         }
+        if (routed && getenv("DUET_HARBOR_CATALOGUE"))
+          for (const auto& item : std::vector<std::pair<int32_t, std::string>>{
+                 { 1, "General" }, { 2, "Lead A" }, { 3, "Lead B" } })
+          {
+            ContactInfo topic;
+            topic.id = TelegramForum::ConversationId(DemoRouteChat(), item.first);
+            topic.name = "Routed group > " + item.second;
+            n->contactInfos.push_back(topic);
+          }
       }
       Emit(n);
       break;

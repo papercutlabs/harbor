@@ -212,6 +212,10 @@ private:
   void ProcessEvents();
   void Event(std::shared_ptr<ServiceMessage>);
   void SortChats();
+  void PublishConversationCatalogue();
+  std::set<std::string> m_CatalogueReadyProfiles;
+  std::string m_LastConversationCatalogue;
+  bool m_ConversationCatalogueDirty = false;
   void Merge(Conversation&, const std::vector<ChatMessage>&, bool outOfSequence = false);
   void OpenChat(const std::string&);
   void Fetch(Conversation&, bool older = false, bool automatic = false);
