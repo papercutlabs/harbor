@@ -244,6 +244,9 @@ CompatibleVersions(const std::string& p_Client, const std::string& p_Backend)
   // (8b853b57) differs from 0.1.29 only in these upgrade exceptions, and 0.1.31
   // keeps that wire contract. Released 0.1.31 (28201205) matches pre-allowlist
   // 0.1.32 (fe839a94), including the accepted reply-display and cursor changes.
+  // Released 0.1.32 (ed2e14e7) has byte-identical session/wire/protocol sources
+  // before the 0.1.33 allowlist: this release changes only window-side navigation.
+  // Its wire contract also remains the verified 0.1.31 contract above.
   // No general semver range.
   return p_Client == p_Backend ||
          (p_Client == "0.1.23" && p_Backend == "0.1.22") ||
@@ -255,7 +258,8 @@ CompatibleVersions(const std::string& p_Client, const std::string& p_Backend)
          (p_Client == "0.1.29" && p_Backend == "0.1.28") ||
          (p_Client == "0.1.30" && p_Backend == "0.1.29") ||
          (p_Client == "0.1.31" && (p_Backend == "0.1.29" || p_Backend == "0.1.30")) ||
-         (p_Client == "0.1.32" && p_Backend == "0.1.31");
+         (p_Client == "0.1.32" && p_Backend == "0.1.31") ||
+         (p_Client == "0.1.33" && (p_Backend == "0.1.31" || p_Backend == "0.1.32"));
 }
 
 // Window side ---------------------------------------------------------------------------------
