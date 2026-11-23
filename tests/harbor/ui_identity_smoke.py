@@ -44,10 +44,21 @@ with tempfile.TemporaryDirectory(prefix='hi-',dir='/tmp') as directory:
     requests=home/'demo-requests.log';receipts=home/'target-native-events.log'
     foreign_recorders=(home/'backend-ui-native-events.log',home/'other-ui-native-events.log')
     env.update(HARBOR_DEMO_REQUEST_LOG=str(requests),HARBOR_TEST_EVENT_LOG='')
+    empty_state=home/'failed-probe-state'
+    for flag in ('--inspect-ui','--inspect-window'):
+        for args,error in (
+            (['-d',str(config),'--target-surface','IDENTITY-MISSING','--target-pid',str(os.getpid()),flag], 'unavailable'),
+            (['-d',flag,'--version'], 'Pass the inspection flag'),
+        ):
+            failed=subprocess.run([exe,*args],cwd=directory,capture_output=True,text=True,
+                env=dict(os.environ,**env)|{'XDG_STATE_HOME':str(empty_state)},timeout=5)
+            assert not empty_state.exists(),f'{flag} wrote the watched journal on failure'
+            assert failed.returncode==1 and error in failed.stderr,(args,failed.stdout,failed.stderr)
+            assert not config.exists() and not (Path(directory)/flag).exists(),'inspection created a profile'
     windows=[]
     def control(window,surface,*flags):
         child=subprocess.Popen([exe,'-d',str(config),'--target-surface',surface,'--target-pid',str(window.pid),*flags],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=dict(os.environ,**env))
-        if '--inspect-window' in flags:inspection_pids.append(child.pid)
+        if any(flag in ('--inspect-window','--inspect-ui') for flag in flags):inspection_pids.append(child.pid)
         until=time.monotonic()+10
         while child.poll() is None and time.monotonic()<until:
             for view in windows:view.pump(.01)
