@@ -247,6 +247,8 @@ CompatibleVersions(const std::string& p_Client, const std::string& p_Backend)
   // Released 0.1.32 (ed2e14e7) has byte-identical session/wire/protocol sources
   // before the 0.1.33 allowlist: this release changes only window-side navigation.
   // Its wire contract also remains the verified 0.1.31 contract above.
+  // 0.1.34 keeps the 0.1.33 (664486a9) wire contract. Window inspection
+  // changes only whether the short-lived command starts operational logging.
   // No general semver range.
   return p_Client == p_Backend ||
          (p_Client == "0.1.23" && p_Backend == "0.1.22") ||
@@ -259,7 +261,8 @@ CompatibleVersions(const std::string& p_Client, const std::string& p_Backend)
          (p_Client == "0.1.30" && p_Backend == "0.1.29") ||
          (p_Client == "0.1.31" && (p_Backend == "0.1.29" || p_Backend == "0.1.30")) ||
          (p_Client == "0.1.32" && p_Backend == "0.1.31") ||
-         (p_Client == "0.1.33" && (p_Backend == "0.1.31" || p_Backend == "0.1.32"));
+         (p_Client == "0.1.33" && (p_Backend == "0.1.31" || p_Backend == "0.1.32")) ||
+         (p_Client == "0.1.34" && (p_Backend == "0.1.31" || p_Backend == "0.1.32" || p_Backend == "0.1.33"));
 }
 
 // Window side ---------------------------------------------------------------------------------

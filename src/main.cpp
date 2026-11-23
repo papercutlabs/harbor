@@ -60,6 +60,10 @@
 #include "harbor/uicontrol.h"
 static bool harborDemo = false;
 static int RunHarborWindow(const std::vector<std::string>& p_Args, const HarborRoute::Target& p_Target);
+static bool IsUiInspection(const std::string& arg)
+{
+  return arg == "--inspect-ui" || arg == "--inspect-window";
+}
 #endif
 
 static std::string GetFeatures();
@@ -225,8 +229,11 @@ static int ApplicationMain(int argc, char* argv[])
       FileUtil::SetApplicationDir(*it);
     }
 #ifdef HARBOR_BUILD
-    else if (*it == "--inspect-ui") { if (!uiAction.empty()) { std::cerr << "Choose one UI control operation.\n"; return 1; } uiAction = "inspect"; }
-    else if (*it == "--inspect-window") { if (!uiAction.empty()) { std::cerr << "Choose one UI control operation.\n"; return 1; } uiAction = "inspect-window"; }
+    else if (IsUiInspection(*it))
+    {
+      if (!uiAction.empty()) { std::cerr << "Choose one UI control operation.\n"; return 1; }
+      uiAction = *it == "--inspect-ui" ? "inspect" : "inspect-window";
+    }
     else if (*it == "--park-ui")
     {
       if (std::distance(it + 1, args.end()) <= 0) { std::cerr << "--park-ui requires the inspected token.\n"; return 1; }
@@ -310,6 +317,12 @@ static int ApplicationMain(int argc, char* argv[])
     }
   }
 
+#ifdef HARBOR_BUILD
+  // A reserved inspection flag may not become a path or token and leave a
+  // mutating invocation running without its operational trace.
+  if (uiAction != "inspect" && uiAction != "inspect-window" && std::any_of(args.begin(), args.end(), IsUiInspection))
+  { std::cerr << "Pass the inspection flag as a UI control operation.\n"; return 1; }
+#endif
   if (isExtraDeveloperMode
 #ifdef HARBOR_BUILD
       && !checkSession
@@ -1165,8 +1178,8 @@ int main(int argc, char* argv[])
     if (argc != 2) { std::cerr << "Focus guard takes no arguments; invoke harbor --focus-guard and send the framed request on stdin.\n"; return 2; }
     return HarborPreviewGuard::Run();
   }
-  // A check must not create even the operational-log directories before parsing its args.
-  const bool checking = std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string(arg) == "--check-session" || std::string(arg) == "--inspect-window"; });
+  // Read-only helpers must never wake a Desk reporter watching this journal.
+  const bool checking = sessionProbe || std::any_of(argv + 1, argv + argc, IsUiInspection);
   if (!checking)
   {
     HarborTrace::Start(FileUtil::GetSelfPath(), HarborUpdate::Version(), SysUtil::GetBuildInfo(), SysUtil::GetBuildGitSha());
