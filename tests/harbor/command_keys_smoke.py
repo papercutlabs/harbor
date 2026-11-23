@@ -50,7 +50,7 @@ with tempfile.TemporaryDirectory(prefix='harbor-command-keys-') as directory:
             assert '│ Commands' not in t.text
         assert state(t) == before
         t.send(b'\x1b[111;9u'); t.expect('│ Commands')
-        t.expect('e · Existing Desk view'); t.expect('q · Existing Desk view')
+        t.expect('Ctrl+X · e · Existing Desk view'); t.expect('Ctrl+B · q · Existing Desk view')
         t.send(b'\x1b'); t.expect('literal e q')
         assert state(t) == before
         for opener, key, label in [(b'\x0f', b'e', 'Everything'), (b'\x0f', b'q', 'Quota'),
@@ -60,6 +60,19 @@ with tempfile.TemporaryDirectory(prefix='harbor-command-keys-') as directory:
             assert recorded() == old + [[label, literal]], recorded()
             t.send(b'\r'); t.expect('Back from Desk'); t.expect('literal e q')
             assert t.pid == pid and state(t) == before
+        # Direct destinations go through the actual decoder and exact existing argv handoff.
+        for wire, label in [(b'\x18', 'Everything'), (b'\x1b[120;5u', 'Everything'),
+                            (b'\x02', 'Quota'), (b'\x1b[98;5u', 'Quota')]:
+            old = recorded()
+            t.send(wire); t.expect('COMMAND CHILD')
+            assert recorded() == old + [[label, literal]], recorded()
+            t.send(b'\r'); t.expect('Back from Desk')
+            assert state(t) == before and t.pid == pid
+        # Ctrl+K still opens the same picker and restores this conversation's exact draft/caret.
+        t.send(b'\x0b'); t.expect('Find a conversation'); t.send('Marina'); t.send(b'\r')
+        assert state(t) == before
+        t.send('!'); t.expect('literal e q!'); t.send(b'\x7f')
+        assert state(t) == before
         # Reading selection also survives the same shortcut handoff.
         t.send(b'\x1b'); t.send(b'\x1b[A')
         reading = state(t)

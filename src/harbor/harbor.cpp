@@ -2841,7 +2841,7 @@ Harbor::DeskOptions(bool help)
     if (fields[0] == "Desk controls" || fields[0] == "Desk") continue;
     if ((fields[0] == "Desk keys…") != help) continue;
     std::vector<std::string> argv(fields.begin() + 2, fields.end());
-    const std::string shortcut = fields[0] == "Everything" ? "e · " : fields[0] == "Quota" ? "q · " : fields[0] == "Focus" ? "f · " : "";
+    const std::string shortcut = fields[0] == "Everything" ? "Ctrl+X · e · " : fields[0] == "Quota" ? "Ctrl+B · q · " : fields[0] == "Focus" ? "f · " : "";
     options.push_back({ "Desk · " + fields[0], shortcut + fields[1], [this, argv, label = fields[0]]
                         {
                           CloseMenu();
@@ -4444,6 +4444,19 @@ Harbor::KeyPress(wint_t k)
   if (k == 17)
   {
     m_Running = false;
+    return;
+  }
+  // Direct Desk views reuse the same handoff as Commands. ChatPicker/Ctrl+K remains independent.
+  if ((k == 24 || k == 2) && m_Menu.empty())
+  {
+    const std::string label = k == 24 ? "Desk · Everything" : "Desk · Quota";
+    for (const auto& option : DeskOptions())
+      if (option.label == label)
+      {
+        option.run();
+        return;
+      }
+    Notify(k == 24 ? "Everything is unavailable. Start Office Desk to enable it." : "Quota is unavailable. Start Office Desk to enable it.");
     return;
   }
   // Ctrl+/ and Ctrl+O open Commands from any draft without changing it; plain / is always literal.
