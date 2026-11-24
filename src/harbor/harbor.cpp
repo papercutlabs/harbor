@@ -339,6 +339,13 @@ Size(const std::string& p)
 }
 
 bool
+DuetDraftAttachments()
+{
+  const char* value = getenv("DUET_HARBOR_DRAFT_ATTACHMENTS");
+  return value && std::strcmp(value, "1") == 0;
+}
+
+bool
 StrikeDim()
 {
   static const bool dim = [] {
@@ -583,9 +590,10 @@ Harbor::UiSnapshot() const
     const auto& c = at->second;
     state << S(c.draft) << c.cursor << c.reply << c.editing << S(c.draftBeforeEdit)
           << c.selected << c.scroll << c.follow << c.visit;
+    for (const auto& attachment : c.draftAttachments) state << '\n' << attachment;
   }
   for (const auto& attachment : m_Attachments) state << attachment;
-  for (const auto& picture : m_PreviewOpens) state << picture;
+  for (const auto& picture : m_PreviewOpens) state << picture.first << picture.second;
   return std::to_string(std::hash<std::string>{}(state.str()));
 }
 void
@@ -632,7 +640,9 @@ Harbor::PollUiControl()
       const char* surface = getenv("CMUX_SURFACE_ID");
       const auto text = "pcl.harbor.ui.v2\t" + std::to_string(getpid()) + "\t" + HarborUiControl::Surface(surface ? surface : "") + "\t" +
         (at == m_Chats.end() ? "" : at->second.profile) + "\t" + (at == m_Chats.end() ? "" : at->second.id) + "\t" + UiSnapshot() + "\t" +
-        (at != m_Chats.end() && (!at->second.draft.empty() || !at->second.reply.empty() || !at->second.editing.empty()) ? "1" : "0") + "\t" + (ready ? "1" : "0") + "\t" + std::to_string(m_PreviewActive ? m_PreviewSequence : 0) + "\n";
+        (at != m_Chats.end() && (!at->second.draft.empty() || !at->second.draftAttachments.empty() ||
+                                !at->second.reply.empty() || !at->second.editing.empty()) ? "1" : "0") +
+        "\t" + (ready ? "1" : "0") + "\t" + std::to_string(m_PreviewActive ? m_PreviewSequence : 0) + "\n";
       (void)!send(reply, text.data(), text.size(), MSG_NOSIGNAL); close(reply); return;
     }
     if (!m_PinnedChat.empty())
@@ -816,7 +826,7 @@ Harbor::TryDeskUpdate()
   state.stable = !StableStatePath().empty() && m_StableStateUsable;
   state.draftsEmpty = true;
   const auto empty = [](const Conversation& chat) {
-    return chat.draft.empty() && chat.reply.empty() && chat.editing.empty() && chat.draftBeforeEdit.empty() &&
+    return chat.draft.empty() && chat.draftAttachments.empty() && chat.reply.empty() && chat.editing.empty() && chat.draftBeforeEdit.empty() &&
       chat.replyBeforeEdit.empty() && chat.recovery.empty();
   };
   for (const auto& chat : m_Chats) state.draftsEmpty &= empty(chat.second);
@@ -1835,9 +1845,12 @@ Harbor::Draw()
   auto& draftLines = draftLayout.lines;
   m_ComposerRows = std::min(std::max(2, std::min(5, m_H / 4)), std::max(2, int(draftLines.size())));
   m_ComposerY = m_H - 4 - m_ComposerRows;
-  m_Bottom = m_ComposerY - 1;
-  if (c && (!c->reply.empty() || !c->editing.empty()))
-    --m_Bottom;
+  const int chatY = stripHeight + ((stripHeight || m_CommandHint == 8) ? 1 : 0);
+  m_Top = 3 + chatY;
+  const int attachmentBottom = m_ComposerY - (c && (!c->reply.empty() || !c->editing.empty()) ? 1 : 0);
+  const bool staged = c && !c->draftAttachments.empty() && c->editing.empty();
+  const int attachmentRows = staged ? std::clamp(attachmentBottom - m_Top - 3, 0, 4) : 0;
+  m_Bottom = attachmentBottom - attachmentRows - 1;
   // Approved indicator A: one count-only bar in the spacer row directly above the composer (and any
   // reply context), so neither the draft nor the reading position moves when it appears.
   bool newBar = c && !c->follow && c->unseen > 0;
@@ -1846,8 +1859,6 @@ Harbor::Draw()
   // the latest message from the bubble, without moving messages when activity starts or stops.
   const int typingY = m_Bottom - 1;
   --m_Bottom;
-  const int chatY = stripHeight + ((stripHeight || m_CommandHint == 8) ? 1 : 0);
-  m_Top = 3 + chatY;
   bkgd(COLOR_PAIR(Base));
   erase();
   m_Hits.clear();
@@ -2135,6 +2146,9 @@ Harbor::Draw()
            Accent);
     for (int row = 0; row < m_ComposerRows + 2; ++row)
       Fill(m_ComposerY + row, m_MainX + 2, m_MainW - 4, Surface);
+    if (staged && m_Menu.empty())
+      DrawDraftAttachments(*c, attachmentRows ? attachmentBottom - attachmentRows : m_ComposerY,
+                           std::max(1, attachmentRows));
     auto point = CursorPoint(draftLayout, std::min(c->cursor, c->draft.size()), c->cursorAtRowEnd);
     m_ComposerFirstLine = std::max(0, std::min(m_ComposerFirstLine, int(draftLines.size()) - m_ComposerRows));
     if (m_ComposerFollowCursor)
@@ -2474,7 +2488,7 @@ Harbor::Send()
 {
   HarborTrace::Event("ui.send.attempt");
   auto* c = Current();
-  if (!c || c->draft.empty())
+  if (!c || (c->draft.empty() && (!c->editing.empty() || c->draftAttachments.empty())))
   {
     HarborTrace::Event("ui.send.result", {{"outcome", "no-action"}});
     return;
@@ -2487,7 +2501,17 @@ Harbor::Send()
   auto paths = HarborPaths(c->draft);
   if (!paths.empty())
   {
-    AttachPreview(paths);
+    if (AttachPreview(paths) && DuetDraftAttachments())
+    {
+      c->draft.clear();
+      c->cursor = 0;
+      c->cursorAtRowEnd = false;
+    }
+    return;
+  }
+  if (c->editing.empty() && !c->draftAttachments.empty())
+  {
+    SendAttachments(c->draftAttachments);
     return;
   }
   ChatMessage m;
@@ -3973,32 +3997,45 @@ Harbor::RebuildFiles()
   }
   m_Option = std::max(0, std::min(m_Option, int(m_Options.size()) - 1));
 }
-void
+bool
 Harbor::AttachPreview(std::vector<std::string> files)
 {
   HarborTrace::Event("ui.attachments.preview");
-  if (auto* c = Current())
-    if (!c->editing.empty())
-    {
-      CloseMenu();
-      Notify("Finish or cancel editing before attaching a new file");
-      return;
-    }
+  auto* c = Current();
+  if (c && !c->editing.empty())
+  {
+    CloseMenu();
+    Notify("Finish or cancel editing before attaching a new file");
+    return false;
+  }
   m_Attachments.clear();
   for (auto& file : files)
-    if (File(file))
+    if (File(file) && file.find('\0') == std::string::npos)
       m_Attachments.push_back(file);
   if (m_Attachments.empty())
   {
     Notify("No readable attachments found");
-    return;
+    return false;
+  }
+  if (c && DuetDraftAttachments())
+  {
+    for (auto& file : m_Attachments)
+    {
+      if (file.front() != '/') file.insert(0, "./");
+      if (std::find(c->draftAttachments.begin(), c->draftAttachments.end(), file) == c->draftAttachments.end())
+        c->draftAttachments.push_back(std::move(file));
+    }
+    m_Attachments.clear();
+    m_Browse = false;
+    CloseMenu();
+    return true;
   }
   m_Menu = "attachments";
   m_Option = 0;
   m_MenuOffset = 0;
   m_Options = { { "Send " + std::to_string(m_Attachments.size()) + " attachment(s)",
                   "Enter to confirm",
-                  [this] { SendAttachments(); } },
+                  [this] { SendAttachments(m_Attachments); } },
                 { "Cancel",
                   "Nothing will be sent",
                   [this]
@@ -4008,22 +4045,24 @@ Harbor::AttachPreview(std::vector<std::string> files)
                   } } };
   m_Filter.clear();
   m_Dirty = true;
+  return true;
 }
 void
-Harbor::SendAttachments()
+Harbor::SendAttachments(const std::vector<std::string>& attachments)
 {
   HarborTrace::Event("ui.attachments.send");
   auto* c = Current();
   if (!c)
     return;
-  bool first = true;
-  for (const auto& file : m_Attachments)
-  {
+  for (const auto& file : attachments)
     if (!File(file))
     {
-      Notify("A file disappeared; canceled");
+      Notify("An attachment is unavailable");
       return;
     }
+  bool first = true;
+  for (const auto& file : attachments)
+  {
     FileInfo f;
     f.filePath = file;
     f.fileType = FileUtil::GetMimeType(file);
@@ -4035,7 +4074,7 @@ Harbor::SendAttachments()
     r->chatMessage.fileInfo = ProtocolUtil::FileInfoToHex(f);
     if (first)
     {
-      if (HarborPaths(c->draft) != m_Attachments)
+      if (HarborPaths(c->draft) != attachments)
         r->chatMessage.text = S(c->draft);
       r->chatMessage.quotedId = c->reply;
       first = false;
@@ -4046,9 +4085,78 @@ Harbor::SendAttachments()
   c->cursor = 0;
   c->reply.clear();
   c->follow = true;
+  c->draftAttachments.clear();
+  c->draftAttachmentOffset = 0;
   m_Attachments.clear();
   CloseMenu();
   Notify("Sending attachments…");
+}
+void
+Harbor::DrawDraftAttachments(Conversation& c, int top, int rows)
+{
+  const int width = std::min(16, m_MainW - 8);
+  const size_t visible = std::max(1, (m_MainW - 8) / (width + 1));
+  const size_t count = c.draftAttachments.size();
+  c.draftAttachmentOffset = std::min(c.draftAttachmentOffset, count - std::min(count, visible));
+  const size_t end = std::min(count, c.draftAttachmentOffset + visible);
+  const int label = top + rows - 1;
+  int x = m_MainX + 4;
+  if (c.draftAttachmentOffset > 0)
+  {
+    Text(label, x - 2, 1, L"‹", Accent);
+    m_Hits.push_back({ label, x - 2, 2, "draft-file-previous", "" });
+  }
+  for (size_t i = c.draftAttachmentOffset; i < end; ++i, x += width + 1)
+  {
+    const auto& path = c.draftAttachments[i];
+    const auto type = Type(path);
+    for (int y = top; y < label; ++y)
+      Fill(y, x, width, Surface);
+    if (rows > 1)
+    {
+      const bool video = type.find("video/") == 0;
+      if (video || type.find("image/") == 0)
+        m_Media->RequestImage(path, width, rows - 1, video);
+      const auto* image = m_Media->Image(path, width, rows - 1);
+      if (image && !image->failed)
+        m_Media->DrawImage(*image, top, x, width, rows - 1);
+      else
+        Text(top, x + 1, width - 2, video ? L"▷" : L"▧", Muted);
+    }
+    Fill(label, x, width, Surface);
+    auto name = Safe(W(FileUtil::BaseName(path)));
+    std::replace_if(name.begin(), name.end(), [](wchar_t ch) { return ch == '\n' || ch == '\t'; }, L' ');
+    Text(label, x, width - 2, Ellipsis(name, width - 2), Surface);
+    Text(label, x + width - 1, 1, L"×", Muted);
+    for (int y = top; y <= label; ++y)
+      m_Hits.push_back({ y, x, width - (y == label ? 1 : 0), "draft-file-open", path });
+    m_Hits.push_back({ label, x + width - 1, 1, "draft-file-remove", path });
+  }
+  if (end < count)
+  {
+    const int next = m_MainX + m_MainW - 3;
+    Text(label, next, 1, L"›", Accent);
+    m_Hits.push_back({ label, next - 1, 2, "draft-file-next", "" });
+  }
+}
+void
+Harbor::ActivateDraftAttachment(Conversation& c, const Hit& hit)
+{
+  if (hit.type == "draft-file-previous")
+    --c.draftAttachmentOffset;
+  else if (hit.type == "draft-file-next")
+    ++c.draftAttachmentOffset;
+  else if (hit.type == "draft-file-remove")
+    c.draftAttachments.erase(std::remove(c.draftAttachments.begin(), c.draftAttachments.end(), hit.value),
+                             c.draftAttachments.end());
+  else if (!File(hit.value))
+    Notify("Attachment is unavailable");
+  else
+  {
+    auto type = FileUtil::GetMimeType(hit.value);
+    if (type.empty()) type = Type(hit.value);
+    OpenPicture(hit.value, type != "application/pdf" && type.find("image/") != 0);
+  }
 }
 void
 Harbor::OpenLink(const std::string& url)
@@ -4269,11 +4377,11 @@ Harbor::OpenAttachment(const std::string& p, const std::string& chatId, const st
   m_Dirty = true;
 }
 void
-Harbor::OpenPicture(const std::string& path)
+Harbor::OpenPicture(const std::string& path, bool quickLook)
 {
-  m_PreviewOpens.push_back(path);
+  m_PreviewOpens.emplace_back(path, quickLook);
   TryOpenPictures();
-  if (!m_PreviewOpens.empty()) Notify("Opening picture…");
+  if (!m_PreviewOpens.empty()) Notify(quickLook ? "Opening Quick Look…" : "Opening picture…");
 }
 void
 Harbor::TryOpenPictures()
@@ -4281,9 +4389,9 @@ Harbor::TryOpenPictures()
   if (m_PreviewOpens.empty()) return;
   HarborPreviewGuard::Lease guard(false);
   if (guard.busy) return; // queue only this open; input and inspection keep running
-  const auto path = m_PreviewOpens.front(); m_PreviewOpens.pop_front();
+  const auto [path, quickLook] = m_PreviewOpens.front(); m_PreviewOpens.pop_front();
   if (guard.fd < 0) { Notify(guard.error); return; }
-  if (m_Media->Open(path, true))
+  if (m_Media->Open(path, quickLook ? HarborMedia::Viewer::QuickLook : HarborMedia::Viewer::Preview))
   {
     // A successful open is a new event even after exec preserves PID and surface.
     // Microseconds from the boot clock remain exact in the Office numeric decoder.
@@ -4473,6 +4581,7 @@ void
 Harbor::KeyPress(wint_t k)
 {
   m_Dirty = true;
+  m_DraftAttachmentPress.reset();
   if (k != KEY_MOUSE && (m_HasSelection || m_MouseDown))
   {
     m_MouseDown = m_MouseDragging = m_HasSelection = false;
@@ -4928,6 +5037,33 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown, int wheelTicks)
   m_Dirty = true;
 
   auto* c = Current();
+  if ((m_DraftAttachmentPress || (c && !c->draftAttachments.empty())) &&
+      (e.bstate & (BUTTON1_PRESSED | BUTTON1_RELEASED)))
+  {
+    const auto hit = std::find_if(m_Hits.begin(), m_Hits.end(), [&](const Hit& candidate)
+    {
+      return candidate.type.rfind("draft-file-", 0) == 0 && e.y == candidate.y &&
+             e.x >= candidate.x && e.x < candidate.x + candidate.w;
+    });
+    if (e.bstate & BUTTON1_PRESSED)
+    {
+      m_DraftAttachmentPress.reset();
+      if (c && m_Menu.empty() && hit != m_Hits.end())
+      {
+        m_DraftAttachmentPress.emplace(m_Current, *hit);
+        return;
+      }
+    }
+    else if (m_DraftAttachmentPress)
+    {
+      const auto pressed = std::move(*m_DraftAttachmentPress);
+      m_DraftAttachmentPress.reset();
+      if (c && m_Menu.empty() && pressed.first == m_Current && hit != m_Hits.end() &&
+          hit->type == pressed.second.type && hit->value == pressed.second.value)
+        ActivateDraftAttachment(*c, *hit);
+      return;
+    }
+  }
   auto placeCursor = [&](const TextLayout& layout, int row, int col)
   {
     const size_t start = layout.rowStarts[row], end = layout.rowEnds[row];

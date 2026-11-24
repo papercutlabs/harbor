@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <ncurses.h>
+#include <optional>
 #include <set>
 #include <string>
 #include <termios.h>
@@ -54,6 +55,8 @@ private:
     std::map<std::string, ChatMessage> messages;
     std::vector<std::string> order;
     std::wstring draft;
+    std::vector<std::string> draftAttachments;
+    size_t draftAttachmentOffset = 0;
     size_t cursor = 0;
     bool cursorAtRowEnd = false; // transient visual affinity at a soft-wrap boundary
     std::wstring draftBeforeEdit;
@@ -130,7 +133,7 @@ private:
   HarborUiControl::Server m_UiControl;
   uint64_t m_PreviewSequence = 0;
   bool m_PreviewActive = false;
-  std::deque<std::string> m_PreviewOpens;
+  std::deque<std::pair<std::string, bool>> m_PreviewOpens;
   std::set<std::string> m_PendingPictures;
   int m_ControlReply = -1;
   std::string m_ControlProfile, m_ControlConversation, m_ControlKey, m_ControlError;
@@ -150,6 +153,7 @@ private:
   std::vector<Option> m_Options;
   int m_Option = 0, m_MenuOffset = 0;
   std::vector<std::string> m_Attachments;
+  std::optional<std::pair<std::string, Hit>> m_DraftAttachmentPress;
   std::string m_Directory;
   std::string m_UpdateTarget, m_UpdateVersion;
   int64_t m_LastUpdateCheck = 0;
@@ -261,13 +265,15 @@ private:
   void Choose(int);
   void FilePicker(const std::string&);
   void RebuildFiles();
-  void AttachPreview(std::vector<std::string>);
-  void SendAttachments();
+  bool AttachPreview(std::vector<std::string>);
+  void SendAttachments(const std::vector<std::string>&);
+  void DrawDraftAttachments(Conversation&, int y, int rows);
+  void ActivateDraftAttachment(Conversation&, const Hit&);
   void MessageClick(int x, int y);
   void OpenLink(const std::string&);
   void SaveAttachment(const std::string&, const std::string&, const std::string&);
   void OpenAttachment(const std::string&, const std::string&, const std::string&, bool preview = false);
-  void OpenPicture(const std::string&);
+  void OpenPicture(const std::string&, bool quickLook = false);
   void TryOpenPictures();
   void ClipboardPaste();
   HarborFormatting::Text Format(const Conversation&, const ChatMessage&, bool forceConceal = false) const;

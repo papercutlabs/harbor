@@ -49,7 +49,8 @@ public:
   const std::string& PlayingPath() const { return m_PlayingPath; }
   double Position() const;
   std::string Error() const { return m_Error; }
-  bool Open(const std::string& path, bool image = false);
+  enum class Viewer { Default, Preview, QuickLook };
+  bool Open(const std::string& path, Viewer viewer = Viewer::Default);
   std::string PasteboardImage();
   bool CopyText(const std::string&);
 
@@ -62,7 +63,7 @@ private:
   pid_t m_Player = -1;
   bool m_Paused = false;
   int64_t m_LastPosition = 0;
-  std::vector<pid_t> m_Children;
+  std::vector<std::pair<pid_t, Viewer>> m_Children;
   int64_t m_PlayStart = 0, m_PauseStart = 0, m_PauseTotal = 0;
   std::map<std::pair<int, int>, short> m_Pairs;
   short m_NextPair = 100;

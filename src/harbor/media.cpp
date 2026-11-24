@@ -243,10 +243,11 @@ HarborMedia::~HarborMedia()
 {
   Stop();
   ClearGraphics();
-  for (auto child : m_Children)
+  for (auto [child, viewer] : m_Children)
   {
     int status;
-    waitpid(child, &status, 0);
+    // Quick Look stays open until the user closes it.
+    waitpid(child, &status, viewer == Viewer::QuickLook ? WNOHANG : 0);
   }
 }
 std::string
@@ -409,10 +410,10 @@ HarborMedia::Poll()
   }
   m_Children.erase(std::remove_if(m_Children.begin(),
                                   m_Children.end(),
-                                  [](pid_t child)
+                                  [](const auto& child)
                                   {
                                     int status;
-                                    return waitpid(child, &status, WNOHANG) != 0;
+                                    return waitpid(child.first, &status, WNOHANG) != 0;
                                   }),
                    m_Children.end());
   return changed;
@@ -522,24 +523,29 @@ HarborMedia::Position() const
   return ((m_Paused ? m_PauseStart : TimeUtil::GetCurrentTimeMSec()) - m_PlayStart - m_PauseTotal) / 1000.0;
 }
 bool
-HarborMedia::Open(const std::string& path, bool image)
+HarborMedia::Open(const std::string& path, Viewer viewer)
 {
   // Offline tests exercise the actual spawn boundary without opening a user's player.
   const char* testOpener = getenv("HARBOR_TEST_OPENER");
   pid_t pid = -1;
   if (testOpener && getenv("HARBOR_DEMO_FIXTURES"))
-    pid = HarborSpawn({ testOpener, path, image ? "preview" : "default" });
+    pid = HarborSpawn({ testOpener, path, viewer == Viewer::Preview ? "preview" :
+                                         viewer == Viewer::QuickLook ? "quick-look" : "default" });
   else
   {
 #ifdef __APPLE__
-    pid = image ? HarborSpawn({ "/usr/bin/open", "-a", "Preview", path })
-                : HarborSpawn({ "/usr/bin/open", path });
+    if (viewer == Viewer::Preview)
+      pid = HarborSpawn({ "/usr/bin/open", "-a", "Preview", path });
+    else if (viewer == Viewer::QuickLook)
+      pid = HarborSpawn({ "/usr/bin/qlmanage", "-p", path });
+    else
+      pid = HarborSpawn({ "/usr/bin/open", path });
 #else
     pid = HarborSpawn({ "xdg-open", path });
 #endif
   }
   if (pid > 0)
-    m_Children.push_back(pid);
+    m_Children.emplace_back(pid, viewer);
   else
     m_Error = "Could not launch the default viewer";
   return pid > 0;
