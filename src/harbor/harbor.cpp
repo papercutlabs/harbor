@@ -34,6 +34,7 @@
 #include <set>
 #include <spawn.h>
 #include <sstream>
+#include <string_view>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <termios.h>
@@ -83,6 +84,17 @@ enum
   BackwardWordKey,
   ForwardWordKey
 };
+bool
+Enabled(const char* setting)
+{
+  const char* value = getenv(setting);
+  return value && std::string_view(value) == "1";
+}
+bool
+UsesNativeDuetPicker()
+{
+  return Enabled("DUET_HARBOR_NATIVE_PICKER");
+}
 std::wstring
 W(const std::string& s)
 {
@@ -441,6 +453,7 @@ Harbor::Init()
   if (!m_InitialChat.empty())
   {
     m_RestoreChat.clear();
+    if (Enabled("DUET_HARBOR_PINNED_CHAT")) m_PinnedChat = m_InitialChat;
     m_InitialRouteUntil = TimeUtil::GetCurrentTimeMSec() + 30000;
   }
   setlocale(LC_ALL, "");
@@ -592,8 +605,11 @@ Harbor::PollUiControl()
     std::string selected;
     try { selected = HarborRoute::SelectProfile(target, profiles, demo); }
     catch (const std::exception& error) { HarborUiControl::Reply(reply, error.what()); return; }
+    const auto key = Key(selected, target.conversation);
+    if (!m_PinnedChat.empty() && key != m_PinnedChat)
+    { HarborUiControl::Reply(reply, "This pane is pinned to its current conversation."); return; }
     m_ControlProfile = selected; m_ControlConversation = target.conversation;
-    m_ControlKey = Key(selected, target.conversation); m_ControlReply = reply;
+    m_ControlKey = key; m_ControlReply = reply;
     m_ControlPending = true; m_ControlError.clear();
   }, [this](const std::string& action, const std::string& token, int reply) {
     const auto at = m_Chats.find(m_Current);
@@ -619,6 +635,8 @@ Harbor::PollUiControl()
         (at != m_Chats.end() && (!at->second.draft.empty() || !at->second.reply.empty() || !at->second.editing.empty()) ? "1" : "0") + "\t" + (ready ? "1" : "0") + "\t" + std::to_string(m_PreviewActive ? m_PreviewSequence : 0) + "\n";
       (void)!send(reply, text.data(), text.size(), MSG_NOSIGNAL); close(reply); return;
     }
+    if (!m_PinnedChat.empty())
+    { HarborUiControl::Reply(reply, "This pane is pinned to its current conversation."); return; }
     if (!ready || token != UiSnapshot())
     { HarborUiControl::Reply(reply, "The inspected Harbor view changed or has an active action. Its conversation and drafts were retained."); return; }
     // Keep the window and every conversation object alive, including drafts, reply/edit and reading state.
@@ -721,7 +739,9 @@ Harbor::Run()
     if (m_InitialRouteUntil && now >= m_InitialRouteUntil)
     {
       m_InitialRouteUntil = 0;
-      m_InitialRouteStatus = "Requested conversation unavailable. No other chat was opened. Ctrl+R retries; Ctrl+K chooses another.";
+      m_InitialRouteStatus = UsesNativeDuetPicker()
+        ? "Requested conversation unavailable. No other chat was opened. Ctrl+R retries."
+        : "Requested conversation unavailable. No other chat was opened. Ctrl+R retries; Ctrl+K chooses another.";
       if (m_ControlReply >= 0)
         FinishUiRoute("Conversation unavailable; previous chat and drafts kept");
       m_Dirty = true;
@@ -1535,15 +1555,20 @@ Harbor::Fetch(Conversation& c, bool older, bool automatic)
   c.fetching = true;
   Request(c.profile, r);
 }
-void
+bool
 Harbor::OpenChat(const std::string& key)
 {
+  if (!m_PinnedChat.empty() && key != m_PinnedChat)
+  {
+    Notify("Open that conversation from the workspace to see it here.");
+    return false;
+  }
   HarborTrace::Event("ui.chat.open");
   auto it = m_Chats.find(key);
   if (it == m_Chats.end())
   {
     HarborTrace::Event("ui.chat.opened", {{"outcome", "unavailable"}});
-    return;
+    return false;
   }
   m_ComposerFollowCursor = true;
   if (auto* previous = Current(); previous && !previous->follow &&
@@ -1607,6 +1632,7 @@ Harbor::OpenChat(const std::string& key)
   m_Dirty = true;
   HarborTrace::Event("ui.chat.opened", {{"account_id", HarborTrace::Token(c.profile)},
     {"conversation_id", HarborTrace::Token(c.id)}, {"view", "conversation"}, {"outcome", "success"}});
+  return true;
 }
 void
 Harbor::Text(int y, int x, int width, const std::wstring& s, int color, bool bold)
@@ -1801,7 +1827,7 @@ Harbor::Draw()
     m_Media->EndFrame();
     return;
   }
-  m_MainX = m_W >= 100 ? 25 : 0;
+  m_MainX = !UsesNativeDuetPicker() && m_W >= 100 ? 25 : 0;
   m_MainW = m_W - m_MainX;
   auto* c = Current();
   int textWidth = std::max(1, m_MainW - 11);
@@ -2580,7 +2606,7 @@ Harbor::RebuildPicker(bool preserveSelection)
                               auto body = m_ForwardText;
                               std::string source = Name(m_ForwardProfile, message.senderId);
                               CloseMenu();
-                              OpenChat(key);
+                              if (!OpenChat(key)) return;
                               auto* target = Current();
                               if (target)
                               {
@@ -2759,7 +2785,6 @@ Harbor::Commands()
   m_MenuOffset = 0;
   m_Options = {
     { "Search or pinned messages", "", [this] { SearchPrompt(); } },
-    { "Chats", "Ctrl+K", [this] { ChatPicker(); } },
     { "Jump to latest messages",
       "Ctrl+G",
       [this]
@@ -2820,6 +2845,8 @@ Harbor::Commands()
                          CloseMenu();
                          ReturnBack();
                        } });
+  if (!UsesNativeDuetPicker())
+    m_Options.insert(m_Options.begin() + 1, { "Chats", "Ctrl+K", [this] { ChatPicker(); } });
   auto desk = DeskOptions();
   m_Options.insert(m_Options.begin(), desk.begin(), desk.end());
   m_Dirty = true;
@@ -2832,7 +2859,9 @@ Harbor::Help()
     { "Compose", "Enter sends · Shift+Enter / Ctrl+J newline", [this] { CloseMenu(); } },
     { "Clear chat draft", "Ctrl+C", [this] { CloseMenu(); } },
     { "Commands", "Ctrl+O / Ctrl+/ · / is literal text", [this] { CloseMenu(); } },
-    { "Chats / latest messages", "Ctrl+K / Ctrl+G", [this] { CloseMenu(); } },
+    UsesNativeDuetPicker()
+      ? Option{ "Latest messages", "Ctrl+G", [this] { CloseMenu(); } }
+      : Option{ "Chats / latest messages", "Ctrl+K / Ctrl+G", [this] { CloseMenu(); } },
     { "Browse messages", "Esc · arrows · Enter for actions", [this] { CloseMenu(); } },
     { "Attach / paste", "Ctrl+T files · Ctrl+V clipboard · paste or drop paths", [this] { CloseMenu(); } },
     { "Copy / message tools", "Drag to copy · right-click or Enter for actions", [this] { CloseMenu(); } },
@@ -3166,7 +3195,7 @@ Harbor::Actions(bool minimal)
                         [this, key, id]
                         {
                           CloseMenu();
-                          OpenChat(key);
+                          if (!OpenChat(key)) return;
                           auto* target = Current();
                           if (!target->editing.empty())
                             EndEdit(*target);
@@ -3179,7 +3208,7 @@ Harbor::Actions(bool minimal)
                           [this, key, id]
                           {
                             CloseMenu();
-                            OpenChat(key);
+                            if (!OpenChat(key)) return;
                             auto* target = Current();
                             BeginEdit(*target, id);
                             m_Browse = false;
@@ -3189,7 +3218,8 @@ Harbor::Actions(bool minimal)
   // until the user reveals it, so neither its secret nor ▒ placeholders reach the composer
   const bool hiddenSpoiler = formatted.spoilers && !c->revealed.count(id);
   const std::wstring forwardText = formatted.native ? formatted.copy : W(message.text);
-  m_Options.push_back({ "Forward",
+  if (m_PinnedChat.empty())
+    m_Options.push_back({ "Forward",
                         "Choose a destination",
                         [this, message, key, hiddenSpoiler, forwardText]
                         {
@@ -3516,8 +3546,7 @@ Harbor::Visit(std::string key, std::string id)
   auto it = m_Chats.find(key);
   if (it == m_Chats.end() || id.empty())
     return;
-  if (m_Current != key)
-    OpenChat(key);
+  if (m_Current != key && !OpenChat(key)) return;
   auto& c = it->second;
   Remember(c);
   if (!c.messages.count(id) || c.messages[id].isDeleted)
@@ -3555,8 +3584,7 @@ Harbor::ReturnBack()
   c->visitUntil = 0;
   if (!mark.returnKey.empty())
   {
-    OpenChat(mark.returnKey);
-    ReturnBack();
+    if (OpenChat(mark.returnKey)) ReturnBack();
     return;
   }
   c->selected = mark.selected;
@@ -4561,7 +4589,7 @@ Harbor::KeyPress(wint_t k)
   }
   if (k == FindKey || k == 11)
   {
-    ChatPicker();
+    if (!UsesNativeDuetPicker()) ChatPicker();
     return;
   }
   if (!m_Menu.empty())
@@ -5096,7 +5124,7 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown, int wheelTicks)
       Commands();
     else if (hit.type == "latest")
       Latest();
-    else if (hit.type == "chats")
+    else if (hit.type == "chats" && !UsesNativeDuetPicker())
       ChatPicker();
     else if (hit.type == "chat")
       OpenChat(hit.value);

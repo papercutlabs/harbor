@@ -124,6 +124,7 @@ private:
   std::map<std::string, std::map<std::string, ContactInfo>> m_Contacts;
   std::map<std::string, Conversation> m_Chats, m_SavedStates;
   std::string m_LastState, m_RestoreChat;
+  std::string m_PinnedChat; // exact fork route for the lifetime of an explicitly pinned pane
   std::string m_InitialChat, m_InitialProfile, m_InitialRouteStatus;
   int64_t m_InitialRouteUntil = 0;
   HarborUiControl::Server m_UiControl;
@@ -217,7 +218,7 @@ private:
   std::string m_LastConversationCatalogue;
   bool m_ConversationCatalogueDirty = false;
   void Merge(Conversation&, const std::vector<ChatMessage>&, bool outOfSequence = false);
-  void OpenChat(const std::string&);
+  bool OpenChat(const std::string&);
   void Fetch(Conversation&, bool older = false, bool automatic = false);
   void Send();
   void BeginEdit(Conversation&, const std::string&);

@@ -24,6 +24,72 @@ DemoRouteChat()
   HarborRoute::Validate(target);
   return TelegramForum::ChatNumber(target.conversation);
 }
+// The standalone Harbor fixture keeps its original IDs and stories. The fork's
+// fixture uses the same shared route IDs as its desktop and Android test clients.
+struct DuetMessage
+{
+  const char* sender;
+  const char* text;
+};
+struct DuetChat
+{
+  int64_t roomId;
+  int32_t topicId;
+  const char* room;
+  const char* title;
+  int minutesAgo;
+  std::vector<DuetMessage> messages;
+
+  std::string Id() const { return topicId ? TelegramForum::ConversationId(roomId, topicId) : StrUtil::NumToHex(roomId); }
+  std::string Name() const { return topicId ? std::string(room) + " > " + title : room; }
+};
+constexpr int64_t AgentsRoom = -100123450002LL;
+std::vector<DuetChat>
+DuetChats()
+{
+  const auto pcL = DemoRouteChat();
+  return {
+    { pcL, 0, "Papercut Labs", "", 55, {
+      { "kleya", "Workspace trial is ready for a first pass. Use this group for anything that affects more than one team." },
+      { "self", "I'll keep the focused questions in each topic." },
+    } },
+    { pcL, 550, "Papercut Labs", "Doug", 2, {
+      { "doug", "Two things are ready for you. The Org Walk draft has one decision left, and the Prospaq team has a revised shortlist." },
+      { "self", "Bring me the Org Walk decision first. I can read the shortlist afterward." },
+      { "doug", "I'll keep the shortlist on hand. The question for the walk is who owns the return when a handoff crosses teams." },
+    } },
+    { pcL, 421, "Papercut Labs", "Org Walk", 9, {
+      { "kleya", "I moved the handoff example next to the rule it illustrates. I used an internal handoff so the example can stand on its own." },
+      { "self", "Give me the point where ownership changes." },
+      { "kleya", "Ownership changes when the receiving lead accepts the outcome and its conditions in writing." },
+    } },
+    { pcL, 712, "Papercut Labs", "Keys & Accounts", 38, {
+      { "keys", "The account inventory now shows which quota figures were refreshed and which are still from the previous read." },
+      { "self", "Keep the older figures visible with their age. I need to distinguish a missing read from a low balance." },
+      { "keys", "I’ll keep both values in separate columns." },
+    } },
+    { AgentsRoom, 0, "Papercut Agents", "", 720, {
+      { "amelia", "The engagement notes have moved into their own topics. Keep the shared client questions here." },
+    } },
+    { AgentsRoom, 610, "Papercut Agents", "Prospaq", 17, {
+      { "amelia", "The shortlist is down to six. Three matches have an operations lead who can sponsor a trial." },
+      { "self", "Show me the three with a named sponsor." },
+      { "amelia", "They’re grouped at the top with the problem each person is trying to solve." },
+    } },
+    { pcL, 1, "Papercut Labs", "General", 260, {
+      { "doug", "Please leave the test workspaces as you found them after the review." },
+      { "self", "I’ll keep the demo assignments isolated." },
+    } },
+    { pcL, 2, "Papercut Labs", "Lead A", 130, {
+      { "leo", "The workspace checks are done. The newer build kept the draft during the switch." },
+      { "self", "Attach the observation so the other device can be checked against it." },
+    } },
+    { pcL, 3, "Papercut Labs", "Lead B", 980, {
+      { "asha", "The two panes can take different assignments now." },
+      { "self", "Keep a report of what happens when both devices update the same pane." },
+    } },
+  };
+}
 // UTF-16 length, the unit native ranges use
 int32_t
 U16(const std::string& utf8)
@@ -105,16 +171,29 @@ HarborDemo::Seed()
   }
   if (getenv("HARBOR_DEMO_TOPICS"))
   {
-    const std::string parent = getenv("HARBOR_DEMO_ROUTES") ? StrUtil::NumToHex(DemoRouteChat()) : "hive";
-    const auto topic = [&](int32_t id) { return getenv("HARBOR_DEMO_ROUTES") ? TelegramForum::ConversationId(DemoRouteChat(), id) : parent + "#" + std::to_string(id); };
-    add(parent, "leo", "Parent group history.", 10);
-    add(topic(421), "leo", "Topic-specific history for the Desk conversation.", 100);
-    add(topic(550), "asha", "A different topic with separate history.", 90);
-    if (getenv("DUET_HARBOR_CATALOGUE"))
+    if (getenv("HARBOR_DEMO_ROUTES") && getenv("DUET_HARBOR_CATALOGUE"))
     {
-      add(topic(1), "leo", "General workspace conversation for the offline trial.", 95);
-      add(topic(2), "leo", "Lead A conversation for the offline trial.", 97);
-      add(topic(3), "asha", "Lead B conversation for the offline trial.", 98);
+      const auto now = TimeUtil::GetCurrentTimeMSec();
+      for (const auto& chat : DuetChats())
+      {
+        const auto id = chat.Id();
+        for (size_t i = 0; i < chat.messages.size(); ++i)
+        {
+          const auto& message = chat.messages[i];
+          add(id, message.sender, message.text, 0);
+          const auto age = chat.minutesAgo + int64_t(chat.messages.size() - i - 1) * 3;
+          m_Messages[id].back().timeSent = now - age * 60000;
+        }
+      }
+    }
+    else
+    {
+      const bool routed = getenv("HARBOR_DEMO_ROUTES");
+      const auto parent = routed ? StrUtil::NumToHex(DemoRouteChat()) : "hive";
+      const auto topic = [&](int32_t id) { return routed ? TelegramForum::ConversationId(DemoRouteChat(), id) : parent + "#" + std::to_string(id); };
+      add(parent, "leo", "Parent group history.", 10);
+      add(topic(421), "leo", "Topic-specific history for the Desk conversation.", 100);
+      add(topic(550), "asha", "A different topic with separate history.", 90);
     }
   }
   // Load a substantial offline conversation without synthesizing terminal sends.
@@ -502,26 +581,38 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
       if (getenv("HARBOR_DEMO_TOPICS"))
       {
         const bool routed = getenv("HARBOR_DEMO_ROUTES");
-        const std::string parent = routed ? StrUtil::NumToHex(DemoRouteChat()) : "hive";
-        for (auto pair : std::vector<std::pair<std::string, std::string>>{
-               { parent, routed ? "Routed group" : "Team forum" },
-               { routed ? TelegramForum::ConversationId(DemoRouteChat(), 421) : "hive#421", routed ? "Routed group > Agent" : "Team forum > Desk planning — DEMO-421" },
-               { routed ? TelegramForum::ConversationId(DemoRouteChat(), 550) : "hive#550", routed ? "Routed group > Doug" : "Team forum > Infrastructure" } })
-        {
-          ContactInfo topic;
-          topic.id = pair.first;
-          topic.name = pair.second;
-          n->contactInfos.push_back(topic);
-        }
         if (routed && getenv("DUET_HARBOR_CATALOGUE"))
-          for (const auto& item : std::vector<std::pair<int32_t, std::string>>{
-                 { 1, "General" }, { 2, "Lead A" }, { 3, "Lead B" } })
+        {
+          for (const auto& chat : DuetChats())
+          {
+            ContactInfo contact;
+            contact.id = chat.Id();
+            contact.name = chat.Name();
+            n->contactInfos.push_back(contact);
+          }
+          for (const auto& sender : std::vector<std::pair<const char*, const char*>>{
+                 { "doug", "Doug" }, { "amelia", "Amelia" }, { "keys", "Keys" } })
+          {
+            ContactInfo contact;
+            contact.id = sender.first;
+            contact.name = sender.second;
+            n->contactInfos.push_back(contact);
+          }
+        }
+        else
+        {
+          const auto parent = routed ? StrUtil::NumToHex(DemoRouteChat()) : "hive";
+          for (const auto& entry : std::vector<std::pair<std::string, std::string>>{
+                 { parent, routed ? "Routed group" : "Team forum" },
+                 { routed ? TelegramForum::ConversationId(DemoRouteChat(), 421) : "hive#421", routed ? "Routed group > Agent" : "Team forum > Desk planning — DEMO-421" },
+                 { routed ? TelegramForum::ConversationId(DemoRouteChat(), 550) : "hive#550", routed ? "Routed group > Doug" : "Team forum > Infrastructure" } })
           {
             ContactInfo topic;
-            topic.id = TelegramForum::ConversationId(DemoRouteChat(), item.first);
-            topic.name = "Routed group > " + item.second;
+            topic.id = entry.first;
+            topic.name = entry.second;
             n->contactInfos.push_back(topic);
           }
+        }
       }
       Emit(n);
       break;
