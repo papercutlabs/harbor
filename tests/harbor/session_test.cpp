@@ -844,7 +844,7 @@ VersionTests()
 {
   // Preserve exact-version semantics, even for a future build's own identical peer.
   for (const std::string version : { "0.1.21", "0.1.22", "0.1.23", "0.1.24", "0.1.25", "0.1.26", "0.1.27", "0.1.28",
-                                    "0.1.29", "0.1.30", "0.1.31", "0.1.32", "0.1.33", "0.1.34", "0.1.35", "0.1.36", "0.1.37" })
+                                    "0.1.29", "0.1.30", "0.1.31", "0.1.32", "0.1.33", "0.1.34", "0.1.35", "0.1.36", "0.1.37", "0.1.38" })
     assert(HarborSession::CompatibleVersions(version, version));
   assert(HarborSession::CompatibleVersions("0.1.23", "0.1.22"));
   assert(HarborSession::CompatibleVersions("0.1.24", "0.1.22"));
@@ -879,7 +879,7 @@ VersionTests()
   assert(HarborSession::CompatibleVersions("0.1.37", "0.1.35"));
   assert(HarborSession::CompatibleVersions("0.1.37", "0.1.36"));
   const std::string versions[] = { "0.1.21", "0.1.22", "0.1.23", "0.1.24", "0.1.25", "0.1.26", "0.1.27", "0.1.28",
-                                   "0.1.29", "0.1.30", "0.1.31", "0.1.32", "0.1.33", "0.1.34", "0.1.35", "0.1.36", "0.1.37",
+                                   "0.1.29", "0.1.30", "0.1.31", "0.1.32", "0.1.33", "0.1.34", "0.1.35", "0.1.36", "0.1.37", "0.1.38",
                                    "1.0.0", "unknown", "" };
   for (const auto& client : versions)
     for (const auto& backend : versions)
@@ -901,12 +901,14 @@ VersionTests()
                             (client == "0.1.36" && (backend == "0.1.31" || backend == "0.1.32" ||
                                                     backend == "0.1.33" || backend == "0.1.34" || backend == "0.1.35")) ||
                             (client == "0.1.37" && (backend == "0.1.31" || backend == "0.1.32" || backend == "0.1.33" ||
-                                                    backend == "0.1.34" || backend == "0.1.35" || backend == "0.1.36"));
+                                                    backend == "0.1.34" || backend == "0.1.35" || backend == "0.1.36")) ||
+                            (client == "0.1.38" && (backend == "0.1.31" || backend == "0.1.32" || backend == "0.1.33" ||
+                                                    backend == "0.1.34" || backend == "0.1.35" || backend == "0.1.36" || backend == "0.1.37"));
       assert(HarborSession::CompatibleVersions(client, backend) == expected);
     }
   assert(!HarborSession::CompatibleVersions("0.1.23", "0.1.22.1"));
   assert(!HarborSession::CompatibleVersions("0.1.23", "v0.1.22"));
-  std::cout << "session versions: exact equality and only the verified directional 23/24/25/26/27/28/29/30/31/32/33/34/35/36/37 upgrade pairs\n";
+  std::cout << "session versions: exact equality and only the verified directional 23/24/25/26/27/28/29/30/31/32/33/34/35/36/37/38 upgrade pairs\n";
 }
 
 int

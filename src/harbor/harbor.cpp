@@ -589,6 +589,7 @@ Harbor::UiSnapshot() const
     const auto& c = at->second;
     state << S(c.draft) << c.cursor << c.reply << c.editing << S(c.draftBeforeEdit)
           << c.selected << c.scroll << c.follow << c.visit;
+    for (const auto& image : c.draftImages) state << image.size() << ':' << image;
   }
   for (const auto& attachment : m_Attachments) state << attachment;
   for (const auto& picture : m_PreviewOpens) state << picture;
@@ -635,7 +636,7 @@ Harbor::PollUiControl()
       const char* surface = getenv("CMUX_SURFACE_ID");
       const auto text = "pcl.harbor.ui.v2\t" + std::to_string(getpid()) + "\t" + HarborUiControl::Surface(surface ? surface : "") + "\t" +
         (at == m_Chats.end() ? "" : at->second.profile) + "\t" + (at == m_Chats.end() ? "" : at->second.id) + "\t" + UiSnapshot() + "\t" +
-        (at != m_Chats.end() && (!at->second.draft.empty() || !at->second.reply.empty() || !at->second.editing.empty()) ? "1" : "0") + "\t" + (ready ? "1" : "0") + "\t" + std::to_string(m_PreviewActive ? m_PreviewSequence : 0) + "\n";
+        (at != m_Chats.end() && (!at->second.draft.empty() || !at->second.draftImages.empty() || !at->second.reply.empty() || !at->second.editing.empty()) ? "1" : "0") + "\t" + (ready ? "1" : "0") + "\t" + std::to_string(m_PreviewActive ? m_PreviewSequence : 0) + "\n";
       (void)!send(reply, text.data(), text.size(), MSG_NOSIGNAL); close(reply); return;
     }
     if (!ready || token != UiSnapshot())
@@ -815,7 +816,7 @@ Harbor::TryDeskUpdate()
   state.stable = !StableStatePath().empty() && m_StableStateUsable;
   state.draftsEmpty = true;
   const auto empty = [](const Conversation& chat) {
-    return chat.draft.empty() && chat.reply.empty() && chat.editing.empty() && chat.draftBeforeEdit.empty() &&
+    return chat.draft.empty() && chat.draftImages.empty() && chat.reply.empty() && chat.editing.empty() && chat.draftBeforeEdit.empty() &&
       chat.replyBeforeEdit.empty() && chat.recovery.empty();
   };
   for (const auto& chat : m_Chats) state.draftsEmpty &= empty(chat.second);
@@ -1764,6 +1765,40 @@ Harbor::BuildRows()
 }
 
 void
+Harbor::DrawDraftImages(Conversation& c, int y)
+{
+  const int left = m_MainX + 2, right = m_MainX + m_MainW - 2;
+  auto label = [](size_t i) { return L"[Image #" + std::to_wstring(i + 1) + L"]"; };
+  int available = right - left;
+  for (size_t i = 0; i < c.draftImages.size() && available >= 0; ++i)
+    available -= int(label(i).size()) + 3;
+  if (available >= 0) c.draftImageOffset = 0;
+  const int limit = available < 0 ? right - 4 : right;
+  int x = left;
+  size_t i = c.draftImageOffset;
+  for (; i < c.draftImages.size(); ++i)
+  {
+    const auto name = label(i);
+    const int width = int(name.size());
+    if (x + width + 3 > limit) break;
+    Text(y, x, width, name, Accent);
+    Text(y, x + width + 1, 1, L"×", Muted);
+    m_Hits.push_back({ y, x, width, "draft-image", m_Current, int(i) });
+    m_Hits.push_back({ y, x + width + 1, 1, "draft-image-remove", m_Current, int(i) });
+    x += width + 3;
+  }
+  if (c.draftImageOffset)
+  {
+    Text(y, right - 3, 1, L"←", Accent);
+    m_Hits.push_back({ y, right - 3, 1, "draft-image-scroll", m_Current, -1 });
+  }
+  if (i < c.draftImages.size())
+  {
+    Text(y, right - 1, 1, L"→", Accent);
+    m_Hits.push_back({ y, right - 1, 1, "draft-image-scroll", m_Current, 1 });
+  }
+}
+void
 Harbor::Draw()
 {
   m_Media->BeginFrame();
@@ -1791,7 +1826,11 @@ Harbor::Draw()
   m_ComposerRows = std::min(std::max(2, std::min(5, m_H / 4)), std::max(2, int(draftLines.size())));
   m_ComposerY = m_H - 4 - m_ComposerRows;
   m_Bottom = m_ComposerY - 1;
-  if (c && (!c->reply.empty() || !c->editing.empty()))
+  const bool replyOrEdit = c && (!c->reply.empty() || !c->editing.empty());
+  const bool draftImages = c && !c->draftImages.empty() && c->editing.empty();
+  if (replyOrEdit)
+    --m_Bottom;
+  if (draftImages)
     --m_Bottom;
   // Approved indicator A: one count-only bar in the spacer row directly above the composer (and any
   // reply context), so neither the draft nor the reading position moves when it appears.
@@ -2081,13 +2120,14 @@ Harbor::Draw()
         mvaddnwstr(y, x + 3 + dot * 2, bright ? L"●" : L"•", 1);
       }
     }
-    if (!c->reply.empty() || !c->editing.empty())
-      Text(m_ComposerY - 1,
+    if (replyOrEdit)
+      Text(m_ComposerY - 1 - int(draftImages),
            m_MainX + 2,
            m_MainW - 4,
            !c->editing.empty() ? L"Editing your message · Esc cancels"
                                : Ellipsis(ReplyContext(*c), std::max(1, m_MainW - 4)),
            Accent);
+    if (draftImages) DrawDraftImages(*c, m_ComposerY - 1);
     for (int row = 0; row < m_ComposerRows + 2; ++row)
       Fill(m_ComposerY + row, m_MainX + 2, m_MainW - 4, Surface);
     auto point = CursorPoint(draftLayout, std::min(c->cursor, c->draft.size()), c->cursorAtRowEnd);
@@ -2429,6 +2469,11 @@ Harbor::Send()
 {
   HarborTrace::Event("ui.send.attempt");
   auto* c = Current();
+  if (c && c->editing.empty() && !c->draftImages.empty())
+  {
+    SendAttachments(c->draftImages);
+    return;
+  }
   if (!c || c->draft.empty())
   {
     HarborTrace::Event("ui.send.result", {{"outcome", "no-action"}});
@@ -2500,10 +2545,15 @@ void
 Harbor::Paste(const std::wstring& value)
 {
   auto paths = HarborPaths(value);
-  if (!paths.empty())
-    AttachPreview(paths);
-  else
+  if (paths.empty())
     Insert(value);
+  else if (std::all_of(paths.begin(), paths.end(), [](const std::string& path) {
+    const auto type = FileUtil::GetMimeType(path);
+    return (type.empty() ? Type(path) : type).rfind("image/", 0) == 0;
+  }))
+    StageImages(paths);
+  else
+    AttachPreview(std::move(paths));
 }
 void
 Harbor::CloseMenu()
@@ -3930,16 +3980,40 @@ Harbor::RebuildFiles()
   m_Option = std::max(0, std::min(m_Option, int(m_Options.size()) - 1));
 }
 void
+Harbor::StageImages(const std::vector<std::string>& paths)
+{
+  auto* c = Current();
+  if (!c) return;
+  if (!c->editing.empty())
+  {
+    Notify("Finish or cancel editing before attaching a new file");
+    return;
+  }
+  const auto count = c->draftImages.size();
+  for (const auto& path : paths)
+    if (File(path)) c->draftImages.push_back(path);
+  if (c->draftImages.size() == count)
+  {
+    Notify("No readable images found");
+    return;
+  }
+  HarborTrace::Event("ui.attachments.staged");
+  m_Attachments.clear();
+  CloseMenu();
+  c->selected.clear();
+  m_Browse = m_MouseDown = m_MouseDragging = m_HasSelection = false;
+}
+void
 Harbor::AttachPreview(std::vector<std::string> files)
 {
   HarborTrace::Event("ui.attachments.preview");
-  if (auto* c = Current())
-    if (!c->editing.empty())
-    {
-      CloseMenu();
-      Notify("Finish or cancel editing before attaching a new file");
-      return;
-    }
+  auto* c = Current();
+  if (c && !c->editing.empty())
+  {
+    CloseMenu();
+    Notify("Finish or cancel editing before attaching a new file");
+    return;
+  }
   m_Attachments.clear();
   for (auto& file : files)
     if (File(file))
@@ -3949,12 +4023,14 @@ Harbor::AttachPreview(std::vector<std::string> files)
     Notify("No readable attachments found");
     return;
   }
+  if (c)
+    m_Attachments.insert(m_Attachments.begin(), c->draftImages.begin(), c->draftImages.end());
   m_Menu = "attachments";
   m_Option = 0;
   m_MenuOffset = 0;
   m_Options = { { "Send " + std::to_string(m_Attachments.size()) + " attachment(s)",
                   "Enter to confirm",
-                  [this] { SendAttachments(); } },
+                  [this] { SendAttachments(m_Attachments); } },
                 { "Cancel",
                   "Nothing will be sent",
                   [this]
@@ -3966,20 +4042,21 @@ Harbor::AttachPreview(std::vector<std::string> files)
   m_Dirty = true;
 }
 void
-Harbor::SendAttachments()
+Harbor::SendAttachments(const std::vector<std::string>& files)
 {
   HarborTrace::Event("ui.attachments.send");
   auto* c = Current();
-  if (!c)
+  if (!c || files.empty())
     return;
-  bool first = true;
-  for (const auto& file : m_Attachments)
+  if (!std::all_of(files.begin(), files.end(), File))
   {
-    if (!File(file))
-    {
-      Notify("A file disappeared; canceled");
-      return;
-    }
+    Notify("An attachment is unavailable. Remove it and try again.");
+    return;
+  }
+  const bool useDraftForCaption = &files == &c->draftImages || HarborPaths(c->draft) != files;
+  bool first = true;
+  for (const auto& file : files)
+  {
     FileInfo f;
     f.filePath = file;
     f.fileType = FileUtil::GetMimeType(file);
@@ -3991,17 +4068,22 @@ Harbor::SendAttachments()
     r->chatMessage.fileInfo = ProtocolUtil::FileInfoToHex(f);
     if (first)
     {
-      if (HarborPaths(c->draft) != m_Attachments)
+      if (useDraftForCaption)
         r->chatMessage.text = S(c->draft);
       r->chatMessage.quotedId = c->reply;
+      r->chatMessage.quotedChatId = c->id;
       first = false;
     }
     Request(c->profile, r);
   }
   c->draft.clear();
+  c->draftImages.clear();
+  c->draftImageOffset = 0;
   c->cursor = 0;
+  c->cursorAtRowEnd = false;
   c->reply.clear();
   c->follow = true;
+  m_Browse = false;
   m_Attachments.clear();
   CloseMenu();
   Notify("Sending attachments…");
@@ -4275,7 +4357,7 @@ Harbor::ClipboardPaste()
   HarborTrace::Event("ui.clipboard.paste");
   std::string image = m_Media->PasteboardImage();
   if (!image.empty())
-    AttachPreview({ image });
+    StageImages({ image });
   else
     Paste(W(Clipboard::GetText()));
 }
@@ -4977,8 +5059,49 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown, int wheelTicks)
   }
   if (m_Menu.empty())
   {
+    const auto imageHit = e.y == m_ComposerY - 1 && c && !c->draftImages.empty()
+      ? std::find_if(m_Hits.begin(), m_Hits.end(), [&](const Hit& hit) {
+          return hit.value == m_Current && hit.type.rfind("draft-image", 0) == 0 &&
+            e.y == hit.y && e.x >= hit.x && e.x < hit.x + hit.w;
+        })
+      : m_Hits.end();
     if (wheelDown || (e.bstate & BUTTON4_PRESSED))
       m_MouseDown = m_MouseDragging = m_HasSelection = false;
+    if (m_MouseDown && m_DraftImagePress)
+    {
+      m_MouseActivityAt = TimeUtil::GetCurrentTimeMSec();
+      if (e.x != m_SelectionX || e.y != m_SelectionY) m_MouseDragging = true;
+      if (!(e.bstate & BUTTON1_RELEASED)) return;
+      const auto pressed = std::move(*m_DraftImagePress);
+      m_DraftImagePress.reset();
+      m_MouseDown = false;
+      const bool dragged = m_MouseDragging;
+      m_MouseDragging = false;
+      if (!c || dragged || imageHit == m_Hits.end() || imageHit->type != pressed.type ||
+          imageHit->value != pressed.value || imageHit->code != pressed.code)
+        return;
+      m_Browse = false;
+      c->selected.clear();
+      if (pressed.type == "draft-image-scroll")
+      {
+        const auto offset = int(c->draftImageOffset) + pressed.code;
+        if (offset >= 0 && size_t(offset) < c->draftImages.size()) c->draftImageOffset = size_t(offset);
+      }
+      else if (size_t(pressed.code) < c->draftImages.size())
+      {
+        if (pressed.type == "draft-image-remove")
+        {
+          c->draftImages.erase(c->draftImages.begin() + pressed.code);
+          c->draftImageOffset = c->draftImages.empty() ? 0 : std::min(c->draftImageOffset, c->draftImages.size() - 1);
+        }
+        else if (File(c->draftImages[pressed.code]))
+          OpenPicture(c->draftImages[pressed.code]);
+        else
+          Notify("This image is unavailable");
+      }
+      return;
+    }
+    m_DraftImagePress.reset();
     if (m_MouseDown)
     {
       m_MouseActivityAt = TimeUtil::GetCurrentTimeMSec();
@@ -5009,6 +5132,16 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown, int wheelTicks)
     else if (e.bstate & BUTTON1_PRESSED)
     {
       m_HasSelection = false;
+      if (imageHit != m_Hits.end())
+      {
+        m_DraftImagePress = *imageHit;
+        m_MouseDown = true;
+        m_MouseActivityAt = TimeUtil::GetCurrentTimeMSec();
+        m_MouseDragging = false;
+        m_SelectionX = e.x;
+        m_SelectionY = e.y;
+        return;
+      }
       for (const auto& hit : m_Hits)
         if (hit.type == "message" && e.y == hit.y && e.x >= hit.x && e.x < hit.x + hit.w)
         {
