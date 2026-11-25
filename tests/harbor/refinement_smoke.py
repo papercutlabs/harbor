@@ -31,7 +31,7 @@ try:
     assert 'COMPOSE' in t.text
     assert 'Message actions' not in t.text
     t.send(b'\x15')
-    fixture = str(ROOT / 'tests/harbor/fixtures/harbor.png')
+    fixture = str(ROOT / 'tests/harbor/fixtures/new-shelf.md')
     t.send('existing caption ')
     t.send('\x1b[200~' + fixture + '\x1b[201~', wait=.4)
     t.expect('Caption · type to add')

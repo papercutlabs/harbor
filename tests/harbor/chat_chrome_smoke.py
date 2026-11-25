@@ -152,13 +152,13 @@ for use_click in (False, True):
                                             'HARBOR_DEMO_INCOMING_COUNT': '3'})
     try:
         t.picker('Marina'); t.send('kept attachment caption'); t.send(b'\x1b[5~')
-        fixture = str(ROOT / 'tests/harbor/fixtures/harbor.png')
+        fixture = str(ROOT / 'tests/harbor/fixtures/new-shelf.md')
         t.send('\x1b[200~' + fixture + '\x1b[201~', wait=.4)
         t.expect('Preview attachments'); wait_for(t, '↓ 3 new', timeout=8)
         capture(t, f'unseen-attachment-{"click" if use_click else "key"}-56')
         if use_click: t.click_text('↓ 3 new')
         else: t.send(b'\x07')
-        t.expect('Preview attachments'); t.expect('harbor.png'); t.expect('kept attachment caption')
+        t.expect('Preview attachments'); t.expect('new-shelf.md'); t.expect('kept attachment caption')
         assert '↓ 3 new' not in t.text and 'Sending attachments' not in t.text and 'Sent' not in t.text
         t.click_text('Send 1 attachment'); t.delivered('kept attachment caption')
         assert 'Preview attachments' not in t.text, t.text

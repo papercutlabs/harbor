@@ -122,7 +122,7 @@ with tempfile.TemporaryDirectory(prefix='harbor-word-navigation-') as directory:
 
         # Attachment captions share composer word navigation, including legacy Alt-b/f.
         reset(t, 'caption two')
-        fixture = str(Path(__file__).resolve().parent / 'fixtures/harbor.png')
+        fixture = str(Path(__file__).resolve().parent / 'fixtures/new-shelf.md')
         t.send('\x1b[200~' + fixture + '\x1b[201~', wait=.4)
         t.expect('Send 1 attachment')
         t.send(b'\x1bb')

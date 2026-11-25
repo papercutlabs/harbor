@@ -189,7 +189,7 @@ for record in (home/'.office/harbor-windows').iterdir():
         end=time.monotonic()+5
         while original(a) is None and time.monotonic()<end:a.pump(.05)
         visited=original(a);assert visited,a.text
-        fixture=str(ROOT/'tests/harbor/fixtures/harbor.png')
+        fixture=str(ROOT/'tests/harbor/fixtures/new-shelf.md')
         b.send('\x1b[200~'+fixture+'\x1b[201~');b.expect('Preview attachments')
         old_names=set((home/'.office/harbor-windows').iterdir())
         b_name=next(path for path in old_names if path.name.startswith(str(b.pid)+'-'))

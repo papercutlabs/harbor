@@ -25,7 +25,7 @@ try:
     y=next(y for y,row in enumerate(t.screen.display) if 'line 6' in row)
     click(t,8,y);t.send('X');t.expect('liXne 6')
     t.clear_draft(10);t.send('caption ')
-    fixture=str(__import__('native_smoke').ROOT/'tests/harbor/fixtures/harbor.png')
+    fixture=str(__import__('native_smoke').ROOT/'tests/harbor/fixtures/new-shelf.md')
     t.send('\x1b[200~'+fixture+'\x1b[201~',wait=.4)
     t.expect('Caption · type to add')
     y=next(y for y,row in enumerate(t.screen.display) if 'caption ' in row and 'Caption' not in row)
