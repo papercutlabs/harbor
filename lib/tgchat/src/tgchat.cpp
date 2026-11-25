@@ -230,6 +230,8 @@ private:
   void TdMessageConvert(td::td_api::message& p_TdMessage, ChatMessage& p_ChatMessage);
   void DownloadFile(std::string p_ChatId, std::string p_MsgId, std::string p_FileId, std::string p_DownloadId,
                     DownloadFileAction p_DownloadFileAction, uint64_t p_RequestId = 0);
+  void ReportFileDownload(const std::string& p_ChatId, const std::string& p_MsgId, const std::string& p_FileId,
+                          DownloadFileAction p_Action, uint64_t p_RequestId, const std::string& p_Path = {});
   void RequestSponsoredMessagesIfNeeded();
   uint64_t TakePendingSend(int64_t p_ChatId, int64_t p_PendingMsgId);
   void GetSponsoredMessages(const std::string& p_ChatId);
@@ -575,15 +577,21 @@ void TgChat::Impl::SetMessageHandler(const std::function<void(std::shared_ptr<Se
 
 void TgChat::Impl::CallMessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMessage)
 {
+  bool cache = true;
   switch (p_ServiceMessage->GetMessageType()) {
     case NewMessageStatusNotifyType: TopicUpdate<NewMessageStatusNotify>(p_ServiceMessage); break;
     case NewMessageReactionsNotifyType: TopicUpdate<NewMessageReactionsNotify>(p_ServiceMessage); break;
     case NewMessageIsPinnedNotifyType: TopicUpdate<NewMessageIsPinnedNotify>(p_ServiceMessage); break;
-    case NewMessageFileNotifyType: TopicUpdate<NewMessageFileNotify>(p_ServiceMessage); break;
+    case NewMessageFileNotifyType:
+      TopicUpdate<NewMessageFileNotify>(p_ServiceMessage);
+      // A transfer failure has no filename or MIME type. Retain the cached message metadata.
+      cache = ProtocolUtil::FileInfoFromHex(std::static_pointer_cast<NewMessageFileNotify>(p_ServiceMessage)->fileInfo)
+                .fileStatus != FileStatusDownloadFailed;
+      break;
     case DeleteMessageNotifyType: TopicUpdate<DeleteMessageNotify>(p_ServiceMessage); break;
     default: break;
   }
-  MessageCache::AddFromServiceMessage(m_ProfileId, p_ServiceMessage);
+  if (cache) MessageCache::AddFromServiceMessage(m_ProfileId, p_ServiceMessage);
 
   if (!m_MessageHandler)
   {
@@ -1585,23 +1593,21 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
         SendQuery(std::move(get_remote_file),
                   [this, chatId, msgId, fileId, downloadFileAction, requestId](Object object)
         {
-          if (object->get_id() == td::td_api::error::ID) return;
-
-          if (object->get_id() == td::td_api::file::ID)
+          if (object->get_id() != td::td_api::file::ID)
           {
-            auto file_ = td::move_tl_object_as<td::td_api::file>(object);
-            std::string downloadId = StrUtil::NumToHex(file_->id_);
-
-            std::shared_ptr<DeferDownloadFileRequest> deferDownloadFileRequest =
-              std::make_shared<DeferDownloadFileRequest>();
-            deferDownloadFileRequest->chatId = chatId;
-            deferDownloadFileRequest->msgId = msgId;
-            deferDownloadFileRequest->fileId = fileId;
-            deferDownloadFileRequest->downloadId = downloadId;
-            deferDownloadFileRequest->downloadFileAction = downloadFileAction;
-            deferDownloadFileRequest->requestId = requestId;
-            SendRequest(deferDownloadFileRequest);
+            ReportFileDownload(chatId, msgId, fileId, downloadFileAction, requestId);
+            return;
           }
+
+          auto file = td::move_tl_object_as<td::td_api::file>(object);
+          auto deferred = std::make_shared<DeferDownloadFileRequest>();
+          deferred->chatId = chatId;
+          deferred->msgId = msgId;
+          deferred->fileId = fileId;
+          deferred->downloadId = StrUtil::NumToHex(file->id_);
+          deferred->downloadFileAction = downloadFileAction;
+          deferred->requestId = requestId;
+          SendRequest(deferred);
         });
       }
       break;
@@ -3882,33 +3888,38 @@ void TgChat::Impl::DownloadFile(std::string p_ChatId, std::string p_MsgId, std::
     SendQuery(std::move(download_file),
               [this, p_ChatId, p_MsgId, p_FileId, p_DownloadFileAction, p_RequestId](Object object)
     {
-      if (object->get_id() == td::td_api::error::ID) return;
-
-      if (object->get_id() == td::td_api::file::ID)
+      if (object->get_id() != td::td_api::file::ID)
       {
-        auto file_ = td::move_tl_object_as<td::td_api::file>(object);
-        std::string path = file_->local_->path_;
-
-        FileInfo fileInfo;
-        fileInfo.fileStatus = FileStatusDownloaded;
-        fileInfo.filePath = path;
-        fileInfo.fileId = p_FileId;
-
-        std::shared_ptr<NewMessageFileNotify> newMessageFileNotify =
-          std::make_shared<NewMessageFileNotify>(m_ProfileId);
-        newMessageFileNotify->chatId = std::string(p_ChatId);
-        newMessageFileNotify->msgId = std::string(p_MsgId);
-        newMessageFileNotify->fileInfo = ProtocolUtil::FileInfoToHex(fileInfo);
-        newMessageFileNotify->downloadFileAction = p_DownloadFileAction;
-        newMessageFileNotify->requestId = p_RequestId;
-
-        CallMessageHandler(newMessageFileNotify);
+        ReportFileDownload(p_ChatId, p_MsgId, p_FileId, p_DownloadFileAction, p_RequestId);
+        return;
       }
+      auto file = td::move_tl_object_as<td::td_api::file>(object);
+      const auto path = file->local_ && file->local_->is_downloading_completed_ ? file->local_->path_ : std::string();
+      ReportFileDownload(p_ChatId, p_MsgId, p_FileId, p_DownloadFileAction, p_RequestId, path);
     });
   }
   catch (...)
   {
+    ReportFileDownload(p_ChatId, p_MsgId, p_FileId, p_DownloadFileAction, p_RequestId);
   }
+}
+
+void TgChat::Impl::ReportFileDownload(const std::string& p_ChatId, const std::string& p_MsgId,
+                                     const std::string& p_FileId, DownloadFileAction p_Action,
+                                     uint64_t p_RequestId, const std::string& p_Path)
+{
+  FileInfo fileInfo;
+  fileInfo.fileStatus = p_Path.empty() ? FileStatusDownloadFailed : FileStatusDownloaded;
+  fileInfo.filePath = p_Path;
+  fileInfo.fileId = p_FileId;
+
+  auto notify = std::make_shared<NewMessageFileNotify>(m_ProfileId);
+  notify->chatId = p_ChatId;
+  notify->msgId = p_MsgId;
+  notify->fileInfo = ProtocolUtil::FileInfoToHex(fileInfo);
+  notify->downloadFileAction = p_Action;
+  notify->requestId = p_RequestId;
+  CallMessageHandler(notify);
 }
 
 uint64_t TgChat::Impl::TakePendingSend(int64_t p_ChatId, int64_t p_PendingMsgId)

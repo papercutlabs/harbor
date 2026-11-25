@@ -289,6 +289,26 @@ File(const std::string& p)
   return stat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode);
 }
 bool
+SameSavedPicture(const std::string& source, const std::string& saved)
+{
+  struct stat sourceStat{}, savedStat{};
+  if (stat(source.c_str(), &sourceStat) != 0 || lstat(saved.c_str(), &savedStat) != 0 ||
+      !S_ISREG(sourceStat.st_mode) || !S_ISREG(savedStat.st_mode) || sourceStat.st_size != savedStat.st_size)
+    return false;
+  std::ifstream original(source, std::ios::binary), copy(saved, std::ios::binary);
+  if (!original || !copy)
+    return false;
+  char left[65536], right[65536];
+  do
+  {
+    original.read(left, sizeof(left));
+    copy.read(right, sizeof(right));
+    if (original.gcount() != copy.gcount() || std::memcmp(left, right, original.gcount()) != 0)
+      return false;
+  } while (original && copy);
+  return original.eof() && copy.eof() && !original.bad() && !copy.bad();
+}
+bool
 Directory(const std::string& p)
 {
   struct stat st;
@@ -1368,21 +1388,42 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
     {
       auto n = std::static_pointer_cast<NewMessageFileNotify>(e);
       auto& c = Ensure(p, n->chatId);
+      auto file = ProtocolUtil::FileInfoFromHex(n->fileInfo);
+      const auto save = c.picturesToSave.find(n->msgId);
+      const bool savePicture = save != c.picturesToSave.end() && save->second == file.fileId;
+      if (savePicture) c.picturesToSave.erase(save);
       auto it = c.messages.find(n->msgId);
-      if (it != c.messages.end())
+      if (it != c.messages.end() && !it->second.isDeleted)
       {
-        it->second.fileInfo = n->fileInfo;
-        const bool picturePending = m_PendingPictures.erase(Key(p, n->chatId) + "\n" + n->msgId) != 0;
-        if (n->downloadFileAction == DownloadFileActionOpen || picturePending)
+        const auto previous = ProtocolUtil::FileInfoFromHex(it->second.fileInfo);
+        if (!previous.fileId.empty() && !file.fileId.empty() && previous.fileId != file.fileId)
+          break;
+        const bool ready = file.fileStatus != FileStatusDownloadFailed && File(file.filePath);
+        if (!ready)
         {
-          if (File(ProtocolUtil::FileInfoFromHex(n->fileInfo).filePath))
+          file.filePath = previous.filePath;
+          file.fileStatus = FileStatusDownloadFailed;
+        }
+        if (file.fileType.empty()) file.fileType = previous.fileType;
+        it->second.fileInfo = ProtocolUtil::FileInfoToHex(file);
+        const bool picturePending = m_PendingPictures.erase(Key(p, n->chatId) + "\n" + n->msgId) != 0;
+        if (savePicture)
+        {
+          if (ready)
+            SaveAttachment(p, n->chatId, n->msgId, true);
+          else
+            Notify("Could not download the picture");
+        }
+        else if (n->downloadFileAction == DownloadFileActionOpen || picturePending)
+        {
+          if (ready)
             OpenAttachment(p, n->chatId, n->msgId);
           else
             Notify("Could not download the picture");
         }
         else if (n->downloadFileAction == DownloadFileActionSave)
         {
-          if (File(ProtocolUtil::FileInfoFromHex(n->fileInfo).filePath))
+          if (ready)
             SaveAttachment(p, n->chatId, n->msgId);
           else
             Notify("Could not download the attachment");
@@ -4013,7 +4054,7 @@ Harbor::MessageClick(int x, int y)
   for (const auto& hit : m_Hits)
     if (hit.type == "picture" && hit.y == y && x >= hit.x && x < hit.x + hit.w)
     {
-      OpenAttachment(c->profile, c->id, hit.value);
+      SaveAttachment(c->profile, c->id, hit.value, true);
       return;
     }
   for (const auto& hit : m_Hits)
@@ -4041,31 +4082,35 @@ Harbor::MessageClick(int x, int y)
     }
 }
 void
-Harbor::SaveAttachment(const std::string& p, const std::string& chatId, const std::string& id)
+Harbor::SaveAttachment(const std::string& p, const std::string& chatId, const std::string& id, bool openPicture)
 {
   auto& c = Ensure(p, chatId);
   auto it = c.messages.find(id);
   if (it == c.messages.end() || it->second.fileInfo.empty())
     return;
   auto f = ProtocolUtil::FileInfoFromHex(it->second.fileInfo);
-  if (!File(f.filePath))
+  if (!File(f.filePath) || (openPicture && f.fileStatus == FileStatusDownloading))
   {
+    if (openPicture)
+      c.picturesToSave[id] = f.fileId;
     if (f.fileStatus == FileStatusDownloading)
     {
-      Notify("Attachment is downloading…");
+      Notify(openPicture ? "Saving and opening picture when download completes…" : "Attachment is downloading…");
       return;
     }
     auto request = std::make_shared<DownloadFileRequest>();
     request->chatId = chatId;
     request->msgId = id;
     request->fileId = f.fileId;
-    request->downloadFileAction = DownloadFileActionSave;
+    // The Preview intent belongs to the initiating window. The backend only needs the file.
+    request->downloadFileAction = openPicture ? DownloadFileActionNone : DownloadFileActionSave;
     f.fileStatus = FileStatusDownloading;
     it->second.fileInfo = ProtocolUtil::FileInfoToHex(f);
     Request(p, request);
     Notify("Downloading attachment to Downloads…");
     return;
   }
+  if (openPicture) c.picturesToSave.erase(id);
   // The UI is a separate process from the backend. Read this one preference
   // without initializing or saving the backend-owned AppConfig (or its credentials).
   std::ifstream config(FileUtil::GetApplicationDir() + "/app.conf");
@@ -4083,9 +4128,19 @@ Harbor::SaveAttachment(const std::string& p, const std::string& chatId, const st
       StrUtil::Trim(downloads);
     }
   }
-  FileUtil::SetDownloadsDir(downloads);
+  FileUtil::SetDownloadsDir(downloads.empty() ? "~/Downloads" : downloads);
   const auto directory = FileUtil::GetDownloadsDir();
   const auto name = FileUtil::BaseName(f.filePath);
+  const auto type = f.fileType.empty() ? Type(f.filePath) : f.fileType;
+  const bool picture = openPicture || type.rfind("image/", 0) == 0;
+  const auto saved = c.savedPictures.find(id);
+  if (picture && saved != c.savedPictures.end() && FileUtil::DirName(saved->second) == FileUtil::DirName(directory + "/file") &&
+      SameSavedPicture(f.filePath, saved->second))
+  {
+    Notify("Saved to " + saved->second);
+    if (openPicture) OpenPicture(saved->second);
+    return;
+  }
   std::string destination;
   int output = -1;
   for (int suffix = 0; suffix < 10000; ++suffix)
@@ -4124,6 +4179,11 @@ Harbor::SaveAttachment(const std::string& p, const std::string& chatId, const st
   }
   HarborTrace::Event(ok ? "ui.attachment.saved" : "ui.attachment.save_failed");
   Notify(ok ? "Saved to " + destination : "Could not save attachment to " + directory);
+  if (ok)
+  {
+    if (picture) c.savedPictures[id] = destination;
+    if (openPicture) OpenPicture(destination);
+  }
 }
 void
 Harbor::OpenAttachment(const std::string& p, const std::string& chatId, const std::string& id, bool preview)
