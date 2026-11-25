@@ -1,26 +1,40 @@
-"""Visible-photo auto download, delayed single-click Preview, separate save, and Focus event.
+"""Visible photo cache, click-to-save-and-preview, and Focus event.
 
 Real native PTY/render/input/request/control paths; offline Telegram fixture only.
 A private recording opener replaces the final OS dispatch. No account or app opens.
 """
-from native_smoke import Terminal
+from native_smoke import ROOT, Terminal
 from pathlib import Path
 import json, os, subprocess, tempfile, time
 
-def check(mode):
+def check(mode, cached=False, failure=None):
     with tempfile.TemporaryDirectory(prefix='harbor-picture-', dir='/tmp') as directory:
         root=Path(directory);home=root/'home';home.mkdir();config=root/'config';config.mkdir()
-        downloads=root/'Downloads';downloads.mkdir()
+        downloads=(home/'Downloads' if cached else root/'custom-downloads');downloads.mkdir()
         (config/'version').write_text('31')
-        (config/'app.conf').write_text('downloads_dir='+str(downloads)+'\n')
+        (config/'app.conf').write_text('' if cached else 'downloads_dir='+str(downloads)+'\n')
+        existing=downloads/'harbor.png'
+        existing.write_bytes(b'existing download')
+        saved=downloads/'harbor_1.png'
+        image=(ROOT/'tests/harbor/fixtures/harbor.png').read_bytes()
         requests=root/'requests';opened=root/'opened';opener=root/'open.sh'
         opener.write_text('#!/bin/sh\nprintf "%s|%s\\n" "$1" "$2" >> "'+str(opened)+'"\n');opener.chmod(0o700)
         env=dict(HOME=str(home),XDG_CONFIG_HOME=str(home/'xdg'),HARBOR_DEMO_PICTURES=mode,
-                 HARBOR_DEMO_PICTURE_DELAY_MS='3000',HARBOR_DEMO_REQUEST_LOG=str(requests),
+                 HARBOR_DEMO_PICTURE_DELAY_MS='3600',HARBOR_DEMO_REQUEST_LOG=str(requests),
                  HARBOR_TEST_OPENER=str(opener),CMUX_SURFACE_ID='PICTURE-TEST')
+        if failure=='transfer':
+            env['HARBOR_DEMO_PICTURE_FAILURE']='1'
         t=Terminal(cols=56,rows=30,config_dir=config,extra_env=env)
         def log():return requests.read_text() if requests.exists() else ''
         def opens():return opened.read_text().splitlines() if opened.exists() else []
+        def click_picture(name):
+            y=next(y for y,line in enumerate(t.screen.display) if name in line)
+            t.send(f'\x1b[<0;9;{y+2}M',wait=.03);t.send(f'\x1b[<0;9;{y+2}m',wait=.06)
+        def expect_open(path, count):
+            deadline=time.monotonic()+7
+            while len(opens())<count and time.monotonic()<deadline:t.pump(.08)
+            assert len(opens())==count and opens()[-1]==f'{path}|preview',opens()
+            assert path.read_bytes()==image and existing.read_bytes()==b'existing download'
         samples=[]
         def inspect(window=False):
             child=subprocess.Popen([os.environ['HARBOR_EXECUTABLE'],'-d',str(config),'--target-surface','PICTURE-TEST','--target-pid',str(t.pid),'--inspect-window' if window else '--inspect-ui'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=dict(os.environ,**env))
@@ -36,19 +50,28 @@ def check(mode):
             t.expect('photo-shown');t.send('draft stays');t.expect('downloading')
             assert 'picture-download photo-shown action=0' in log(),log()
             assert 'photo-offscreen' not in log(),log()+'\n'+t.text
-            assert not opens() and not list(downloads.iterdir()),'automatic download opened or saved'
+            assert not opens() and list(downloads.iterdir())==[existing],'automatic download opened or saved'
             # A history refresh may replay stale remote metadata during the local transfer.
             t.send(b'\x12');t.expect('Refreshing conversation')
             before_open=inspect();assert before_open[8]=='0'
-            y=next(y for y,line in enumerate(t.screen.display) if '[Photo]' in line)
-            # Thumbnail rows are reserved even while its original download finishes.
-            t.send(f'\x1b[<0;9;{y+2}M',wait=.03);t.send(f'\x1b[<0;9;{y+2}m',wait=.03)
-            t.expect('Opening picture when download completes')
-            deadline=time.monotonic()+6
-            while not opens() and time.monotonic()<deadline:t.pump(.1)
-            assert len(opens())==1 and opens()[0].endswith('harbor.png|preview'),opens()
+            if cached:
+                t.expect('harbor.png',timeout=8)
+                assert not opens() and list(downloads.iterdir())==[existing]
+            if failure=='save':
+                downloads.chmod(0o500)
+            click_picture('harbor.png' if cached else '[Photo]')
+            if not cached:
+                # Two clicks during the same fetch collapse into one deferred save and open.
+                click_picture('[Photo]')
+            if failure:
+                t.expect('Could not save attachment' if failure=='save' else 'Could not download the picture',timeout=8)
+                assert not opens() and existing.read_bytes()==b'existing download' and list(downloads.iterdir())==[existing]
+                t.expect('draft stays')
+                print('PASS '+failure+' failure leaves Downloads and draft intact without opening a file')
+                return
+            expect_open(saved,1)
             assert log().count('picture-download photo-shown')==1,log()
-            assert not list(downloads.iterdir())
+            assert set(downloads.iterdir())=={existing,saved}
             first=inspect();assert int(first[8])>0 and first[6]=='1',first
             assert inspect(True)[9]=='external-preview'
             t.expect('draft stays')
@@ -60,19 +83,29 @@ def check(mode):
             assert 'draft stays' in t.text and 'Message actions' not in t.text
             # A downloaded filename is still the explicit Save action.
             t.click_text('harbor.png');t.expect('Saved to ')
-            assert len(opens())==1 and (downloads/'harbor.png').is_file()
+            assert len(opens())==1 and set(downloads.iterdir())=={existing,saved}
             # Clicking the same picture again produces a new Focus event.
-            y=next(y for y,line in enumerate(t.screen.display) if 'harbor.png' in line)
-            t.send(f'\x1b[<0;9;{y+2}M',wait=.03);t.send(f'\x1b[<0;9;{y+2}m',wait=.1)
+            click_picture('harbor.png')
+            expect_open(saved,2)
             second=inspect();assert int(second[8])>int(first[8]),second
             t.send('!');assert inspect()[8]=='0'
             assert 'draft stays!' in t.text and len(opens())==2
             t.send(b'\x12');t.expect('Refreshing conversation');t.pump(.2)
             assert log().count('picture-download photo-shown')==1 and len(opens())==2,log()
+            if cached:
+                replacement=b'edited by the user'
+                saved.write_bytes(replacement)
+                click_picture('harbor.png')
+                expect_open(downloads/'harbor_2.png',3)
+                assert saved.read_bytes()==replacement
             print('PREVIEW_NATIVE_SAMPLES '+json.dumps({'mode':mode,'raw':samples}),flush=True)
-            print('PASS visible largest-photo metadata path auto-downloads once; offscreen/chat scope; pending-click Preview; no auto-open/save; explicit save; fresh Focus token and late focus-in ignored; deliberate input return; draft preserved')
+            print('PASS '+('cached' if cached else 'pending')+' picture click saves to Downloads and previews its exact bytes; collisions, reuse, Focus and draft preserved')
         finally:
+            downloads.chmod(0o700)
             t.close()
             t.wait_backend_shutdown()
 
-for mode in ("1", "legacy"):check(mode)
+check("1")
+check("legacy", cached=True)
+check("1", cached=True, failure="save")
+check("legacy", failure="transfer")

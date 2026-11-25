@@ -762,8 +762,9 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
           if (getenv("HARBOR_DEMO_CLICKS") || getenv("HARBOR_DEMO_PICTURES"))
           {
             auto file = ProtocolUtil::FileInfoFromHex(m.fileInfo);
-            file.filePath = file.fileId;
-            file.fileStatus = FileStatusDownloaded;
+            const bool failed = getenv("HARBOR_DEMO_PICTURE_FAILURE");
+            file.filePath = failed ? "" : file.fileId;
+            file.fileStatus = failed ? FileStatusDownloadFailed : FileStatusDownloaded;
             n->fileInfo = ProtocolUtil::FileInfoToHex(file);
             Record("attachment-download action=" + std::to_string(int(r->downloadFileAction)));
             if (getenv("HARBOR_DEMO_PICTURES")) Record("picture-download " + r->msgId + " action=" + std::to_string(int(r->downloadFileAction)));

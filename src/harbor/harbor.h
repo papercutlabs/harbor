@@ -53,6 +53,7 @@ private:
     std::string profile, id, name;
     HarborTyping typing;
     std::map<std::string, ChatMessage> messages;
+    std::map<std::string, std::string> picturesToSave, savedPictures;
     std::vector<std::string> order;
     std::wstring draft;
     size_t cursor = 0;
@@ -262,7 +263,7 @@ private:
   void SendAttachments();
   void MessageClick(int x, int y);
   void OpenLink(const std::string&);
-  void SaveAttachment(const std::string&, const std::string&, const std::string&);
+  void SaveAttachment(const std::string&, const std::string&, const std::string&, bool openPicture = false);
   void OpenAttachment(const std::string&, const std::string&, const std::string&, bool preview = false);
   void OpenPicture(const std::string&);
   void TryOpenPictures();
