@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <ncurses.h>
+#include <optional>
 #include <set>
 #include <string>
 #include <termios.h>
@@ -148,6 +149,7 @@ private:
   std::wstring m_Filter;
   std::vector<Option> m_Options;
   int m_Option = 0, m_MenuOffset = 0;
+  std::optional<std::pair<int, int>> m_MessageMenuAnchor;
   std::vector<std::string> m_Attachments;
   std::string m_Directory;
   std::string m_UpdateTarget, m_UpdateVersion;
@@ -251,7 +253,7 @@ private:
   void DeskFailurePause(const std::string& reason);
   void SuspendTerminal();
   void ResumeTerminal();
-  void Actions(bool minimal = true);
+  void Actions(bool minimal = true, std::optional<std::pair<int, int>> anchor = {});
   void CloseMenu();
   void Choose(int);
   void FilePicker(const std::string&);
