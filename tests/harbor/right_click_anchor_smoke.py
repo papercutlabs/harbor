@@ -49,17 +49,18 @@ try:
     assert (left, top) == pointer, terminal.text
     # The old centered Reply row is outside the menu drawn at the pointer.
     click(terminal, (terminal.cols - width) // 2 + 2, 7)
-    assert 'Message actions' not in terminal.text and 'Replying to' not in terminal.text, terminal.text
+    assert 'Message actions' not in terminal.text and 'Replying ·' not in terminal.text, terminal.text
 
     click(terminal, *pointer, button=2)
     terminal.click_text('Reply')
     terminal.expect('The new layout is ready')
-    terminal.expect('Replying to Leo')
+    terminal.expect('Replying · Leo: The new layout')
     terminal.expect('› Draft remains')
     terminal.send(b'\x1b')
 
     terminal.resize(116, 36)
-    pointer = (terminal.cols - 3, locate(terminal, 'Keep the details quiet')[1])
+    # The timestamp row belongs to the same message and sits closer to the bottom.
+    pointer = (terminal.cols - 3, locate(terminal, 'Keep the details quiet')[1] + 1)
     click(terminal, *pointer, button=2)
     left, top, width, height = expect_anchor(terminal, pointer)
     assert left + width == terminal.cols and top + height == terminal.rows, terminal.text
@@ -75,7 +76,7 @@ try:
     terminal.resize(56, 32)
     expect_anchor(terminal, pointer)
     terminal.click_text('Reply')
-    terminal.expect('Replying to You')
+    terminal.expect('Replying · You:')
     terminal.expect('› Draft remains')
 finally:
     terminal.close()
@@ -92,7 +93,7 @@ try:
     click(terminal, *pointer, button=2)
     expect_anchor(terminal, pointer)
     terminal.click_text('Reply')
-    terminal.expect('Replying to You · ' + note)
+    terminal.expect('Replying · You: ' + note)
 finally:
     terminal.close()
 
