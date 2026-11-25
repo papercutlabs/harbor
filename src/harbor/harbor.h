@@ -220,6 +220,7 @@ private:
   void PublishConversationCatalogue();
   std::set<std::string> m_CatalogueReadyProfiles;
   std::string m_LastConversationCatalogue;
+  std::string m_LastDuetPickerSnapshot;
   bool m_ConversationCatalogueDirty = false;
   void Merge(Conversation&, const std::vector<ChatMessage>&, bool outOfSequence = false);
   bool OpenChat(const std::string&);

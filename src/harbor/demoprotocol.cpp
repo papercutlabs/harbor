@@ -636,7 +636,8 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
           c.isPinned = true;
           c.lastMessageTime = 8000000000000000000LL;
         }
-        c.isUnread = c.id == "marina";
+        const auto topic = TelegramForum::TopicNumber(c.id);
+        c.isUnread = c.id == "marina" || (getenv("DUET_HARBOR_CATALOGUE") && (topic == 550 || topic == 712));
         n->chatInfos.push_back(c);
       }
       Emit(n);

@@ -1101,37 +1101,14 @@ Harbor::ProcessEvents()
     PublishConversationCatalogue();
   }
 }
-void
-Harbor::PublishConversationCatalogue()
+namespace
 {
-  const char* configured = getenv("DUET_HARBOR_CATALOGUE");
-  if (!configured || configured[0] != '/' || m_CatalogueReadyProfiles.empty()) return;
-  const std::string path(configured);
+void PublishDuetCatalogue(const std::string& path, std::string body, std::string& previous)
+{
+  if (body == previous) return;
   const auto parent = FileUtil::DirName(path);
   struct stat directory{};
   if (lstat(parent.c_str(), &directory) || !S_ISDIR(directory.st_mode) || directory.st_uid != geteuid() || (directory.st_mode & 077)) return;
-  const auto supported = [](const std::string& profile) {
-    return profile.rfind("Telegram_", 0) == 0 || profile.rfind("HarborDemo_", 0) == 0;
-  };
-  for (const auto& profile : m_Protocols)
-    if (supported(profile.first) && !m_CatalogueReadyProfiles.count(profile.first)) return;
-
-  std::string body = "pcl.harbor.conversations.v1\n";
-  for (const auto& entry : m_Chats)
-  {
-    const auto& c = entry.second;
-    if (!supported(c.profile) || c.name.empty() || c.name == c.id || c.name.size() > 2048) continue;
-    const auto chat = TelegramForum::ChatNumber(c.id);
-    const auto topic = TelegramForum::TopicNumber(c.id);
-    if (!chat || c.id != (topic ? TelegramForum::ConversationId(chat, topic) : StrUtil::NumToHex(chat))) continue;
-    const auto base = StrUtil::NumToHex(chat);
-    auto room = topic ? Name(c.profile, base) : std::string();
-    if (room == base || room.size() > 2048) room.clear();
-    body += StrUtil::StrToHex(HarborRoute::DuetProfile(c.profile)) + '\t' + std::to_string(chat) + '\t' + std::to_string(topic) + '\t' +
-      std::to_string(c.actualLast) + '\t' + StrUtil::StrToHex(c.name) + '\t' + StrUtil::StrToHex(room) + '\n';
-    if (body.size() > 8 * 1024 * 1024) return;
-  }
-  if (body == m_LastConversationCatalogue) return;
   std::string temporary = path + ".XXXXXX";
   const int fd = mkstemp(&temporary[0]);
   if (fd < 0) return;
@@ -1145,9 +1122,72 @@ Harbor::PublishConversationCatalogue()
   }
   const bool closed = close(fd) == 0;
   if (closed && offset == body.size() && rename(temporary.c_str(), path.c_str()) == 0)
-    m_LastConversationCatalogue = std::move(body);
+    previous = std::move(body);
   else unlink(temporary.c_str());
 }
+
+std::string DuetPickerPreview(const std::string& preview, bool native)
+{
+  // Match the CLI picker: native spoilers are already concealed. Interpret older markup
+  // before handing off a bounded, single display string, and keep it out of diagnostics.
+  const auto text = native ? W(preview) : HarborFormatting::Parse(W(preview)).text;
+  std::wstring display;
+  bool pendingSpace = false;
+  constexpr size_t limit = 192;
+  for (wchar_t ch : text)
+  {
+    if (iswspace(ch) || iswcntrl(ch))
+    {
+      pendingSpace = !display.empty();
+      continue;
+    }
+    if (display.size() >= limit) break;
+    if (pendingSpace && display.size() + 1 < limit) display += L' ';
+    display += ch;
+    pendingSpace = false;
+  }
+  return S(display);
+}
+}
+
+void
+Harbor::PublishConversationCatalogue()
+{
+  const char* configured = getenv("DUET_HARBOR_CATALOGUE");
+  if (!configured || configured[0] != '/' || m_CatalogueReadyProfiles.empty()) return;
+  const char* picker = getenv("DUET_HARBOR_PICKER_SNAPSHOT");
+  const bool wantsPreview = picker && picker[0] == '/';
+  const auto supported = [](const std::string& profile) {
+    return profile.rfind("Telegram_", 0) == 0 || profile.rfind("HarborDemo_", 0) == 0;
+  };
+  for (const auto& profile : m_Protocols)
+    if (supported(profile.first) && !m_CatalogueReadyProfiles.count(profile.first)) return;
+
+  constexpr size_t sizeLimit = 8 * 1024 * 1024;
+  std::string catalogue = "pcl.harbor.conversations.v1\n";
+  std::string snapshot = "pcl.harbor.picker.v1\n";
+  for (const auto& entry : m_Chats)
+  {
+    const auto& c = entry.second;
+    if (!supported(c.profile) || c.name.empty() || c.name == c.id || c.name.size() > 2048) continue;
+    const auto chat = TelegramForum::ChatNumber(c.id);
+    const auto topic = TelegramForum::TopicNumber(c.id);
+    if (!chat || c.id != (topic ? TelegramForum::ConversationId(chat, topic) : StrUtil::NumToHex(chat))) continue;
+    const auto base = StrUtil::NumToHex(chat);
+    auto room = topic ? Name(c.profile, base) : std::string();
+    if (room == base || room.size() > 2048) room.clear();
+    const auto row = StrUtil::StrToHex(HarborRoute::DuetProfile(c.profile)) + '\t' + std::to_string(chat) + '\t' + std::to_string(topic) + '\t' +
+      std::to_string(c.actualLast) + '\t' + StrUtil::StrToHex(c.name) + '\t' + StrUtil::StrToHex(room);
+    catalogue += row + '\n';
+    if (catalogue.size() > sizeLimit) return;
+    if (wantsPreview && snapshot.size() <= sizeLimit)
+      snapshot += row + '\t' + (c.unread ? "1" : "0") + '\t' + StrUtil::StrToHex(DuetPickerPreview(c.preview, c.previewNative)) + '\n';
+  }
+  PublishDuetCatalogue(configured, std::move(catalogue), m_LastConversationCatalogue);
+  if (wantsPreview && snapshot.size() <= sizeLimit)
+    PublishDuetCatalogue(picker, std::move(snapshot), m_LastDuetPickerSnapshot);
+}
+
 void
 Harbor::SortChats()
 {
@@ -1206,14 +1246,18 @@ Harbor::Merge(Conversation& c, const std::vector<ChatMessage>& messages, bool ou
       }
     }
     c.last = std::max(c.last, m.timeSent);
-    if (m.timeSent >= c.actualLast)
+    if (!m.isDeleted && m.timeSent >= c.actualLast)
     {
-      if (m.timeSent > c.actualLast && getenv("DUET_HARBOR_CATALOGUE")) m_ConversationCatalogueDirty = true;
-      c.actualLast = m.timeSent;
       const bool attachment = m.text.empty() && !m.fileInfo.empty();
       RichText::Message decoded;
-      c.previewNative = !attachment && RichText::Decode(m.richText, decoded);
-      c.preview = (m.isOutgoing ? "You: " : "") + (attachment ? "Attachment" : RichText::Preview(m.richText, m.text));
+      const bool native = !attachment && RichText::Decode(m.richText, decoded);
+      auto preview = (m.isOutgoing ? "You: " : "") + (attachment ? "Attachment" : RichText::Preview(m.richText, m.text));
+      if (getenv("DUET_HARBOR_CATALOGUE") &&
+          (m.timeSent != c.actualLast || (getenv("DUET_HARBOR_PICKER_SNAPSHOT") && (preview != c.preview || native != c.previewNative))))
+        m_ConversationCatalogueDirty = true;
+      c.actualLast = m.timeSent;
+      c.previewNative = native;
+      c.preview = std::move(preview);
     }
   }
   c.order.clear();
@@ -1443,6 +1487,17 @@ Harbor::Event(std::shared_ptr<ServiceMessage> e)
         auto& deleted = c.messages[n->msgId];
         deleted.id = n->msgId;
         deleted.isDeleted = true;
+        if (getenv("DUET_HARBOR_PICKER_SNAPSHOT") && (!deleted.timeSent || deleted.timeSent == c.actualLast))
+        {
+          // A summary without a loaded message has no ID. Drop the preview on a possible
+          // match until the provider supplies a fresh last-message summary.
+          c.preview.clear();
+          c.actualLast = 0;
+          m_ConversationCatalogueDirty = true;
+          auto request = std::make_shared<DeferGetChatDetailsRequest>();
+          request->chatIds = {StrUtil::NumToHex(TelegramForum::ChatNumber(c.id))};
+          Request(p, request);
+        }
         ChatMessage reference;
         reference.quotedChatId = c.id;
         reference.quotedId = n->msgId;
