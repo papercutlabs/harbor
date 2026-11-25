@@ -2633,6 +2633,7 @@ void
 Harbor::CloseMenu()
 {
   m_Menu.clear();
+  m_MessageMenuAnchor.reset();
   m_Filter.clear();
   m_Options.clear();
   m_Option = 0;
@@ -3250,10 +3251,12 @@ Harbor::DeskHandoff(const std::vector<std::string>& argv)
   return spawned == 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 void
-Harbor::Actions(bool minimal)
+Harbor::Actions(bool minimal, std::optional<std::pair<int, int>> anchor)
 {
   HarborTrace::Event("ui.message_actions.open");
-  if (m_Motion)
+  if (minimal)
+    m_MessageMenuAnchor = anchor;
+  if (m_Motion && !m_MessageMenuAnchor)
     m_AnimatedUntil = TimeUtil::GetCurrentTimeMSec() + 80;
   auto* c = Current();
   if (!c || c->order.empty())
@@ -4487,6 +4490,11 @@ Harbor::DrawMenu()
   int captionHeight = m_Menu == "attachments" ? 4 : 0;
   int optionsHeight = std::min(maxItems, int(m_Options.size())) * stride;
   int height = std::min(m_H - 5, (picker ? 8 : 5) + optionsHeight + extra + captionHeight + 2);
+  if (m_MessageMenuAnchor && (m_Menu == "actions" || m_Menu == "message-tools"))
+  {
+    x = std::clamp(m_MessageMenuAnchor->first, m_MainX, m_W - width);
+    y = std::clamp(m_MessageMenuAnchor->second, m_DeskStrip.Enabled() ? 4 : 0, m_H - height);
+  }
   if (m_Option < m_MenuOffset)
     m_MenuOffset = m_Option;
   if (m_Option >=
@@ -5181,7 +5189,7 @@ Harbor::Mouse(const MEVENT& e, bool wheelDown, int wheelTicks)
       {
         c->selected = it->value;
         m_Browse = true;
-        Actions();
+        Actions(true, std::make_pair(e.x, e.y));
         return;
       }
     return;
