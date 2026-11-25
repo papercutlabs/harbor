@@ -254,6 +254,8 @@ CompatibleVersions(const std::string& p_Client, const std::string& p_Backend)
   // 0.1.36 keeps the 0.1.35 (f028a37c) wire contract. Menu placement is local to the window.
   // 0.1.37 keeps the 0.1.36 (3dcf6152) wire contract. Saving is window-local, and
   // the Telegram backend uses the existing file status to report a failed transfer.
+  // 0.1.38 keeps the 0.1.37 (40e94cc5) wire contract. Photo staging is window-local
+  // and reuses existing SendMessage requests.
   // No general semver range.
   return p_Client == p_Backend ||
          (p_Client == "0.1.23" && p_Backend == "0.1.22") ||
@@ -273,7 +275,10 @@ CompatibleVersions(const std::string& p_Client, const std::string& p_Backend)
          (p_Client == "0.1.36" && (p_Backend == "0.1.31" || p_Backend == "0.1.32" ||
                                   p_Backend == "0.1.33" || p_Backend == "0.1.34" || p_Backend == "0.1.35")) ||
          (p_Client == "0.1.37" && (p_Backend == "0.1.31" || p_Backend == "0.1.32" || p_Backend == "0.1.33" ||
-                                  p_Backend == "0.1.34" || p_Backend == "0.1.35" || p_Backend == "0.1.36"));
+                                  p_Backend == "0.1.34" || p_Backend == "0.1.35" || p_Backend == "0.1.36")) ||
+         (p_Client == "0.1.38" && (p_Backend == "0.1.31" || p_Backend == "0.1.32" || p_Backend == "0.1.33" ||
+                                  p_Backend == "0.1.34" || p_Backend == "0.1.35" || p_Backend == "0.1.36" ||
+                                  p_Backend == "0.1.37"));
 }
 
 // Window side ---------------------------------------------------------------------------------

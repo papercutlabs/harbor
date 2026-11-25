@@ -26,3 +26,7 @@ Source for 5–9: PCL-1312, Teren’s acceptance of all six proposals in Telegra
 12. Recognize a picture as soon as its message appears, with the largest Telegram rendition downloaded automatically into the local cache only for visible messages. Click its thumbnail once to save that rendition to the configured Downloads folder and open the saved file in macOS Preview, including while the download is finishing. Click the filename to save without opening Preview. When used with Desk Focus, allow this explicitly opened Preview until a deliberate Harbor input or Office observes the return from Preview. A raw terminal focus notification alone does not establish that return.
 
 Sources: PCL-1302, Teren’s automatic-download ruling in Telegram 11705 and Preview and Focus acceptance in Telegram 11707. PCL-1607, Teren’s Downloads correction in Telegram 13038.
+
+13. Paste photos directly into the current draft. Keep the caption and caret in the composer, show pending photos above it, and let the user preview or remove each one before they send. Keep the staged photos with their chat when the user switches conversations in the window.
+
+Source: PCL-1612, Teren’s inline photo request in Telegram 13127.

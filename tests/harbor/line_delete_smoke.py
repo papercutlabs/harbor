@@ -72,7 +72,7 @@ try:
 
     # Attachment preview caption: only the current caption line goes, preview stays.
     draft(t, 'qcaption head', 'qcaption tail ')
-    fixture = str(ROOT / 'tests/harbor/fixtures/harbor.png')
+    fixture = str(ROOT / 'tests/harbor/fixtures/new-shelf.md')
     t.send('\x1b[200~' + fixture + '\x1b[201~', wait=.4)
     t.expect('Preview attachments')
     t.send(b'\x1b[127;9u')

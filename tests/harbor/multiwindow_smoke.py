@@ -65,7 +65,7 @@ def orderly_pending_checks(root):
             a.click_text('Keeping this one', button=2); a.click_text('Reply')
             a.send(caption)
             a.send('\x1b[200~' + str(fixture) + '\x1b[201~', .3)
-            a.expect('Preview attachments'); a.click_text('Send 1 attachment')
+            a.expect('[Image #1]'); a.send(b'\r')
             wait(lambda: log.exists() and 'send chat=' in log.read_text(), 'original request')
             assert 'Send failed' not in a.text, a.text
             if mode == 'queued-final':

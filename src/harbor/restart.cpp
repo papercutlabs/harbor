@@ -77,9 +77,12 @@ void Harbor::TryRestartAll()
 {
   if (m_RestartRegistration.empty()) return;
   const auto path = m_RestartRegistration + ".restart";
+  const bool stagedImages = std::any_of(m_Chats.begin(), m_Chats.end(), [](const auto& chat) {
+    return !chat.second.draftImages.empty();
+  });
   const char* blocked = m_InDeskView || m_InColdDeskView ? "desk-view" : m_AuthSuspended || !m_AuthOwner.empty() ? "authentication" :
     m_ControlPending || m_ControlReply >= 0 ? "addressed-route" : m_InitialRouteUntil || !m_RestoreChat.empty() ? "chat-restore" :
-    m_MouseDown ? "mouse-gesture" : !m_Attachments.empty() && (m_Menu == "attachments" || m_Menu == "preview") ? "attachments" :
+    m_MouseDown ? "mouse-gesture" : stagedImages || (!m_Attachments.empty() && (m_Menu == "attachments" || m_Menu == "preview")) ? "attachments" :
     Current() && !Current()->visit.empty() ? "message-visit" : nullptr;
   if (blocked)
   {

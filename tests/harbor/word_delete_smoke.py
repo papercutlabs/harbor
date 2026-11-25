@@ -22,7 +22,7 @@ try:
     assert any('› keep  tail' in row for row in t.screen.display)
     t.send(b'\x15'); t.send(b'\x05'); t.send(b'\x15')
     t.send('caption unwanted')
-    fixture = str(ROOT / 'tests/harbor/fixtures/harbor.png')
+    fixture = str(ROOT / 'tests/harbor/fixtures/new-shelf.md')
     t.send('\x1b[200~' + fixture + '\x1b[201~', wait=.4)
     t.send(b'\x1b[127;3u')
     assert 'unwanted' not in t.text

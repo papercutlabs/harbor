@@ -56,6 +56,8 @@ private:
     std::map<std::string, std::string> picturesToSave, savedPictures;
     std::vector<std::string> order;
     std::wstring draft;
+    std::vector<std::string> draftImages;
+    size_t draftImageOffset = 0;
     size_t cursor = 0;
     bool cursorAtRowEnd = false; // transient visual affinity at a soft-wrap boundary
     std::wstring draftBeforeEdit;
@@ -180,6 +182,7 @@ private:
   void VisitReply(const std::string&, const ChatMessage&);
   std::vector<Row> m_Rows;
   std::vector<Hit> m_Hits;
+  std::optional<Hit> m_DraftImagePress;
   struct CopyCell
   {
     int y, x, width;
@@ -225,6 +228,7 @@ private:
   void Latest();
   void Notify(const std::string&);
   void Draw();
+  void DrawDraftImages(Conversation&, int y);
   void DrawMenu();
   void BuildRows();
   void Text(int, int, int, const std::wstring&, int color, bool bold = false);
@@ -259,8 +263,9 @@ private:
   void Choose(int);
   void FilePicker(const std::string&);
   void RebuildFiles();
+  void StageImages(const std::vector<std::string>&);
   void AttachPreview(std::vector<std::string>);
-  void SendAttachments();
+  void SendAttachments(const std::vector<std::string>&);
   void MessageClick(int x, int y);
   void OpenLink(const std::string&);
   void SaveAttachment(const std::string&, const std::string&, const std::string&, bool openPicture = false);

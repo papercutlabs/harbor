@@ -164,7 +164,7 @@ def check_integrated_cursor():
                 t.send(b'\x1b')
                 t.clear_draft()
                 t.send('caption_frame')
-                fixture = str(ROOT / 'tests/harbor/fixtures/harbor.png')
+                fixture = str(ROOT / 'tests/harbor/fixtures/new-shelf.md')
                 t.send('\x1b[200~' + fixture + '\x1b[201~', wait=.4)
                 t.expect('Caption · type to add'); t.send('X')
                 x, y = locate(t, 'caption_frameX')
@@ -237,7 +237,7 @@ for cols in (34, 50, 112):
 
         # Caption preview uses its own display width and the same click/edit behavior.
         reset(t, 'caption_keep\n界e\u0301🌊')
-        fixture = str(ROOT / 'tests/harbor/fixtures/harbor.png')
+        fixture = str(ROOT / 'tests/harbor/fixtures/new-shelf.md')
         t.send('\x1b[200~' + fixture + '\x1b[201~', wait=.4)
         t.expect('Preview attachments')
         x, y = locate(t, '界é🌊')
