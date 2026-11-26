@@ -535,16 +535,23 @@ HarborMedia::Open(const std::string& path, Viewer viewer)
   std::string lower = path;
   std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
   if (getenv("DUET_HARBOR_NATIVE_LINKS") && cli && cli[0] == '/' && surface &&
-      (lower.rfind("https://t.me/", 0) == 0 || lower.rfind("http://t.me/", 0) == 0 || lower.rfind("https://telegram.me/", 0) == 0 || lower.rfind("https://www.t.me/", 0) == 0 || lower.rfind("https://www.telegram.me/", 0) == 0 || lower.rfind("http://telegram.me/", 0) == 0 || lower.rfind("tg://", 0) == 0))
+      (lower.rfind("https://t.me/", 0) == 0 || lower.rfind("http://t.me/", 0) == 0 || lower.rfind("https://telegram.me/", 0) == 0 || lower.rfind("https://www.t.me/", 0) == 0 || lower.rfind("https://www.telegram.me/", 0) == 0 || lower.rfind("http://telegram.me/", 0) == 0 || lower.rfind("http://www.t.me/", 0) == 0 || lower.rfind("http://www.telegram.me/", 0) == 0 || lower.rfind("tg://", 0) == 0))
   {
     const auto quote = [](const std::string& input) {
       std::string out = "\"";
       for (unsigned char c : input) { if (c == '\\' || c == '"') out += '\\'; out += char(c); }
       return out + "\"";
     };
-    pid = HarborSpawn({cli, "rpc", "duet.open-link", "{\"url\":" + quote(path) + ",\"surface_id\":" + quote(surface) + "}"});
+    auto response = HarborCapture({cli, "rpc", "duet.open-link", "{\"url\":" + quote(path) + ",\"surface_id\":" + quote(surface) + "}"}, 4096, 5000);
+    response.output.erase(std::remove_if(response.output.begin(), response.output.end(), [](unsigned char c) { return std::isspace(c); }), response.output.end());
+    if (response.status == 0 && response.output == "{\"accepted\":true}") return true;
+    if (response.status != 0 || response.output != "{\"accepted\":false}") {
+      m_Error = "Could not route this conversation link";
+      return false;
+    }
+    // Non-conversation Telegram actions retain the existing platform opener.
   }
-  else if (testOpener && getenv("HARBOR_DEMO_FIXTURES"))
+  if (testOpener && getenv("HARBOR_DEMO_FIXTURES"))
     pid = HarborSpawn({ testOpener, path, viewer == Viewer::Preview ? "preview" :
                                          viewer == Viewer::QuickLook ? "quick-look" : "default" });
   else

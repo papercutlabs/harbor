@@ -209,7 +209,8 @@ HarborDemo::Seed()
     m_Messages[topic(550)].back().id = StrUtil::NumToHex(int64_t(90) << 20);
     add(topic(550), "leo", "Open the linked Desk message.", 91);
     RichText::Message link; link.text = "Open the linked Desk message.";
-    link.entities.push_back({RichText::TextUrl, 9, 19, "https://t.me/c/12345/421/100"});
+    const char* linkURL = getenv("HARBOR_DEMO_LINK_URL");
+    link.entities.push_back({RichText::TextUrl, 9, 19, linkURL ? linkURL : "https://t.me/c/12345/421/100"});
     m_Messages[topic(550)].back().richText = RichText::Encode(link);
   }
   // Load a substantial offline conversation without synthesizing terminal sends.

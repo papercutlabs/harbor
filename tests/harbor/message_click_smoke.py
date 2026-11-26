@@ -4,6 +4,9 @@ Everything uses offline demo data, private Downloads/clipboard and a recording
 opener. No browser, account, default viewer or user file is touched.
 """
 import tempfile
+import os
+import select
+import time
 import unicodedata
 from pathlib import Path
 from native_smoke import Terminal
@@ -11,11 +14,22 @@ from native_smoke import Terminal
 work = Path(tempfile.mkdtemp(prefix='harbor-click-'))
 opened, clipboard, requests = (work / name for name in ('opened', 'clipboard', 'requests'))
 opener = work / 'opener.sh'
-opener.write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "' + str(opened) + '"\n')
+events = work / 'open-events'
+os.mkfifo(events, 0o600)
+event_descriptor = os.open(events, os.O_RDWR | os.O_NONBLOCK)
+opener.write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "' + str(opened) + '"\nprintf x > "' + str(events) + '"\n')
 opener.chmod(0o755)
 
 def opened_urls():
     return opened.read_text().splitlines() if opened.exists() else []
+
+def expect_opened(count, expected):
+    # The opener is an asynchronous native child. Wait for its output event, not a scheduler delay.
+    until = time.monotonic() + 5
+    while len(opened_urls()) < count + len(expected) and time.monotonic() < until:
+        if select.select([event_descriptor], [], [], max(0, until-time.monotonic()))[0]:
+            os.read(event_descriptor, 4096)
+    assert opened_urls()[count:] == expected, opened_urls()
 
 def point(t, text):
     for y in range(t.rows):
@@ -56,16 +70,16 @@ for cols in (42, 110):
             mouse(t, p, 'down')
             assert len(opened_urls()) == count, 'Press must wait for release to distinguish dragging'
             mouse(t, p, 'up'); t.pump(.2)
-            assert opened_urls()[count:] == ['https://example.com/shelf?view=full'], opened_urls()
+            expect_opened(count, ['https://example.com/shelf?view=full'])
         x, y = point(t, 'PcL')
         count = len(opened_urls()); click(t, (x+3, y))
-        assert opened_urls()[count:] == ['https://example.com/shelf?view=full']
+        expect_opened(count, ['https://example.com/shelf?view=full'])
         for text in ('你', '好', 'café', 'é'):
             count = len(opened_urls()); p = point(t, text)
             # A wide glyph's second terminal column belongs to the same link.
             if text == '你': p = (p[0]+1, p[1])
             click(t, p)
-            assert opened_urls()[count:] == ['https://example.com/wide']
+            expect_opened(count, ['https://example.com/wide'])
         count = len(opened_urls())
         for text in ('Read', 'now.', '▒▒▒', 'Normal underlined'):
             click(t, point(t, text))
@@ -107,8 +121,9 @@ for cols in (42, 110):
             t.send(b'\x1b'); t.send(b'\r'); t.expect('Message actions')
             t.click_text('More message tools'); t.expect('Message tools')
             t.expect('Open / play attachment'); t.send(b'\r'); t.pump(.3)
-            assert opened_urls()[count:] == [str(Path(__file__).parent.resolve() / 'fixtures/new-shelf.md')]
+            expect_opened(count, [str(Path(__file__).parent.resolve() / 'fixtures/new-shelf.md')])
         t.snapshot(f'harbor-message-click-{cols}')
     finally:
         t.close()
+os.close(event_descriptor)
 print('PASS message clicks: wrapped native links, spaces, wide/combining glyphs, spoilers, URL refusal, drag, download, collision, explicit open')

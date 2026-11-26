@@ -31,7 +31,8 @@
     "tests/harbor/reply_spacing_smoke.py",
     "tests/harbor/reply_display_smoke.py",
     "tests/harbor/popup_fixture.py",
-    "tests/harbor/telegram_link_smoke.py"
+    "tests/harbor/telegram_link_smoke.py",
+    "tests/harbor/telegram_link_click_smoke.py"
   ],
   "lanes": {
     "typing": [
@@ -197,7 +198,8 @@
       "tests/harbor/reply_display_smoke.py"
     ],
     "telegram_links": [
-      "tests/harbor/telegram_link_smoke.py"
+      "tests/harbor/telegram_link_smoke.py",
+      "tests/harbor/telegram_link_click_smoke.py"
     ]
   }
 }
