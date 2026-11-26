@@ -19,7 +19,7 @@ inline void Validate(Target& target)
   if (!target.Present())
   {
     if (!target.topic.empty() || !target.profile.empty() || !target.message.empty())
-      throw std::invalid_argument("--open-telegram-topic and --open-profile require --open-telegram-chat.");
+      throw std::invalid_argument("--open-telegram-topic, --open-telegram-message and --open-profile require --open-telegram-chat.");
     return;
   }
   auto decimal = [](const std::string& value, bool signedValue) {

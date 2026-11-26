@@ -349,6 +349,8 @@ static int ApplicationMain(int argc, char* argv[])
   { std::cerr << "--check-session applies only to ordinary Harbor startup arguments; setup, removal, export, keydump, backend, UI control, help and version modes cannot be combined with it.\n"; return 1; }
   if (showHelp) { ShowHelp(); return 0; }
   if (showVersion) { ShowVersion(); return 0; }
+  if (!resolveProfile.empty() && resolveLink.empty() && resolveUsername.empty())
+  { std::cerr << "--resolve-profile requires --resolve-telegram-link or --resolve-telegram-username.\n"; return 1; }
   try { HarborRoute::Validate(initialTarget); }
   catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
   if (checkSession)

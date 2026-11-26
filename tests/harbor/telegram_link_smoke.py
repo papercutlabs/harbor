@@ -43,6 +43,9 @@ with tempfile.TemporaryDirectory(prefix='duet-links-') as directory:
         assert result[0] != 0, 'mutation accepted without exact inspected PID'
         result = command('--target-surface','LINK-FIRST','--target-pid',str(first.pid+1000000),'--open-telegram-chat','-10012345','--open-telegram-message','100')
         assert result[0] != 0, 'mutation accepted stale PID'
+        assert command('--resolve-profile','HarborDemo_local')[0] != 0
+        assert command('--open-telegram-message','100')[0] != 0
+        assert command('--open-telegram-chat','-10012345','--open-telegram-message','0')[0] != 0
         first.expect('first draft untouched'); assert second.text == before
         print('PASS inspected native identity, exact older message, public provider route, chat-only route, both drafts, other window unchanged, no-PID/stale-PID refusal')
     finally:
