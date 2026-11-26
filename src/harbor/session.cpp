@@ -923,7 +923,7 @@ Backend::Handle(std::shared_ptr<ServiceMessage> n)
       case NewMessagesNotifyType: case SendMessageNotifyType: case DeleteMessageNotifyType:
       case ReceiveTypingNotifyType: case NewMessageStatusNotifyType: case NewMessageFileNotifyType:
       case RequestAppExitNotifyType: case NewMessageReactionsNotifyType: case AvailableReactionsNotifyType:
-      case SearchMessagesNotifyType:
+      case ResolveTelegramLinkNotifyType: case SearchMessagesNotifyType:
       {
         std::lock_guard<std::mutex> lock(m_Mutex);
         for (auto& peer : m_Peers)

@@ -1861,6 +1861,38 @@ void TgChat::Impl::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessa
       }
       break;
 
+    case ResolveTelegramLinkRequestType:
+      {
+        auto request = std::static_pointer_cast<ResolveTelegramLinkRequest>(p_RequestMessage);
+        auto reply = std::make_shared<ResolveTelegramLinkNotify>(m_ProfileId);
+        reply->requestId = request->requestId;
+        const auto done = [this, reply](Object object) {
+          if (object->get_id() == td::td_api::error::ID)
+            reply->error = td::td_api::move_object_as<td::td_api::error>(object)->message_;
+          else if (object->get_id() == td::td_api::messageLinkInfo::ID) {
+            auto info = td::td_api::move_object_as<td::td_api::messageLinkInfo>(object);
+            reply->chat = std::to_string(info->chat_id_);
+            if (info->topic_id_ && info->topic_id_->get_id() == td::td_api::messageTopicForum::ID)
+              reply->topic = std::to_string(static_cast<const td::td_api::messageTopicForum&>(*info->topic_id_).forum_topic_id_);
+            if (info->message_) reply->message = std::to_string(info->message_->id_ >> 20);
+            reply->success = info->chat_id_ != 0 && info->message_ != nullptr;
+            if (!reply->success) reply->error = "The linked Telegram message is unavailable.";
+          } else if (object->get_id() == td::td_api::chat::ID) {
+            auto chat = td::td_api::move_object_as<td::td_api::chat>(object);
+            reply->chat = std::to_string(chat->id_); reply->success = chat->id_ != 0;
+          }
+          CallMessageHandler(reply);
+        };
+        if (!request->username.empty()) {
+          auto query = td::td_api::make_object<td::td_api::searchPublicChat>(); query->username_ = request->username;
+          SendQuery(std::move(query), done);
+        } else {
+          auto query = td::td_api::make_object<td::td_api::getMessageLinkInfo>(); query->url_ = request->url;
+          SendQuery(std::move(query), done);
+        }
+      }
+      break;
+
     case SearchMessagesRequestType:
       {
         LOG_DEBUG("Search messages");

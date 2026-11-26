@@ -14,6 +14,8 @@
 #include <string>
 
 #include <cassert>
+#include <condition_variable>
+#include <chrono>
 #include <dlfcn.h>
 #include <signal.h>
 #include <sys/stat.h>
@@ -207,6 +209,7 @@ static int ApplicationMain(int argc, char* argv[])
   }
   std::vector<std::string> windowArgs; // forwarded to a spawned backend and to a restart
   HarborRoute::Target initialTarget;
+  std::string resolveLink, resolveUsername, resolveProfile;
   std::string targetSurface, targetPid, uiAction, uiToken;
   bool showHelp = false, showVersion = false, isExport = false;
 #endif
@@ -229,6 +232,12 @@ static int ApplicationMain(int argc, char* argv[])
       FileUtil::SetApplicationDir(*it);
     }
 #ifdef HARBOR_BUILD
+    else if (*it == "--resolve-telegram-link" || *it == "--resolve-telegram-username" || *it == "--resolve-profile")
+    {
+      const auto flag = *it;
+      if (std::distance(it + 1, args.end()) <= 0) { std::cerr << flag << " requires a value.\n"; return 1; }
+      (flag == "--resolve-telegram-link" ? resolveLink : flag == "--resolve-profile" ? resolveProfile : resolveUsername) = *++it;
+    }
     else if (IsUiInspection(*it))
     {
       if (!uiAction.empty()) { std::cerr << "Choose one UI control operation.\n"; return 1; }
@@ -240,12 +249,12 @@ static int ApplicationMain(int argc, char* argv[])
       if (!uiAction.empty()) { std::cerr << "Choose one UI control operation.\n"; return 1; }
       uiAction = "park"; uiToken = *++it;
     }
-    else if (*it == "--open-telegram-chat" || *it == "--open-telegram-topic" || *it == "--open-profile" || *it == "--target-surface" || *it == "--target-pid")
+    else if (*it == "--open-telegram-chat" || *it == "--open-telegram-topic" || *it == "--open-telegram-message" || *it == "--open-profile" || *it == "--target-surface" || *it == "--target-pid")
     {
       const auto flag = *it;
       if (std::distance(it + 1, args.end()) <= 0)
       { std::cerr << flag << " requires a value.\n"; return 1; }
-      auto& value = flag == "--open-telegram-chat" ? initialTarget.chat : flag == "--open-telegram-topic" ? initialTarget.topic : flag == "--open-profile" ? initialTarget.profile : flag == "--target-surface" ? targetSurface : targetPid;
+      auto& value = flag == "--open-telegram-chat" ? initialTarget.chat : flag == "--open-telegram-topic" ? initialTarget.topic : flag == "--open-telegram-message" ? initialTarget.message : flag == "--open-profile" ? initialTarget.profile : flag == "--target-surface" ? targetSurface : targetPid;
       if (!value.empty()) { std::cerr << flag << " may be supplied only once.\n"; return 1; }
       value = *++it;
       if (value.empty()) { std::cerr << flag << " requires a nonempty value.\n"; return 1; }
@@ -357,7 +366,7 @@ static int ApplicationMain(int argc, char* argv[])
   { std::cerr << "Initial conversation selection applies only to an ordinary Harbor window.\n"; return 1; }
   if (!targetSurface.empty() || !targetPid.empty() || !uiAction.empty())
   {
-    if (targetSurface.empty() || targetPid.empty())
+    if (targetSurface.empty() || (targetPid.empty() && uiAction != "inspect" && uiAction != "inspect-window"))
     { std::cerr << "--target-surface and --target-pid must identify the same existing Harbor UI.\n"; return 1; }
     try {
       if (!uiAction.empty() && (initialTarget.Present() || sessionBackend || isSetup || isRemove || isKeyDump || isExport || checkSession))
@@ -367,6 +376,34 @@ static int ApplicationMain(int argc, char* argv[])
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
     std::cout << (uiAction == "park" ? "Duplicate view returned to Chats; drafts retained.\n" : "Requested conversation opened in the selected Harbor UI.\n");
+    return 0;
+  }
+  if (!resolveLink.empty() || !resolveUsername.empty())
+  {
+    if ((!resolveLink.empty() && !resolveUsername.empty()) || initialTarget.Present() || sessionBackend || isSetup || isRemove || isKeyDump || isExport || checkSession)
+    { std::cerr << "Link resolution requires one link or username and an optional profile.\n"; return 1; }
+    auto arguments = std::vector<std::string>{ "-d", FileUtil::GetApplicationDir() };
+    if (harborDemo) arguments.push_back("--demo");
+    auto attachment = HarborSession::Attach(FileUtil::GetApplicationDir(), FileUtil::GetSelfPath(), arguments);
+    if (attachment.fd < 0) { std::cerr << attachment.error << '\n'; return 1; }
+    std::vector<std::string> profiles; for (const auto& p : attachment.profiles) profiles.push_back(p.id);
+    std::string profile;
+    try { auto target = initialTarget; target.profile = resolveProfile; profile = HarborRoute::SelectProfile(target, profiles, harborDemo); }
+    catch (const std::exception& error) { close(attachment.fd); std::cerr << error.what() << '\n'; return 1; }
+    auto connection = std::make_shared<HarborSession::Connection>(attachment.fd, attachment.pending, attachment.connectionId);
+    std::mutex mutex; std::condition_variable changed; std::shared_ptr<ResolveTelegramLinkNotify> result;
+    connection->SetHandler(profile, [&](std::shared_ptr<ServiceMessage> event) {
+      if (event->GetMessageType() != ResolveTelegramLinkNotifyType) return;
+      { std::lock_guard<std::mutex> lock(mutex); result = std::static_pointer_cast<ResolveTelegramLinkNotify>(event); }
+      changed.notify_one();
+    });
+    connection->Start();
+    auto request = std::make_shared<ResolveTelegramLinkRequest>(); request->url = resolveLink; request->username = resolveUsername;
+    connection->Send(profile, request);
+    { std::unique_lock<std::mutex> lock(mutex); changed.wait_for(lock, std::chrono::seconds(15), [&] { return bool(result); }); }
+    connection->Stop();
+    if (!result || !result->success) { std::cerr << (result ? result->error : "Telegram did not resolve this link.") << '\n'; return 1; }
+    std::cout << "pcl.harbor.link.v1\t" << result->chat << '\t' << result->topic << '\t' << result->message << '\t' << profile << '\n';
     return 0;
   }
   // An ordinary run is a window of the directory's shared session. Setup, removal, export and
@@ -941,6 +978,10 @@ void ShowHelp()
     "                    exit 0 if absent or compatible; 1 with the session error otherwise\n"
     "                    two-second connect/welcome limit; no backend start or config writes\n"
     "  --open-telegram-chat ID   open this signed decimal chat ID in this window\n"
+    "  --resolve-telegram-link URL resolve a message link through the signed-in Telegram account\n"
+    "  --resolve-telegram-username NAME resolve a public chat through that account\n"
+    "  --resolve-profile ID     choose the signed-in account for link resolution\n"
+    "  --open-telegram-message ID jump to this linked Telegram message in that conversation\n"
     "  --open-telegram-topic ID  select this positive decimal forum topic in that chat\n"
     "  --open-profile ID        select the exact native Telegram account profile\n"
     "  --target-surface ID --target-pid PID   route only that existing UI; never launch another\n"
@@ -1106,7 +1147,7 @@ static int RunHarborWindow(const std::vector<std::string>& p_BackendArgs, const 
   auto connection = std::make_shared<HarborSession::Connection>(attachment.fd, attachment.pending, attachment.connectionId);
   std::shared_ptr<Ui> ui = std::make_shared<Ui>();
   ui->SetSession(slot, [connection] { connection->Lent(); }, attachment.generation);
-  if (p_Target.Present()) ui->SetInitialChat(initialProfile, p_Target.conversation);
+  if (p_Target.Present()) ui->SetInitialChat(initialProfile, p_Target.conversation, p_Target.message);
   std::function<void(std::shared_ptr<ServiceMessage>)> messageHandler =
     std::bind(&Ui::MessageHandler, std::ref(*ui), std::placeholders::_1);
   std::vector<std::shared_ptr<Protocol>> remotes;

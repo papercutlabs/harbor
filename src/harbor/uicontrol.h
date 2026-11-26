@@ -69,9 +69,10 @@ inline void Reply(int fd, const std::string& error = {})
 inline std::string Send(const std::string& dir, std::string surface, const std::string& pid, const HarborRoute::Target& target, const std::string& action = {}, const std::string& token = {})
 {
   surface = Surface(surface);
-  if (pid.empty() || pid.size() > 12 || !std::all_of(pid.begin(), pid.end(), [](char c) { return c >= '0' && c <= '9'; }) || std::stoll(pid) <= 0)
+  const bool discover = pid.empty() && (action == "inspect" || action == "inspect-window");
+  if (!discover && (pid.empty() || pid.size() > 12 || !std::all_of(pid.begin(), pid.end(), [](char c) { return c >= '0' && c <= '9'; }) || std::stoll(pid) <= 0))
     throw std::invalid_argument("--target-pid requires the exact current native Harbor UI PID.");
-  if ((action.empty() && !target.Present()) || !Field(target.chat) || !Field(target.topic) || !Field(target.profile) ||
+  if ((action.empty() && !target.Present()) || !Field(target.chat) || !Field(target.topic) || !Field(target.profile) || !Field(target.message) ||
       (!action.empty() && action != "inspect" && action != "inspect-window" && action != "park") || !Field(token))
     throw std::invalid_argument("Targeted Harbor control requires a valid conversation route.");
   sockaddr_un addr;
@@ -81,7 +82,7 @@ inline std::string Send(const std::string& dir, std::string surface, const std::
   NoSigPipe(fd);
   if (connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 || !SameUser(fd))
   { close(fd); throw std::runtime_error("The selected Harbor UI is unavailable. Refresh Desk before trying again; no window was opened."); }
-  const auto request = pid + '\t' + surface + '\t' + (action.empty() ? target.chat : "__" + action + "__") + '\t' + (action.empty() ? target.topic : token) + '\t' + (action.empty() ? target.profile : "") + '\n';
+  const auto request = pid + '\t' + surface + '\t' + (action.empty() ? target.chat : "__" + action + "__") + '\t' + (action.empty() ? target.topic : token) + '\t' + (action.empty() ? target.profile : "") + (target.message.empty() ? "" : "\t" + target.message) + '\n';
   if (send(fd, request.data(), request.size(), MSG_NOSIGNAL) != ssize_t(request.size()))
   { close(fd); throw std::runtime_error("Harbor control delivery is unknown. Inspect the selected window before retrying."); }
   std::string response;
@@ -174,13 +175,14 @@ public:
           std::vector<std::string> fields; size_t start = 0;
           for (size_t at = 0; at <= line.size(); ++at)
             if (at == line.size() || line[at] == '\t') { fields.push_back(line.substr(start, at - start)); start = at + 1; }
-          if (fields.size() != 5 || !std::all_of(fields.begin(), fields.end(), Field)) throw std::invalid_argument("Malformed Harbor UI request.");
-          if (fields[0] != std::to_string(getpid()) || fields[1] != m_Surface)
+          if ((fields.size() != 5 && fields.size() != 6) || !std::all_of(fields.begin(), fields.end(), Field)) throw std::invalid_argument("Malformed Harbor UI request.");
+          const bool discovery = fields[0].empty() && fields.size() == 5 && (fields[2] == "__inspect__" || fields[2] == "__inspect-window__");
+          if ((!discovery && fields[0] != std::to_string(getpid())) || fields[1] != m_Surface)
             throw std::invalid_argument("The selected Harbor UI changed. Refresh Desk before trying again; no conversation changed.");
           if (control && fields[4].empty() && (fields[2] == "__inspect__" || fields[2] == "__inspect-window__" || fields[2] == "__park__"))
           { control(fields[2], fields[3], it->fd); it->fd = -1; remove = true; }
           else {
-          HarborRoute::Target target{ fields[2], fields[3], fields[4], {} }; HarborRoute::Validate(target);
+          HarborRoute::Target target{ fields[2], fields[3], fields[4], {}, fields.size() == 6 ? fields[5] : "" }; HarborRoute::Validate(target);
           if (!target.Present()) throw std::invalid_argument("Harbor UI request requires a conversation.");
           apply(target, it->fd); it->fd = -1; }
         }

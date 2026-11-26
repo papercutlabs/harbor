@@ -34,7 +34,7 @@ public:
   // Shared-session window: per-view state slot (0 keeps the existing harbor-state file) and the
   // hook that hands the terminal to the session backend once an auth prompt has suspended ncurses.
   void SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended, const std::string& p_Generation);
-  void SetInitialChat(const std::string& p_Profile, const std::string& p_Conversation);
+  void SetInitialChat(const std::string& p_Profile, const std::string& p_Conversation, const std::string& p_Message = {});
 
 private:
   std::string StatePath() const;
@@ -128,7 +128,7 @@ private:
   std::map<std::string, Conversation> m_Chats, m_SavedStates;
   std::string m_LastState, m_RestoreChat;
   std::string m_PinnedChat; // exact fork route for the lifetime of an explicitly pinned pane
-  std::string m_InitialChat, m_InitialProfile, m_InitialRouteStatus;
+  std::string m_InitialChat, m_InitialProfile, m_InitialRouteStatus, m_InitialMessage;
   int64_t m_InitialRouteUntil = 0;
   HarborUiControl::Server m_UiControl;
   uint64_t m_PreviewSequence = 0;
@@ -136,7 +136,7 @@ private:
   std::deque<std::pair<std::string, bool>> m_PreviewOpens;
   std::set<std::string> m_PendingPictures;
   int m_ControlReply = -1;
-  std::string m_ControlProfile, m_ControlConversation, m_ControlKey, m_ControlError;
+  std::string m_ControlProfile, m_ControlConversation, m_ControlMessage, m_ControlKey, m_ControlError;
   bool m_ControlPending = false, m_InDeskView = false, m_InColdDeskView = false;
   bool m_DeskParked = false;
   std::string UiSnapshot() const;

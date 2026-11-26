@@ -554,7 +554,7 @@ Harbor::FinishUiRoute(const std::string& error)
   m_ControlError = error;
   if (!error.empty())
   {
-    m_InitialChat.clear(); m_InitialProfile.clear(); m_InitialRouteUntil = 0;
+    m_InitialChat.clear(); m_InitialProfile.clear(); m_InitialMessage.clear(); m_InitialRouteUntil = 0;
     m_InitialRouteStatus.clear();
   }
   m_Dirty = true;
@@ -565,7 +565,7 @@ Harbor::BeginUiRoute()
   if (!m_ControlPending) return;
   m_ControlPending = false;
   CloseMenu();
-  SetInitialChat(m_ControlProfile, m_ControlConversation);
+  SetInitialChat(m_ControlProfile, m_ControlConversation, m_ControlMessage);
   m_InitialRouteUntil = TimeUtil::GetCurrentTimeMSec() + 30000;
   if (m_Chats.count(m_ControlKey))
   {
@@ -575,6 +575,7 @@ Harbor::BeginUiRoute()
   else
   {
     auto request = std::make_shared<GetChatsRequest>(); request->includeForumTopics = true;
+    request->chatIds.insert(StrUtil::NumToHex(TelegramForum::ChatNumber(m_ControlConversation)));
     Request(m_ControlProfile, request);
   }
 }
@@ -616,7 +617,7 @@ Harbor::PollUiControl()
     const auto key = Key(selected, target.conversation);
     if (!m_PinnedChat.empty() && key != m_PinnedChat)
     { HarborUiControl::Reply(reply, "This pane is pinned to its current conversation."); return; }
-    m_ControlProfile = selected; m_ControlConversation = target.conversation;
+    m_ControlProfile = selected; m_ControlConversation = target.conversation; m_ControlMessage = target.message;
     m_ControlKey = key; m_ControlReply = reply;
     m_ControlPending = true; m_ControlError.clear();
   }, [this](const std::string& action, const std::string& token, int reply) {
@@ -658,8 +659,9 @@ Harbor::PollUiControl()
   if (!m_InDeskView) BeginUiRoute();
 }
 void
-Harbor::SetInitialChat(const std::string& profile, const std::string& conversation)
+Harbor::SetInitialChat(const std::string& profile, const std::string& conversation, const std::string& message)
 {
+  m_InitialMessage = message;
   m_InitialChat = Key(profile, conversation);
   m_InitialProfile = profile;
   m_InitialRouteStatus = "Opening requested conversation…";
@@ -1673,6 +1675,8 @@ Harbor::OpenChat(const std::string& key)
   m_DeskParked = false;
   m_Current = key;
   m_RestoreChat.clear();
+  const auto linkedMessage = key == m_InitialChat ? m_InitialMessage : std::string();
+  m_InitialMessage.clear();
   m_InitialChat.clear();
   m_InitialProfile.clear();
   m_InitialRouteStatus.clear();
@@ -1694,6 +1698,7 @@ Harbor::OpenChat(const std::string& key)
   }
   m_Browse = restoreBrowse;
   m_Media->Stop();
+  if (!linkedMessage.empty()) Visit(m_Current, StrUtil::NumToHex(std::stoll(linkedMessage) << 20));
   m_Dirty = true;
   HarborTrace::Event("ui.chat.opened", {{"account_id", HarborTrace::Token(c.profile)},
     {"conversation_id", HarborTrace::Token(c.id)}, {"view", "conversation"}, {"outcome", "success"}});
@@ -5420,9 +5425,9 @@ Ui::SetSession(int p_Slot, std::function<void()> p_OnAuthSuspended, const std::s
   m_Harbor->SetSession(p_Slot, p_OnAuthSuspended, p_Generation);
 }
 void
-Ui::SetInitialChat(const std::string& profile, const std::string& conversation)
+Ui::SetInitialChat(const std::string& profile, const std::string& conversation, const std::string& message)
 {
-  m_Harbor->SetInitialChat(profile, conversation);
+  m_Harbor->SetInitialChat(profile, conversation, message);
 }
 void
 Ui::RunKeyDump()

@@ -130,6 +130,8 @@ enum MessageType
   // Appended so existing numeric values stay unchanged
   SearchMessagesRequestType,
   SearchMessagesNotifyType,
+  ResolveTelegramLinkRequestType,
+  ResolveTelegramLinkNotifyType,
 };
 
 struct ContactInfo
@@ -810,4 +812,19 @@ public:
   bool success = false;
   std::string chatId;
   bool isArchived = false;
+};
+
+class ResolveTelegramLinkRequest : public RequestMessage
+{
+public:
+  MessageType GetMessageType() const override { return ResolveTelegramLinkRequestType; }
+  std::string url, username;
+};
+class ResolveTelegramLinkNotify : public ServiceMessage
+{
+public:
+  explicit ResolveTelegramLinkNotify(const std::string& profile) : ServiceMessage(profile) {}
+  MessageType GetMessageType() const override { return ResolveTelegramLinkNotifyType; }
+  bool success = false;
+  std::string chat, topic, message, error;
 };

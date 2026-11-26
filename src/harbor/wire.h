@@ -214,6 +214,8 @@ inline bool EncodeRequest(const std::shared_ptr<RequestMessage>& p, std::string&
       for (auto& id : ids) w.S(id);
       break;
     }
+    case ResolveTelegramLinkRequestType:
+    { auto q = std::static_pointer_cast<ResolveTelegramLinkRequest>(p); w.S(q->url); w.S(q->username); break; }
     case GetMessageRequestType:
     {
       auto q = std::static_pointer_cast<GetMessageRequest>(p);
@@ -299,6 +301,8 @@ inline std::shared_ptr<RequestMessage> DecodeRequest(const std::string& in)
       p = q;
       break;
     }
+    case ResolveTelegramLinkRequestType:
+    { auto q = std::make_shared<ResolveTelegramLinkRequest>(); q->url = r.S(); q->username = r.S(); p = q; break; }
     case GetMessageRequestType:
     {
       auto q = std::make_shared<GetMessageRequest>();
@@ -462,6 +466,8 @@ inline bool EncodeNotify(const std::shared_ptr<ServiceMessage>& p, std::string& 
       w.B(n->success);
       break;
     }
+    case ResolveTelegramLinkNotifyType:
+    { auto n = std::static_pointer_cast<ResolveTelegramLinkNotify>(p); w.B(n->success); w.S(n->chat); w.S(n->topic); w.S(n->message); w.S(n->error); break; }
     case SearchMessagesNotifyType:
     {
       auto n = std::static_pointer_cast<SearchMessagesNotify>(p);
@@ -567,6 +573,8 @@ inline std::shared_ptr<ServiceMessage> DecodeNotify(const std::string& in)
       p = n;
       break;
     }
+    case ResolveTelegramLinkNotifyType:
+    { auto n = std::make_shared<ResolveTelegramLinkNotify>(profileId); n->success = r.B(); n->chat = r.S(); n->topic = r.S(); n->message = r.S(); n->error = r.S(); p = n; break; }
     case SearchMessagesNotifyType:
     {
       auto n = std::make_shared<SearchMessagesNotify>(profileId);

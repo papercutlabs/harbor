@@ -528,7 +528,23 @@ HarborMedia::Open(const std::string& path, Viewer viewer)
   // Offline tests exercise the actual spawn boundary without opening a user's player.
   const char* testOpener = getenv("HARBOR_TEST_OPENER");
   pid_t pid = -1;
-  if (testOpener && getenv("HARBOR_DEMO_FIXTURES"))
+  // Delegate a deliberate click to the same native link policy as terminal hyperlinks.
+  // Ordinary Harbor keeps the platform opener when it is outside the Duet trial.
+  const char* cli = getenv("CMUX_BUNDLED_CLI_PATH");
+  const char* surface = getenv("CMUX_SURFACE_ID");
+  std::string lower = path;
+  std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+  if (getenv("DUET_HARBOR_NATIVE_LINKS") && cli && cli[0] == '/' && surface &&
+      (lower.rfind("https://t.me/", 0) == 0 || lower.rfind("http://t.me/", 0) == 0 || lower.rfind("https://telegram.me/", 0) == 0 || lower.rfind("https://www.t.me/", 0) == 0 || lower.rfind("https://www.telegram.me/", 0) == 0 || lower.rfind("http://telegram.me/", 0) == 0 || lower.rfind("tg://", 0) == 0))
+  {
+    const auto quote = [](const std::string& input) {
+      std::string out = "\"";
+      for (unsigned char c : input) { if (c == '\\' || c == '"') out += '\\'; out += char(c); }
+      return out + "\"";
+    };
+    pid = HarborSpawn({cli, "rpc", "duet.open-link", "{\"url\":" + quote(path) + ",\"surface_id\":" + quote(surface) + "}"});
+  }
+  else if (testOpener && getenv("HARBOR_DEMO_FIXTURES"))
     pid = HarborSpawn({ testOpener, path, viewer == Viewer::Preview ? "preview" :
                                          viewer == Viewer::QuickLook ? "quick-look" : "default" });
   else

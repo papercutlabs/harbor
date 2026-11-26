@@ -11,14 +11,14 @@ namespace HarborRoute
 {
 struct Target
 {
-  std::string chat, topic, profile, conversation;
+  std::string chat, topic, profile, conversation, message;
   bool Present() const { return !chat.empty(); }
 };
 inline void Validate(Target& target)
 {
   if (!target.Present())
   {
-    if (!target.topic.empty() || !target.profile.empty())
+    if (!target.topic.empty() || !target.profile.empty() || !target.message.empty())
       throw std::invalid_argument("--open-telegram-topic and --open-profile require --open-telegram-chat.");
     return;
   }
@@ -31,6 +31,12 @@ inline void Validate(Target& target)
   try { chat = std::stoll(target.chat); }
   catch (...) { throw std::invalid_argument("--open-telegram-chat is outside the signed 64-bit range."); }
   if (!chat) throw std::invalid_argument("--open-telegram-chat cannot be zero.");
+  if (!target.message.empty())
+  {
+    int64_t message = 0;
+    try { if (decimal(target.message, false)) message = std::stoll(target.message); } catch (...) { }
+    if (message <= 0 || message > INT32_MAX) throw std::invalid_argument("--open-telegram-message requires a positive 32-bit decimal message ID.");
+  }
   target.conversation = StrUtil::NumToHex(chat);
   if (!target.topic.empty())
   {

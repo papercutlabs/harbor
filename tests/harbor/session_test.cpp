@@ -112,6 +112,8 @@ Requests()
   auto search = std::make_shared<SearchMessagesRequest>();
   search->chatId = "c"; search->query = "q"; search->pinned = true; search->limit = 7; search->token = -5;
   out.push_back(search);
+  auto link = std::make_shared<ResolveTelegramLinkRequest>(); link->url = "https://t.me/c/123/42"; link->username = "public_name";
+  out.push_back(link);
   for (size_t i = 0; i < out.size(); ++i)
     out[i]->requestId = 0x0000000700000000ULL + i + 1;
   return out;
@@ -164,6 +166,8 @@ Notifies()
   search->success = true; search->error = "e"; search->chatId = "c"; search->query = "q"; search->pinned = true;
   search->token = 99; search->totalCount = 2; search->chatMessages = { Full("s1") };
   out.push_back(search);
+  auto link = std::make_shared<ResolveTelegramLinkNotify>(p); link->success = true; link->chat = "-100123"; link->topic = "20"; link->message = "42"; link->error = "provider error";
+  out.push_back(link);
   for (size_t i = 0; i < out.size(); ++i)
     out[i]->requestId = 0x0000000900000000ULL + i + 1;
   return out;
@@ -177,6 +181,7 @@ static void RequestFields(const std::shared_ptr<RequestMessage>& original, const
 #define SAME(field) assert(a->field == b->field)
   switch (original->GetMessageType())
   {
+    REQUEST(ResolveTelegramLinkRequest) SAME(url); SAME(username); break; }
     case GetContactsRequestType: break;
     REQUEST(GetChatsRequest) SAME(includeForumTopics); SAME(chatIds); break; }
     REQUEST(GetMessageRequest) SAME(chatId); SAME(msgId); SAME(cached); SAME(replyPreview); break; }
@@ -227,6 +232,7 @@ static void NotifyFields(const std::shared_ptr<ServiceMessage>& original, const 
       SAME(chatId); SAME(msgId); SAME(reactions);
       SAME(reactions.needConsolidationWithCache); SAME(reactions.updateCountBasedOnSender); SAME(reactions.replaceCount); break; }
     NOTIFY(AvailableReactionsNotify) SAME(chatId); SAME(msgId); SAME(emojis); SAME(success); break; }
+    NOTIFY(ResolveTelegramLinkNotify) SAME(success); SAME(chat); SAME(topic); SAME(message); SAME(error); break; }
     NOTIFY(SearchMessagesNotify)
       SAME(success); SAME(error); SAME(chatId); SAME(query); SAME(pinned); SAME(token); SAME(totalCount);
       assert(a->chatMessages.size() == b->chatMessages.size());
@@ -255,7 +261,7 @@ CodecTests()
     assert(!DecodeRequest(a + '\0'));
     ++requests;
   }
-  assert(requests == 13);
+  assert(requests == 14);
   for (auto& n : Notifies())
   {
     std::string a, b;
@@ -270,7 +276,7 @@ CodecTests()
     assert(!DecodeNotify(a + '\0'));
     ++notifies;
   }
-  assert(notifies == 13);
+  assert(notifies == 14);
 
   // Explicit rich, quote, file and reaction fields survive.
   auto send = std::static_pointer_cast<SendMessageRequest>(Requests()[4]);

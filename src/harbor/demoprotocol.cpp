@@ -196,6 +196,22 @@ HarborDemo::Seed()
       add(topic(550), "asha", "A different topic with separate history.", 90);
     }
   }
+  if (getenv("HARBOR_DEMO_LINKS")) {
+    const auto topic = [&](int id) { return TelegramForum::ConversationId(DemoRouteChat(), id); };
+    m_Messages[topic(421)].clear(); m_Messages[topic(550)].clear();
+    add(topic(421), "leo", "Topic-specific history for the Desk conversation.", 100);
+    m_Messages[topic(421)].back().id = StrUtil::NumToHex(int64_t(100) << 20);
+    for (int index = 101; index <= 130; ++index) {
+      add(topic(421), "leo", "Later message " + std::to_string(index), index);
+      m_Messages[topic(421)].back().id = StrUtil::NumToHex(int64_t(index) << 20);
+    }
+    add(topic(550), "asha", "A different topic with separate history.", 90);
+    m_Messages[topic(550)].back().id = StrUtil::NumToHex(int64_t(90) << 20);
+    add(topic(550), "leo", "Open the linked Desk message.", 91);
+    RichText::Message link; link.text = "Open the linked Desk message.";
+    link.entities.push_back({RichText::TextUrl, 9, 19, "https://t.me/c/12345/421/100"});
+    m_Messages[topic(550)].back().richText = RichText::Encode(link);
+  }
   // Load a substantial offline conversation without synthesizing terminal sends.
   // Input-latency checks use the normal history response and native renderer.
   if (getenv("HARBOR_DEMO_LONG_HISTORY"))
@@ -642,6 +658,16 @@ HarborDemo::SendRequest(std::shared_ptr<RequestMessage> request)
       }
       Emit(n);
       break;
+    }
+    case ResolveTelegramLinkRequestType:
+    {
+      auto r = std::static_pointer_cast<ResolveTelegramLinkRequest>(request);
+      auto n = std::make_shared<ResolveTelegramLinkNotify>(m_Id); n->requestId = r->requestId;
+      if (getenv("HARBOR_DEMO_ROUTES") && (r->username == "duet_demo" || r->url.find("t.me/duet_demo/") != std::string::npos)) {
+        n->chat = std::to_string(DemoRouteChat()); n->success = true;
+        if (r->username.empty()) { n->topic = "421"; n->message = "100"; }
+      } else n->error = "Demo link unavailable";
+      Emit(n); break;
     }
     case GetMessageRequestType:
     {
