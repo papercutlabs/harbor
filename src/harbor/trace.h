@@ -35,14 +35,38 @@ inline bool Uuid(const std::string& s)
     else if (!((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'a' && s[i] <= 'f') || (s[i] >= 'A' && s[i] <= 'F'))) return false;
   return true;
 }
+// Length of the well-formed UTF-8 sequence starting at s[i] (2 to 4 bytes), or 0.
+inline size_t Utf8Sequence(const std::string& s, size_t i)
+{
+  const unsigned char c = s[i];
+  size_t n = c >= 0xc2 && c <= 0xdf ? 2 : c >= 0xe0 && c <= 0xef ? 3 : c >= 0xf0 && c <= 0xf4 ? 4 : 0;
+  if (n == 0 || i + n > s.size()) return 0;
+  const unsigned char second = s[i + 1];
+  // Exclude overlong forms, UTF-16 surrogates and code points above U+10FFFF.
+  if ((c == 0xe0 && second < 0xa0) || (c == 0xed && second > 0x9f) || (c == 0xf0 && second < 0x90) || (c == 0xf4 && second > 0x8f)) return 0;
+  for (size_t k = 1; k < n; ++k)
+    if ((static_cast<unsigned char>(s[i + k]) & 0xc0) != 0x80) return 0;
+  return n;
+}
 inline std::string Quote(const std::string& value)
 {
   std::string out = "\"";
-  // Bounded metadata, including filenames, cannot inject new records.
-  for (unsigned char c : value.substr(0, 1024))
+  // Bounded metadata, including filenames, cannot inject new records. Well-formed UTF-8 is kept as is,
+  // so a JSON reader gets the same text back; any other byte at or above 0x80 is escaped on its own.
+  const std::string bounded = value.substr(0, 1024);
+  for (size_t i = 0; i < bounded.size(); ++i)
   {
+    const unsigned char c = bounded[i];
     if (c == '"' || c == '\\') { out += '\\'; out += char(c); }
     else if (c >= 32 && c < 127) out += char(c);
+    else if (const size_t n = c >= 0x80 ? Utf8Sequence(bounded, i) : 0)
+    {
+      const unsigned char second = bounded[i + 1];
+      // C1 controls (U+0080 to U+009F) are written as their code point's escape, never raw.
+      if (c == 0xc2 && second < 0xa0) { const char* hex = "0123456789abcdef"; out += "\\u00"; out += hex[second >> 4]; out += hex[second & 15]; }
+      else out.append(bounded, i, n);
+      i += n - 1;
+    }
     else { const char* hex = "0123456789abcdef"; out += "\\u00"; out += hex[c >> 4]; out += hex[c & 15]; }
   }
   return out + '"';
